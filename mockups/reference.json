@@ -1,0 +1,36 @@
+{
+  "target": "ESP32-P4",
+  "resolution": [
+    800,
+    800
+  ],
+  "source": "targets/esp32-p4/main/app_ui.c and main/assets",
+  "sample_data": true,
+  "hardware_capture": false,
+  "limitations": [
+    "Browser text rasterization differs from LVGL.",
+    "Keyboard approximates the default LVGL theme."
+  ],
+  "round_screen_exports": [
+    "alert.png",
+    "analog-night.png",
+    "analog.png",
+    "conditions-night.png",
+    "conditions.png",
+    "credentials.png",
+    "digital-night.png",
+    "digital.png",
+    "empty.png",
+    "forecast-night.png",
+    "forecast.png",
+    "location-keyboard.png",
+    "message-night.png",
+    "message.png",
+    "password-keyboard.png",
+    "settings-bottom.png",
+    "settings.png",
+    "storm.png",
+    "unread.png",
+    "wifi.png"
+  ]
+}

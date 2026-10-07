@@ -1,5 +1,7 @@
 # Round Weather Display
 
+This fork, **ESP32 Weather Alarm Clock**, is preparing alarm and DS3231 backup-time support, a redesigned interface, and expanded Night Shift settings for the ESP32-P4. Firmware implementation has not started. See the [architecture and contracts](docs/wac/architecture.md), [approved interface map](docs/wac/screen-state-map.md), and [repository and original-baseline setup](docs/wac/repository-setup.md). The original project's documentation follows below.
+
 [![Watch the Round Clock Weather Display video](https://github.com/user-attachments/assets/ffa7de12-8ffc-4f03-94cb-a3bf73f059a8)](https://www.youtube.com/watch?v=BLWPl8A7HzA)
 **Click the image above to see more about this project on Youtube.**
 
