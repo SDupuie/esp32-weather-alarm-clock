@@ -6,6 +6,8 @@ It is intentionally separate from the Raspberry Pi runtime, but it follows the s
 
 - `../../shared/spec/product-spec.md`
 
+For this fork's enhancements, read the [project instructions](../../AGENTS.md), [development policy](../../docs/wac/development.md), and [architecture and contracts](../../docs/wac/architecture.md). Those contracts govern the new alarm, backup-time, Night Shift, and replacement UI work; the scope below describes the existing firmware.
+
 ## Current Scope
 
 This target includes:
@@ -36,12 +38,42 @@ Choosing hardware target `2` in the root `setup.sh` delegates straight to this s
 
 ## Manual build/flash (for iterative dev work)
 
-If you're actively working on the firmware and don't want the full setup script's git-pull/IDF-install checks every time:
+Run these commands from the repository root. First activate the project's pinned ESP-IDF **v5.5.5** environment. With the VS Code extension, use its ESP-IDF terminal for the selected installation. With ESP-IDF Installation Manager, use the activation script supplied for that installation. On the current Mac it is:
+
+```bash
+source "$HOME/.espressif/tools/activate_idf_v5.5.5.sh"
+```
+
+For an installation made by the repository's setup script, use its existing activation helper instead:
 
 ```bash
 source targets/esp32-p4/scripts/activate-idf.sh
+```
+
+Confirm the active version with `idf.py --version`. The active `IDF_PATH` should point to the selected framework directory. The repository activation helper expects a repository-local installation; use the Installation Manager environment for an Installation Manager installation.
+
+For an unconfigured checkout, select the chip once. Changing the target regenerates configuration and clears its build directory, so this is not a routine pre-build step:
+
+```bash
 targets/esp32-p4/scripts/set-target.sh
+```
+
+Build the firmware and inspect memory usage:
+
+```bash
 targets/esp32-p4/scripts/build.sh
+idf.py -C targets/esp32-p4 size
+```
+
+Run the existing C weather tests on the computer, using the active installation's cJSON source:
+
+```bash
+npm run test:esp32-parity
+```
+
+See the [test instructions](tests/README.md) for when other existing checks apply and what needs hardware verification. Building and testing do not flash the board. When flashing is intended, select the connected board's actual port:
+
+```bash
 targets/esp32-p4/scripts/flash.sh /dev/tty.usbmodemXXXX
 targets/esp32-p4/scripts/monitor.sh /dev/tty.usbmodemXXXX
 ```

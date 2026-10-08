@@ -30,11 +30,25 @@ There is no forwarding-only `app_ui_bridge.c` or second public UI interface.
 
 This avoids repeatedly modifying the original large UI file for every redesigned menu, warning, keyboard, and alarm screen. Future upstream UI fixes must still be reviewed and deliberately incorporated into our replacement. Preserving the original file reduces merge conflicts but does not eliminate that maintenance.
 
-**Use the following proposed file structure for the additions.** Paths are relative to `/Users/Scott/Projects/ESP32 Weather Alarm Clock`. Existing files outside this tree remain in place.
+## File-creation boundary
 
-The tree defines the intended organization, not a requirement to create every file immediately. Add a header, helper, or worker only when the implementation needs that boundary. Closely related code may remain together until a concrete need justifies splitting it. Preserve the ownership rules regardless of the number of files.
+The approved file tree below limits new source-code files and shows the planned supporting documents. Paths are relative to the repository root. Existing files outside this tree remain in place.
+
+Listed files are optional and may be created only when required by the current task. Closely related code may remain together until a concrete need justifies splitting it. Preserve the ownership rules regardless of the number of files.
+
+Before creating a source-code file outside this tree, obtain the user's permission for its exact path and purpose. Explain why an existing approved file is insufficient. Renaming a source-code file to an unlisted path requires the same permission. Approval of a feature does not automatically approve additional source-code files. Add new source-code paths to this tree only after permission is received.
+
+Source code includes firmware, headers, application UI code, build logic, development scripts and tools, maintained test code, and generated code incorporated into the application. The restriction follows the file's purpose: placing implementation code in a report, temporary, or ignored directory does not exempt it.
+
+Supporting files may be created as needed for authorized work without separate path approval. These include documentation, review results, logs, screenshots, exported results, and disposable test data. Keep review artifacts local under `.reviews/`, keep disposable files in the operating system's temporary directory, and place other supporting documents in the existing appropriate directories. Reuse existing documents where they already own the subject. These files must not become an alternate location for application or tooling source code. Existing local artifacts must be preserved unless their replacement or removal is part of the authorized task.
+
+Authorized builds and tests may create ordinary tool-generated output in `targets/esp32-p4/build/`, `targets/esp32-p4/build-benchmark/`, `targets/esp32-p4/build-benchmark-tuned/`, `targets/esp32-p4/build-parity-lab/`, and `targets/esp32-p4/managed_components/`; generated configuration at `targets/esp32-p4/sdkconfig`, `sdkconfig.old`, and `sdkconfig.*.generated`; and disposable test directories under the operating system's temporary directory. All configuration paths in this allowance are under `targets/esp32-p4/`. Clean up disposable test directories after use. This allowance covers normal build products and managed dependencies; generated source-code files added to the maintained application still require an approved path.
+
+Before completing a change, review added and renamed source-code files against this tree and permissions granted in the conversation, and confirm supporting artifacts are appropriate to the task. No historical inventory or exception registry is required.
 
 ```text
+AGENTS.md
+
 targets/esp32-p4/
 ├── main/
 │   └── wac/
@@ -152,6 +166,7 @@ targets/esp32-p4/
 docs/
 └── wac/
     ├── architecture.md
+    ├── development.md
     ├── storage-contract.md
     ├── behavior-contract.md
     └── screen-state-map.md
@@ -430,6 +445,8 @@ Replacement screens must carry forward relevant existing rendering behavior—in
 
 | Document | Purpose |
 |---|---|
+| `../../AGENTS.md` | Agent workflow, scope, required reading, and completion expectations |
+| `development.md` | YAGNI, ownership, implementation, review, and verification practices |
 | `architecture.md` | File structure, ownership, exact upstream integration points, and what to review when incorporating upstream updates |
 | `storage-contract.md` | Storage keys and records, defaults, format versions, conversions, verified interruption behavior, and compatibility limits |
 | `behavior-contract.md` | Time trust, alarm recovery, save semantics, notice lifetime, and Night Shift rules |
