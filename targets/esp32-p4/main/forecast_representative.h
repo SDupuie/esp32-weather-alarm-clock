@@ -2,16 +2,12 @@
 
 #include "cJSON.h"
 
-/* Pure C port of shared/logic/forecast-representative.js -- picks a single
- * representative weather code for a forecast day from Open-Meteo's hourly
- * data, the same way the Pi target does. Deliberately has zero ESP-IDF
- * dependencies (only cJSON + the C standard library) so it can be compiled
- * natively on a dev machine for the parity tests in targets/esp32-p4/tests/,
- * which check this against the exact same fixtures
- * (shared/test-data/forecast-representative-cases.json) the JS
- * implementation is tested against. If you change the heuristic here,
- * change it in the JS too (or vice versa) and re-run both test suites --
- * see targets/esp32-p4/tests/README.md.
+/* Pure C calculation that picks a representative weather code for a forecast
+ * day from Open-Meteo hourly data. It has no ESP-IDF dependency, so the native
+ * C test can run it with the JSON cases in
+ * shared/test-data/forecast-representative-cases.json. Those cases own the
+ * test inputs and expected codes; this C function owns the calculation used
+ * by the ESP32-P4 application.
  */
 
 int forecast_pick_representative_code(

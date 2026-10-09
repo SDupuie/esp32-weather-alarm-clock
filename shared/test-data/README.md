@@ -1,12 +1,10 @@
-# Shared Test Data
+# ESP32-P4 weather and location test data
 
-This folder is reserved for cross-target fixtures.
+These JSON files provide inputs and expected results for the native C checks:
 
-Planned contents:
+- `forecast-representative-cases.json`: representative daytime forecast icons.
+- `location-resolution-cases.json`: location parsing and candidate ranking.
+- `storm-conditions-cases.json`: weather outlook, measurements, fixed storm-warning limits and imperial/metric gust-boundary cases.
 
-- Sample Open-Meteo payloads
-- Expected representative forecast outcomes
-- Expected location-resolution outcomes
-- UI-state fixture notes for stale weather, night shift, and messages
-
-The goal is to validate Raspberry Pi and ESP32-P4 behavior against the same inputs.
+The checks compile the ESP32-P4 calculations and compare their results with these
+expected values. See the [test instructions](../../targets/esp32-p4/tests/README.md#weather-and-location).

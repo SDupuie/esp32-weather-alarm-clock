@@ -41,5 +41,3 @@ for icon_name in "${ICON_NAMES[@]}"; do
     --output-c "${OUTPUT_DIR}/${symbol_name}.c" \
     --output-h "${OUTPUT_DIR}/${symbol_name}.h"
 done
-
-"${SCRIPT_DIR}/update-asset-source-manifest.sh"

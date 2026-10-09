@@ -2141,10 +2141,9 @@
     }
   },
   {
-    "name": "metric gust threshold can be overridden from config",
+    "name": "metric gust at 64 km/h alerts at the inclusive limit",
     "cfg": {
-      "units": "metric",
-      "stormGustKmh": 50
+      "units": "metric"
     },
     "current": {
       "time": "2026-03-14T14:30",
@@ -2231,30 +2230,30 @@
         8.0
       ],
       "wind_gusts_10m": [
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0,
-        55.0
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        64.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0
       ],
       "precipitation": [
         0.0,
@@ -2368,10 +2367,9 @@
     }
   },
   {
-    "name": "imperial gust threshold can be overridden from config",
+    "name": "imperial gust at 64 km/h stays below the 40 mph limit",
     "cfg": {
-      "units": "imperial",
-      "stormGustMph": 60
+      "units": "imperial"
     },
     "current": {
       "time": "2026-03-14T14:30",
@@ -2473,7 +2471,7 @@
         15.0,
         15.0,
         15.0,
-        70.0,
+        64.0,
         15.0,
         15.0,
         15.0,

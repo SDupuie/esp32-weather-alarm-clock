@@ -10,10 +10,8 @@ set -euo pipefail
 # it is NOT run automatically, so the hosted page only ever has whatever was
 # last copied here.
 #
-# For a real release, bump the version yourself -- this script doesn't guess
-# at versioning. The project keeps one version across package.json,
-# targets/pi/package.json (+ lockfile) and docs/firmware/manifest.json;
-# `npm run test:versions` checks they match.
+# For a versioned release, update docs/firmware/manifest.json yourself.
+# This script does not choose a version or publish the installation page.
 # -----------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,7 +29,5 @@ cp "$PROJECT_DIR/build/round_weather_display_esp32_p4.bin" "$DOCS_FIRMWARE_DIR/a
 
 echo ""
 echo "Copied release artifacts to $DOCS_FIRMWARE_DIR"
-echo "If this is a real release, bump the version in package.json,"
-echo "targets/pi/package.json (npm version X.Y.Z --no-git-tag-version in"
-echo "targets/pi) and $DOCS_FIRMWARE_DIR/manifest.json, run"
-echo "'npm run test:versions', then commit and push."
+echo "For a versioned release, update $DOCS_FIRMWARE_DIR/manifest.json."
+echo "The installation page has not been published."

@@ -2,7 +2,7 @@
 
 This target is the native firmware path for the Waveshare `ESP32-P4-WIFI6-Touch-LCD-3.4C` board family.
 
-The [architecture and product specification](../../docs/wac/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. This checkout implements settings persistence and Save handling. Alarm/audio, RTC, full Night Shift runtime and the broader visual redesign remain pending; see the root [implementation status](../../README.md).
+The [architecture and product specification](../../docs/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. This checkout implements settings persistence, Save handling, time-source handling, DS3231 integration and backup-clock notices. Alarm/audio, full Night Shift runtime and the broader visual redesign remain pending; see the root [implementation status](../../README.md). RTC hardware and the physical display remain unverified.
 
 ## Prepare the environment (no board needed)
 
@@ -25,6 +25,8 @@ targets/esp32-p4/scripts/build.sh
 
 The checked-in configuration selects ESP32-P4. Use `scripts/set-target.sh` only when intentionally resetting the target configuration. See [test instructions](tests/README.md) for native checks.
 
+Artwork generators update existing outputs. When adding or retiring a generated source, update `main/CMakeLists.txt` under the [source-list rules](../../docs/architecture.md#existing-code-changes-that-matter); there is no separate generated build manifest.
+
 ## Flash with a board
 
 After activation and building:
@@ -34,7 +36,11 @@ targets/esp32-p4/scripts/flash.sh /dev/tty.usbmodemXXXX
 targets/esp32-p4/scripts/monitor.sh /dev/tty.usbmodemXXXX
 ```
 
-Alternatively, after activating the environment above, run `targets/esp32-p4/scripts/setup.sh` to reset the target configuration, build, detect the connected board, and flash it. It optionally opens the monitor. It does not install a toolchain or update repository source. Root `setup.sh` hardware choice `2` delegates to this script and requires the same prior activation.
+Alternatively, after activating the environment above, run `targets/esp32-p4/scripts/setup.sh` to reset the target configuration, build, detect the connected board, and flash it. It optionally opens the monitor. It does not install a toolchain or update repository source.
+
+For a deliberate whole-device backup before flashing, `scripts/backup-device.sh <serial-port> [output-dir]` defaults to the ignored `backups/<timestamp>/` directory under this target. Keep backups local. This is a manual hardware tool, separate from application settings saves.
+
+For a diagnostic serial capture, `scripts/capture-serial-log.sh <serial-port> <output-path> [duration-seconds]` captures for the requested duration (150 seconds by default). A successful capture means the log was collected; it does not mean the firmware passed a benchmark or hardware test.
 
 ## Prepare browser-installation files
 
@@ -45,6 +51,8 @@ targets/esp32-p4/scripts/build-release.sh
 ```
 
 This builds through the normal build helper and copies the three firmware images into `docs/firmware/`. It does not publish the website or flash a board.
+
+For a versioned release, update the version in `docs/firmware/manifest.json` manually. The helper does not choose or change it.
 
 ## Verified Baseline
 
@@ -60,6 +68,8 @@ Sources:
 
 ## Project Layout
 
+One `main` component holds the application, grouped by function. UI files use `main/ui/`; assets use `main/assets/`. The [approved source tree](../../docs/architecture.md#planned-file-structure) also identifies optional files that are created only when needed.
+
 - `CMakeLists.txt`
   Top-level ESP-IDF project file
 - `sdkconfig.defaults`
@@ -68,14 +78,18 @@ Sources:
   Managed component dependencies
 - `main/main.c`
   Firmware entrypoint
-- `main/app_ui.h` and `main/wac/ui/`
+- `main/app_ui.h` and `main/ui/`
   Public UI interface, retained clock/weather/message rendering and settings draft editors
 - `main/connectivity.*`
   WiFi station connect, scanning, and time sync
 - `main/device_config.*`
   Applied settings, validation and typed NVS saves
-- `main/wac/time.*`
-  System timezone application; RTC/time-trust implementation remains pending
+- `main/clock_time.*`
+  Time source/trust, system timezone application, RTC correction and in-memory warnings
+- `main/ds3231.*`
+  DS3231 register access using the existing board I2C bus; UTC dates from 2000 through 2099
+- `main/night.*`
+  Current Off/Always On/Fixed Schedule appearance decision; solar, remembered appearance and backlight ownership remain pending
 - `main/location_lookup.*`
   On-device Open-Meteo geocoding for the setup UI
 - `main/message_service.*`
@@ -86,6 +100,8 @@ Sources:
   Open-Meteo forecast fetch
 - `main/bsp_shims.h`
   Small forward declarations for BSP backlight helpers documented upstream
+- `tests/`
+  Native settings, time, connectivity and UI checks, plus weather/location and message checks
 - `scripts/`
   Shell helpers: `setup.sh` (build/flash), plus `activate-idf.sh`, `set-target.sh`, `build.sh`, `flash.sh`, `monitor.sh` for manual use
 

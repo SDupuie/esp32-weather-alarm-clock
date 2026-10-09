@@ -50,9 +50,8 @@ render_edge_indicator_asset() {
   local symbol="$1"
   local png_path="/private/tmp/${symbol}.png"
 
-  # Not SVG-based like the other alpha assets: the Pi reference is a CSS
-  # conic-gradient + radial mask + blur, none of which cairosvg supports, so
-  # this is rendered procedurally. See render_edge_indicator.py for the math.
+  # The angle-based gradient, radial mask and blur are rendered procedurally.
+  # See render_edge_indicator.py for the retained effect's calculations.
   "$PYTHON_BIN" "$PROJECT_DIR/tools/render_edge_indicator.py" --output "$png_path"
   "$PYTHON_BIN" "$PROJECT_DIR/tools/generate_lvgl_image.py" \
     --input "$png_path" \
@@ -69,6 +68,5 @@ render_alpha_asset minute_hand analog_minute_hand
 render_alpha_asset second_hand analog_second_hand
 render_alpha_asset center_cap analog_center_cap
 render_edge_indicator_asset analog_edge_indicator
-"$SCRIPT_DIR/update-asset-source-manifest.sh"
 
 echo "Analog parity assets regenerated."

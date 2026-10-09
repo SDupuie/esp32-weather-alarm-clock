@@ -5,7 +5,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 require_idf
 
 PORT="${1:-}"
-OUT_DIR="${2:-$PROJECT_DIR/../../archive/device-backups/$(date +%Y%m%d-%H%M%S)}"
+OUT_DIR="${2:-$PROJECT_DIR/backups/$(date +%Y%m%d-%H%M%S)}"
 
 if [[ -z "$PORT" ]]; then
   echo "Usage: $0 <serial-port> [output-dir]"

@@ -1,12 +1,7 @@
-/* Runs shared/test-data/location-resolution-cases.json -- the exact
- * fixtures shared/scripts/validate-location-resolution.js is tested
- * against -- through the ESP32-P4 target's C port
- * (main/location_scoring.c) of the same geocoding-result scorer. If the
- * two implementations diverge, one of the two test runs fails; this is how
- * that gets caught during development instead of shipping to users.
- *
- * Compiles natively (plain cc, no ESP-IDF toolchain) via
- * scripts/test-weather-parity.sh.
+/* Runs the ESP32-P4 C location scorer against the JSON cases in
+ * shared/test-data/location-resolution-cases.json. The fixture cases provide
+ * queries, candidate results, and expected selections; this test executes
+ * the retained C implementation without an ESP-IDF toolchain.
  */
 
 #include <stdbool.h>

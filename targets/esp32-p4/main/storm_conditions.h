@@ -4,15 +4,11 @@
 
 #include "cJSON.h"
 
-/* Pure C port of shared/logic/storm-conditions.js -- the storm / changing-
- * conditions summary behind the Conditions view: wind, gusts, pressure trend,
- * precipitation, alert reasons, and all of the plain-language wording
- * (headline, column values). Like forecast_representative.c it has zero
- * ESP-IDF dependencies (only cJSON + the C standard library), so
- * tests/test_storm_conditions.c can run it natively against the exact same
- * fixtures (shared/test-data/storm-conditions-cases.json) the JS is tested
- * against. If you change the logic or wording here, change it in the JS too
- * (or vice versa) and re-run both -- see scripts/test-weather-parity.sh.
+/* Pure C calculation for the Conditions view: wind, gusts, pressure trend,
+ * precipitation, alert reasons, and their plain-language wording. It has no
+ * ESP-IDF dependency. The native C test checks its output using the JSON
+ * cases in shared/test-data/storm-conditions-cases.json; the C calculation
+ * is the runtime behavior used by the ESP32-P4 application.
  */
 
 #define STORM_TEXT_LEN 80
@@ -38,16 +34,10 @@ typedef struct {
   char label[STORM_SHORT_TEXT_LEN];
 } storm_alert_t;
 
-/* Threshold overrides are in the display unit for wind (mph when imperial,
- * km/h when metric), matching the Pi's stormGustMph / stormGustKmh config
- * keys. Leave them as NAN to use the defaults. */
+/* Display units and time format; weather-warning limits are fixed. */
 typedef struct {
   bool metric;
   bool time_24h;
-  double gust_override;
-  double wind_override;
-  double pressure_drop_hpa_override;
-  double precip_mm_hr_override;
 } storm_conditions_config_t;
 
 typedef struct {
@@ -99,7 +89,7 @@ typedef struct {
   int outlook_hours;
   bool has_chance;
   double chance;
-  /* Room for any number JS would print before " chance". */
+  /* Space for the formatted chance value and its " chance" suffix. */
   char precip_status[40];
   bool has_precip_detail;
   char precip_detail[STORM_TEXT_LEN];
@@ -108,11 +98,9 @@ typedef struct {
   storm_alert_t alerts[STORM_MAX_ALERTS];
 } storm_conditions_t;
 
-void storm_conditions_default_config(storm_conditions_config_t *config);
-
 /* `current` is Open-Meteo's current_weather object; `hourly` and `daily` are
  * the response's hourly/daily objects (daily may be NULL). Returns false when
- * the current hour can't be found in the hourly data (the JS returns null). */
+ * the current hour can't be found in the hourly data. */
 bool storm_conditions_build(
   const storm_conditions_config_t *config,
   const cJSON *current,

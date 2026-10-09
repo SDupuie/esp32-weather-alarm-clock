@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Constants mirror shared/logic/storm-conditions.js one for one. */
+/* Thresholds and conversion factors for the C weather-summary calculation. */
 #define CONDITIONS_LOOKAHEAD_HOURS 3
 #define CONDITIONS_OUTLOOK_HOURS 6
 #define PRESSURE_TREND_HOURS 3
@@ -278,27 +278,11 @@ static thresholds_t storm_thresholds(const storm_conditions_config_t *config)
 {
   bool imperial = !config->metric;
   thresholds_t t;
-  t.gust_kmh = imperial
-    ? (isfinite(config->gust_override) ? config->gust_override : 40.0) * KMH_PER_MPH
-    : (isfinite(config->gust_override) ? config->gust_override : 64.0);
-  t.wind_kmh = imperial
-    ? (isfinite(config->wind_override) ? config->wind_override : 25.0) * KMH_PER_MPH
-    : (isfinite(config->wind_override) ? config->wind_override : 40.0);
-  t.pressure_drop_hpa = isfinite(config->pressure_drop_hpa_override) ? config->pressure_drop_hpa_override : 3.0;
-  t.heavy_precip_mm_hr = isfinite(config->precip_mm_hr_override) ? config->precip_mm_hr_override : 7.6;
+  t.gust_kmh = imperial ? 40.0 * KMH_PER_MPH : 64.0;
+  t.wind_kmh = imperial ? 25.0 * KMH_PER_MPH : 40.0;
+  t.pressure_drop_hpa = 3.0;
+  t.heavy_precip_mm_hr = 7.6;
   return t;
-}
-
-void storm_conditions_default_config(storm_conditions_config_t *config)
-{
-  if (config == NULL) {
-    return;
-  }
-  memset(config, 0, sizeof(*config));
-  config->gust_override = NAN;
-  config->wind_override = NAN;
-  config->pressure_drop_hpa_override = NAN;
-  config->precip_mm_hr_override = NAN;
 }
 
 const char *storm_alert_kind_name(storm_alert_kind_t kind)

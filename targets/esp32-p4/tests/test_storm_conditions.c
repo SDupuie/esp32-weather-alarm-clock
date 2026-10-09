@@ -1,14 +1,8 @@
-/* Runs shared/test-data/storm-conditions-cases.json -- the exact fixtures
- * targets/pi/scripts/validate-storm-conditions.js is tested against --
- * through the ESP32-P4 target's C port (main/storm_conditions.c).
- *
- * The C result is converted back into the same JSON shape the JS returns,
- * then each case's `expected` object is checked the same way the JS
- * validator does it: alert kinds (and labels when listed) exactly, and every
- * other listed field as a subset match.
- *
- * Compiles natively (plain cc, no ESP-IDF toolchain) via
- * scripts/test-weather-parity.sh.
+/* Runs the ESP32-P4 C Conditions calculation against the JSON cases in
+ * shared/test-data/storm-conditions-cases.json. Each fixture's `expected`
+ * object supplies expected fields; alerts are checked exactly and the other
+ * listed fields are checked as a subset of the C result. This test executes
+ * the retained C implementation without an ESP-IDF toolchain.
  */
 
 #include <math.h>
@@ -61,7 +55,7 @@ static void add_optional_string(cJSON *object, const char *key, bool present, co
   }
 }
 
-/* Same shape as buildConditions() in shared/logic/storm-conditions.js. */
+/* Converts the C result to the JSON shape used by the fixture cases. */
 static cJSON *conditions_to_json(const storm_conditions_t *c)
 {
   cJSON *root = cJSON_CreateObject();
@@ -118,25 +112,14 @@ static cJSON *conditions_to_json(const storm_conditions_t *c)
   return root;
 }
 
-static double number_or_nan(const cJSON *value)
-{
-  return cJSON_IsNumber(value) ? cJSON_GetNumberValue(value) : NAN;
-}
-
 static storm_conditions_config_t config_from_fixture(const cJSON *cfg)
 {
-  storm_conditions_config_t config;
-  storm_conditions_default_config(&config);
   const cJSON *units = cJSON_GetObjectItemCaseSensitive(cfg, "units");
   const cJSON *time_format = cJSON_GetObjectItemCaseSensitive(cfg, "timeFormat");
-  config.metric = cJSON_IsString(units) && strcmp(cJSON_GetStringValue(units), "metric") == 0;
-  config.time_24h = cJSON_IsString(time_format) && strcmp(cJSON_GetStringValue(time_format), "24") == 0;
-  /* The Pi reads whichever unit's key matches cfg.units. */
-  config.gust_override = number_or_nan(cJSON_GetObjectItemCaseSensitive(cfg, config.metric ? "stormGustKmh" : "stormGustMph"));
-  config.wind_override = number_or_nan(cJSON_GetObjectItemCaseSensitive(cfg, config.metric ? "stormWindKmh" : "stormWindMph"));
-  config.pressure_drop_hpa_override = number_or_nan(cJSON_GetObjectItemCaseSensitive(cfg, "stormPressureDropHpa"));
-  config.precip_mm_hr_override = number_or_nan(cJSON_GetObjectItemCaseSensitive(cfg, "stormPrecipMmHr"));
-  return config;
+  return (storm_conditions_config_t) {
+    .metric = cJSON_IsString(units) && strcmp(cJSON_GetStringValue(units), "metric") == 0,
+    .time_24h = cJSON_IsString(time_format) && strcmp(cJSON_GetStringValue(time_format), "24") == 0,
+  };
 }
 
 static bool values_equal(const cJSON *actual, const cJSON *expected)
@@ -156,7 +139,7 @@ static bool values_equal(const cJSON *actual, const cJSON *expected)
   return cJSON_Compare(actual, expected, true);
 }
 
-/* Mirrors assertSubset() in validate-storm-conditions.js. */
+/* Checks every field listed by the fixture's expected object. */
 static bool check_subset(const char *case_name, const char *path, const cJSON *actual, const cJSON *expected)
 {
   bool ok = true;

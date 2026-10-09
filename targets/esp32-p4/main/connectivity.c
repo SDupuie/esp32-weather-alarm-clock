@@ -4,9 +4,11 @@
 #include <string.h>
 #include <time.h>
 #include <inttypes.h>
+#include <stdatomic.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 
 #include "esp_event.h"
 #include "esp_check.h"
@@ -29,9 +31,28 @@ static bool s_wifi_initialized;
 static bool s_wifi_driver_initialized;
 static bool s_wifi_started;
 static bool s_wifi_event_handlers_registered;
-static bool s_wifi_auto_connect_enabled;
+static atomic_bool s_wifi_auto_connect_enabled;
 static bool s_sntp_initialized;
 static bool s_runtime_prepared;
+static portMUX_TYPE s_time_sync_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_time_sync_generation;
+/* Only the background lifecycle operations wait here. Event callbacks retain
+ * their connection retries and share just the atomic auto-connect flag. */
+static StaticSemaphore_t s_wifi_operation_lock_storage;
+static SemaphoreHandle_t s_wifi_operation_lock;
+static portMUX_TYPE s_wifi_operation_lock_init = portMUX_INITIALIZER_UNLOCKED;
+
+static SemaphoreHandle_t connectivity_operation_lock(void)
+{
+  portENTER_CRITICAL(&s_wifi_operation_lock_init);
+  if (s_wifi_operation_lock == NULL) {
+    s_wifi_operation_lock = xSemaphoreCreateMutexStatic(&s_wifi_operation_lock_storage);
+  }
+  SemaphoreHandle_t lock = s_wifi_operation_lock;
+  portEXIT_CRITICAL(&s_wifi_operation_lock_init);
+  xSemaphoreTake(lock, portMAX_DELAY);
+  return lock;
+}
 
 static void connectivity_event_handler(
   void *arg,
@@ -82,7 +103,7 @@ static void connectivity_event_handler(
   }
 }
 
-esp_err_t connectivity_prepare_runtime(void)
+static esp_err_t connectivity_prepare_runtime_locked(void)
 {
   if (s_runtime_prepared) {
     return ESP_OK;
@@ -102,9 +123,17 @@ esp_err_t connectivity_prepare_runtime(void)
   return ESP_OK;
 }
 
+esp_err_t connectivity_prepare_runtime(void)
+{
+  SemaphoreHandle_t lock = connectivity_operation_lock();
+  esp_err_t err = connectivity_prepare_runtime_locked();
+  xSemaphoreGive(lock);
+  return err;
+}
+
 static esp_err_t connectivity_prepare_stack(void)
 {
-  ESP_RETURN_ON_ERROR(connectivity_prepare_runtime(), TAG, "Failed to prepare network runtime");
+  ESP_RETURN_ON_ERROR(connectivity_prepare_runtime_locked(), TAG, "Failed to prepare network runtime");
 
   if (s_wifi_event_group == NULL) {
     s_wifi_event_group = xEventGroupCreate();
@@ -152,12 +181,8 @@ static esp_err_t connectivity_register_handlers(void)
   return ESP_OK;
 }
 
-esp_err_t connectivity_init(const device_config_t *config)
+static esp_err_t connectivity_init_locked(const device_config_t *config)
 {
-  if (config == NULL || !config->wifi_ready) {
-    return ESP_ERR_INVALID_ARG;
-  }
-
   if (s_wifi_initialized) {
     return ESP_OK;
   }
@@ -190,7 +215,18 @@ esp_err_t connectivity_init(const device_config_t *config)
   return ESP_OK;
 }
 
-esp_err_t connectivity_scan_networks(
+esp_err_t connectivity_init(const device_config_t *config)
+{
+  if (config == NULL || !config->wifi_ready) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  SemaphoreHandle_t lock = connectivity_operation_lock();
+  esp_err_t err = connectivity_init_locked(config);
+  xSemaphoreGive(lock);
+  return err;
+}
+
+static esp_err_t connectivity_scan_networks_locked(
   connectivity_scan_result_t *results,
   size_t max_results,
   size_t *out_result_count
@@ -201,12 +237,6 @@ esp_err_t connectivity_scan_networks(
   bool restore_auto_connect = s_wifi_auto_connect_enabled || s_wifi_initialized;
   uint16_t ap_count = 0;
   esp_err_t err = ESP_OK;
-
-  if ((results == NULL && max_results > 0) || out_result_count == NULL) {
-    return ESP_ERR_INVALID_ARG;
-  }
-
-  *out_result_count = 0;
 
   err = connectivity_prepare_stack();
   if (err != ESP_OK) {
@@ -297,7 +327,7 @@ esp_err_t connectivity_scan_networks(
   free(ap_records);
 
   *out_result_count = stored_count;
-  ESP_LOGI(TAG, "Wi-Fi scan completed with %u access points, exposing %u entries", ap_count, stored_count);
+  ESP_LOGI(TAG, "Wi-Fi scan completed with %u access points, exposing %zu entries", ap_count, stored_count);
 
 cleanup:
   s_wifi_auto_connect_enabled = restore_auto_connect;
@@ -305,6 +335,22 @@ cleanup:
     (void) esp_wifi_connect();
   }
 
+  return err;
+}
+
+esp_err_t connectivity_scan_networks(
+  connectivity_scan_result_t *results,
+  size_t max_results,
+  size_t *out_result_count
+)
+{
+  if ((results == NULL && max_results > 0) || out_result_count == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  *out_result_count = 0;
+  SemaphoreHandle_t lock = connectivity_operation_lock();
+  esp_err_t err = connectivity_scan_networks_locked(results, max_results, out_result_count);
+  xSemaphoreGive(lock);
   return err;
 }
 
@@ -361,9 +407,21 @@ bool connectivity_is_time_synced(void)
     && (xEventGroupGetBits(s_wifi_event_group) & NETWORK_TIME_SYNCED_BIT) != 0;
 }
 
+uint32_t connectivity_get_time_sync_generation(void)
+{
+  portENTER_CRITICAL(&s_time_sync_lock);
+  uint32_t generation = s_time_sync_generation;
+  portEXIT_CRITICAL(&s_time_sync_lock);
+  return generation;
+}
+
 static void network_time_sync_cb(struct timeval *tv)
 {
   if (tv != NULL && tv->tv_sec >= VALID_CLOCK_EPOCH) {
+    portENTER_CRITICAL(&s_time_sync_lock);
+    /* Zero means no network correction has been received yet. */
+    if (++s_time_sync_generation == 0) s_time_sync_generation = 1;
+    portEXIT_CRITICAL(&s_time_sync_lock);
     xEventGroupSetBits(s_wifi_event_group, NETWORK_TIME_SYNCED_BIT);
   }
 }

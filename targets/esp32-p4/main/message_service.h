@@ -15,5 +15,10 @@ esp_err_t message_service_get_snapshot(
   uint32_t *out_unread_count,
   bool *out_has_important
 );
-// Acknowledge the message identified by the displayed snapshot, not the latest arrival.
-esp_err_t message_service_acknowledge(const char *device_id, const char *message_id);
+// Copies IDs for the existing worker. An occupied slot returns ESP_ERR_TIMEOUT.
+esp_err_t message_service_submit_acknowledgment(
+  const char *device_id,
+  const char *message_id
+);
+// Completion remains available, and blocks another submission, until consumed.
+bool message_service_take_acknowledgment_result(esp_err_t *out_result);

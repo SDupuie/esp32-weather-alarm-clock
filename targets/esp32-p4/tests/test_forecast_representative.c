@@ -1,12 +1,7 @@
-/* Runs shared/test-data/forecast-representative-cases.json -- the exact
- * fixtures targets/pi/scripts/validate-forecast-representative.js is tested
- * against -- through the ESP32-P4 target's C port
- * (main/forecast_representative.c) of the same heuristic. If the two
- * implementations diverge, one of the two test runs fails; this is how
- * that gets caught during development instead of shipping to users.
- *
- * Compiles natively (plain cc, no ESP-IDF toolchain) via
- * scripts/test-weather-parity.sh.
+/* Runs the ESP32-P4 C forecast calculation against the JSON cases in
+ * shared/test-data/forecast-representative-cases.json. The fixture cases
+ * provide inputs and expected representative codes; this test executes the
+ * retained C implementation without an ESP-IDF toolchain.
  */
 
 #include <stdio.h>

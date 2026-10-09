@@ -4,7 +4,7 @@ A round touchscreen clock for your nightstand or desk, with weather forecasts, c
 
 Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 
-**Development status:** Settings persistence, draft editors and production Save handling are implemented and checked natively. Weather and House Messages remain available. Alarm playback, the DS3231 backup clock, solar Night Shift, brightness/fades and the full approved visual redesign remain pending. No board is available; firmware compilation and native checks do not establish hardware behavior.
+**Development status:** Settings persistence, draft editors, production Save handling, time-source handling and DS3231 backup-clock integration are implemented and checked natively. The backup-clock indicator and notices are connected to the running application. Weather and House Messages remain available. Forecast labels retain provider dates, and weather downloads proceed independently of clock synchronization. Alarm playback, solar Night Shift, brightness/fades and the full approved visual redesign remain pending. No board is available; firmware compilation and native checks do not establish hardware behavior.
 
 - [Features](#features)
 - [Hardware](#hardware)
@@ -26,6 +26,7 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 - An edge indicator for approaching storm conditions, with quick access to the conditions screen.
 - Weather from Open-Meteo, with no API key to configure.
 - Time synchronized over Wi-Fi.
+- DS3231 backup-clock support for startup while network synchronization proceeds, with lost-time and connection notices.
 - A red Night Shift appearance with Off, Always On or Fixed Schedule preferences.
 - Household messages sent from a phone or computer on the same network, with optional sharing among multiple ESP32-P4 clocks.
 - Touchscreen settings for Wi-Fi, location, display, messaging and saved alarm/night preferences. Alarm and expanded night runtime work remains pending.
@@ -35,11 +36,10 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 
 - One recurring alarm with selectable days, sound and volume, plus snooze and dismissal.
 - Classic Beep, Gentle Chime, and Rising Tones, with a sound preview and gradually increasing alarm volume.
-- A DS3231 real-time clock to retain time while the board is unplugged and provide time before network synchronization.
 - Expanded Night Shift choices: Off, Always On, Fixed Schedule, and Sunset to Sunrise, with separate day/night brightness and gradual transitions.
 - A redesigned interface for settings, ringing, snooze, and clock notices.
 
-The approved design is in [docs/wac/architecture.md](docs/wac/architecture.md). Open [mockups/alarm-design.html](mockups/alarm-design.html) in a browser to explore the planned clock screens and House Messages page.
+The approved design is in [docs/architecture.md](docs/architecture.md). Open [mockups/alarm-design.html](mockups/alarm-design.html) in a browser to explore the planned clock screens and House Messages page.
 
 ## Hardware
 
@@ -56,7 +56,7 @@ The approved design is in [docs/wac/architecture.md](docs/wac/architecture.md). 
 
 Waveshare's [hardware documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-Touch-LCD-XC#hardware-description) identifies the USB power/flashing ports and board connectors.
 
-### For the planned alarm and backup clock
+### For backup time and the planned alarm
 
 | Item | What it is for |
 | --- | --- |
@@ -151,7 +151,7 @@ Weather normally refreshes every ten minutes. If an update fails, the clock keep
 
 ### Night Shift
 
-The current renderer supports Off, Always On and the saved Fixed Schedule. The editors also retain solar offsets and brightness preferences for the upcoming Night Shift owner. Solar operation, remembered startup appearance and physical backlight fades remain pending; saving these preferences is not evidence that those features run.
+The Night Shift owner supplies Day or Night to the renderer for Off, Always On and the saved Fixed Schedule. The editors also retain solar offsets and brightness preferences. Solar operation, remembered startup appearance and physical backlight fades remain pending; saving these preferences is not evidence that those features run.
 
 ## Household Messages
 
@@ -175,7 +175,9 @@ An edge indicator shows unread messages; Important messages make it pulse. Swipe
 
 Tapping a message on the clock marks it read **for that clock**. The browser's **Deactivate** action makes it inactive for everyone. Expired messages stop appearing.
 
-The current browser's **Active Messages** list shows messages sent to **All clocks**. Messages sent to an individual clock can be dismissed on that clock, but do not appear in this browser list.
+While dismissal is pending, the clock remains responsive and shows “Dismissing...”. It returns home after acknowledgment succeeds. Failure keeps the message visible with a retry prompt. Leaving the message screen prevents a later result from taking you back home.
+
+The browser's **Active Messages** list shows all active, unexpired messages, including those sent to an individual clock. Messages remain in this list after a clock marks them read; use **Deactivate** to remove them for everyone.
 
 ### Share messages among clocks
 
@@ -208,19 +210,22 @@ Swipe down from the clock to open settings. Saved preferences stay on the device
 | Night Shift | Saved appearance, schedule, solar offsets and brightness preferences; full runtime integration is pending. |
 | Alarm | Saved time, repeat days, sound, volume, snooze and enable preference; ringing and preview are pending. |
 
-Device Setup and Wi-Fi share a draft for **Save & Restart**. Weather Location saves independently and restarts after success. Alarm **Save** and the Settings-entry alarm toggle apply settings without restarting. Nested **Done** keeps edits in the parent draft; **Cancel** discards that editor's edits. See the [architecture](docs/wac/architecture.md#editing-and-saving-user-settings) for save rules and accepted partial-save behavior.
+Device Setup and Wi-Fi share a draft for **Save & Restart**. Weather Location saves independently and restarts after success. Alarm **Save** and the Settings-entry alarm toggle apply settings without restarting. Nested **Done** keeps edits in the parent draft; **Cancel** discards that editor's edits. See the [architecture](docs/architecture.md#editing-and-saving-user-settings) for save rules and accepted partial-save behavior.
 
-Settings screens currently use native rollers and the standard keyboard. Exact approved control styling and the broader replacement interface remain pending; the mockup remains the visual authority.
+Settings screens currently use native rollers and the LVGL keyboard with the original three layouts and the added colon. Exact approved control styling and the broader replacement interface remain pending; the mockup remains the visual authority.
 
 ## Development Notes
 
-The firmware is written in C using **ESP-IDF 5.5.5**. **LVGL** draws the touchscreen interface. The firmware project and shell helpers live in `targets/esp32-p4/`.
+The firmware is written in C using **ESP-IDF 5.5.5**. **LVGL** draws the touchscreen interface. The firmware project and shell helpers live in `targets/esp32-p4/`. One application component groups service owners under `main/`, UI files under `main/ui/`, and artwork/fonts under `main/assets/`; native tests live under `tests/`.
+
+`shared/` retains the weather icon sources and weather/location test data used by the ESP32 tools and native C checks.
 
 Read [AGENTS.md](AGENTS.md) before changing the project. The following documents cover the detailed design and development workflow:
 
 | Document | What it covers |
 | --- | --- |
-| [docs/wac/architecture.md](docs/wac/architecture.md) | Approved behavior, defaults, ownership, source structure, and links to the visual design. |
+| [docs/architecture.md](docs/architecture.md) | Approved behavior, defaults, ownership, source structure, and links to the visual design. |
+| [docs/work.md](docs/work.md) | Current development tasks, completed slices and the next slice. |
 | [targets/esp32-p4/README.md](targets/esp32-p4/README.md) | Environment preparation, build, flash, monitor, and browser-firmware preparation. |
 | [targets/esp32-p4/tests/README.md](targets/esp32-p4/tests/README.md) | Existing checks, how to run them, and verification limits. |
 

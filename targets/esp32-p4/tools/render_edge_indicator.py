@@ -1,20 +1,11 @@
 #!/usr/bin/env python3
 """Procedurally renders the house-messages edge-glow indicator.
 
-This can't be authored as a normal hand-drawn SVG shape like the other
-analog layers: the Pi reference (targets/pi/public/style.css,
-`.message-edge-indicator::before`) is a CSS `conic-gradient` (color varies
-by *angle* around the face) combined with a `mask: radial-gradient(...)`
-(visibility varies by *radius*, confining the glow to a band near the rim
-instead of reaching all the way to the center) and a `filter: blur(6px)`.
-None of that -- conic gradients, mask radial-gradients, or blur filters --
-has any SVG equivalent that cairosvg (this pipeline's rasterizer) actually
-implements, so this renders the identical math directly, pixel by pixel.
-
-Source of truth: targets/pi/public/style.css, `.message-edge-indicator::before`
-(variant "message": red, left edge) and `.weather-edge-indicator::before`
-(variant "weather": the amber storm-alert glow, mirrored onto the right
-edge). Keep this in sync if that CSS ever changes.
+The effect combines angle-based color and opacity, a radial alpha mask, and
+a soft blur. This script computes the per-pixel values because the current
+cairosvg rasterization pipeline does not render that gradient, mask, and
+filter combination. The ``message`` variant is red and the ``weather``
+variant is an amber mask tinted by the firmware at runtime.
 """
 
 from __future__ import annotations
@@ -23,20 +14,21 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
+
+from rasterize_svg import apply_gaussian_blur_rgba
 
 STAGE_SIZE = 800
-# Matches the live face/hand coordinate system in wac/ui/ui.c (ANALOG_CENTER_X/Y,
+# Matches the live face/hand coordinate system in ui/ui.c (ANALOG_CENTER_X/Y,
 # ANALOG_FACE_SIZE=760/2=380) -- NOT the baked stage image's Y-trim, since this
 # is a separate runtime lv_image object aligned directly on the 800x800 canvas.
 FACE_CENTER = STAGE_SIZE / 2  # 400
-FACE_BOX_RADIUS = 380  # ANALOG_FACE_SIZE / 2, matches Pi's 760px .clock-face box
-MASK_BOX_RADIUS = FACE_BOX_RADIUS - 10  # Pi's `inset: 10px` -> 740px box -> r=370
-BLUR_RADIUS_PX = 6  # Pi's `filter: blur(6px)` on the base (non-important) state
+FACE_BOX_RADIUS = 380  # ANALOG_FACE_SIZE / 2
+MASK_BOX_RADIUS = FACE_BOX_RADIUS - 10  # 10px inside the face edge
+BLUR_RADIUS_PX = 6  # Gaussian blur radius for the base state
 
 GRADIENT_FROM_DEG = 218.0
-# (angle_deg, alpha) stops from the CSS conic-gradient, angle measured from
-# GRADIENT_FROM_DEG going clockwise (matches CSS `from` semantics).
+# (angle_deg, alpha) stops, measured clockwise from GRADIENT_FROM_DEG.
 ANGLE_STOPS = [
     (0.0, 0.0),
     (2.0, 0.0),
@@ -50,8 +42,8 @@ ANGLE_STOPS = [
 ]
 COLOR_RGB = (255, 74, 74)
 
-# `.weather-edge-indicator::before`: same mask and blur, different angles.
-# The firmware stores this one as A8 and tints it amber at runtime.
+# Weather variant: same mask and blur with a different angle profile. The
+# firmware stores this one as A8 and tints it amber at runtime.
 WEATHER_GRADIENT_FROM_DEG = 36.0
 WEATHER_ANGLE_STOPS = [
     (0.0, 0.0),
@@ -71,9 +63,8 @@ VARIANTS = {
     "weather": (WEATHER_GRADIENT_FROM_DEG, WEATHER_ANGLE_STOPS, WEATHER_COLOR_RGB),
 }
 
-# (radius_px_from_edge, alpha) stops from the CSS mask radial-gradient, where
-# radius is expressed as "farthest-side minus N px" per the original
-# `calc(100% - Npx)` values, converted here to absolute px from center.
+# (pixels inward from the mask radius, alpha) stops, converted below to
+# absolute radii from the center.
 _MASK_STOPS_FROM_EDGE = [
     (132, 0.0),
     (108, 0.12),
@@ -107,45 +98,16 @@ def render_alpha(size: int, from_deg: float, angle_stops: list[tuple[float, floa
     dy = ys - FACE_CENTER
     radius = np.sqrt(dx * dx + dy * dy)
 
-    # CSS conic-gradient angle: 0deg = 12 o'clock (up, -Y), increasing clockwise.
+    # Angle convention: 0 degrees points up and positive angles go clockwise.
     angle_deg = np.degrees(np.arctan2(dx, -dy)) % 360.0
     rel_deg = (angle_deg - from_deg) % 360.0
 
     angle_alpha = _piecewise_interp(rel_deg, angle_stops)
     radius_alpha = _piecewise_interp(radius, RADIUS_STOPS)
-    # Beyond the mask's own farthest-side radius, CSS masks clip to nothing.
+    # Clip the radial alpha outside the mask radius.
     radius_alpha = np.where(radius <= MASK_BOX_RADIUS, radius_alpha, 0.0)
 
     return angle_alpha * radius_alpha
-
-
-def gaussian_blur_rgba(image: Image.Image, radius: float) -> Image.Image:
-    """Alpha-safe (premultiplied) Gaussian blur -- avoids dark fringing at edges."""
-
-    def blur_channel(channel: np.ndarray) -> np.ndarray:
-        band = Image.fromarray(np.clip(channel, 0, 255).astype("uint8"), mode="L")
-        return np.asarray(band.filter(ImageFilter.GaussianBlur(radius))).astype("float32")
-
-    rgba = np.asarray(image.convert("RGBA")).astype("float32")
-    r, g, b, a = rgba[..., 0], rgba[..., 1], rgba[..., 2], rgba[..., 3]
-    alpha_norm = a / 255.0
-
-    pr_blurred = blur_channel(r * alpha_norm)
-    pg_blurred = blur_channel(g * alpha_norm)
-    pb_blurred = blur_channel(b * alpha_norm)
-    a_blurred = blur_channel(a)
-
-    safe_alpha = np.where(a_blurred > 1.0, a_blurred / 255.0, 1.0)
-    out = np.stack(
-        [
-            np.clip(pr_blurred / safe_alpha, 0, 255),
-            np.clip(pg_blurred / safe_alpha, 0, 255),
-            np.clip(pb_blurred / safe_alpha, 0, 255),
-            np.clip(a_blurred, 0, 255),
-        ],
-        axis=-1,
-    ).astype("uint8")
-    return Image.fromarray(out, mode="RGBA")
 
 
 def render(output_path: Path, size: int = STAGE_SIZE, variant: str = "message") -> None:
@@ -165,7 +127,7 @@ def render(output_path: Path, size: int = STAGE_SIZE, variant: str = "message") 
         # THEN crop down to the bounding box below. Cropping before blurring
         # would risk edge artifacts for no size benefit, since the crop
         # happens right after anyway.
-        image = gaussian_blur_rgba(image, BLUR_RADIUS_PX)
+        image = apply_gaussian_blur_rgba(image, BLUR_RADIUS_PX)
 
     # Only ~12% of the full 800x800 canvas is ever non-transparent (this is
     # a glow confined to one side of the face). Storing the full canvas as
@@ -178,7 +140,7 @@ def render(output_path: Path, size: int = STAGE_SIZE, variant: str = "message") 
     # should have been -- reproduced identically across a full chip erase +
     # reflash, ruling out a bad/worn flash sector). Cropping to the actual
     # content bounding box (plus a small margin) avoids storing dead
-    # transparent space. wac/ui/ui.c's ANALOG_EDGE_INDICATOR_X/Y must match
+    # transparent space. ui/ui.c's ANALOG_EDGE_INDICATOR_X/Y must match
     # this crop's offset -- this prints it so that's easy to keep in sync.
     alpha_channel = np.asarray(image)[..., 3]
     nonzero_rows, nonzero_cols = np.nonzero(alpha_channel > 0)

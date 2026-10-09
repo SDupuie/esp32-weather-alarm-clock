@@ -51,5 +51,4 @@ render_svg_a8 icon_pressure conditions_icon_pressure 36
 render_svg_a8 icon_rain conditions_icon_rain 36
 render_svg_a8 icon_snow conditions_icon_snow 36
 
-"$SCRIPT_DIR/update-asset-source-manifest.sh"
 echo "Conditions assets regenerated."

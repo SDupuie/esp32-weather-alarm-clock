@@ -6,8 +6,6 @@ import argparse
 import re
 from pathlib import Path
 
-import cairosvg
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Rasterize an SVG into a PNG with preserved transparency.")
@@ -79,6 +77,8 @@ def parse_viewbox_dimensions(svg_text: str) -> tuple[int, int] | None:
 
 
 def main() -> int:
+    import cairosvg
+
     args = parse_args()
     input_path = Path(args.input)
     output_path = Path(args.output)

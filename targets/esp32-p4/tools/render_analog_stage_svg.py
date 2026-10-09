@@ -8,14 +8,14 @@ from pathlib import Path
 STAGE_SIZE = 800
 CENTER = STAGE_SIZE // 2
 # Baked-in equivalent of the old runtime STAGE_Y_TRIM=-18 lv_obj_align offset
-# in wac/ui/ui.c. Shifting the *asset* instead of shifting the LVGL image object
+# in ui/ui.c. Shifting the *asset* instead of shifting the LVGL image object
 # at runtime avoids an LVGL rendering artifact confirmed on-device: an
 # offset-aligned image object consistently produced a bright horizontal line
 # at the bottom of the visible content that disappeared entirely when the
 # image was hidden (everything else about the scene unchanged), pointing at
 # the runtime align-offset mechanism itself rather than anything drawn in
 # the image or anything physical. Only this baked-image circle moves — the
-# procedural ticks/numerals in wac/ui/ui.c were never shifted (confirmed fine
+# procedural ticks/numerals in ui/ui.c were never shifted (confirmed fine
 # as-is) and must stay exactly where they are, at the true canvas center.
 STAGE_Y_TRIM = -18
 FACE_CY = CENTER + STAGE_Y_TRIM

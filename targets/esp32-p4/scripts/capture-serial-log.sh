@@ -20,7 +20,4 @@ python "$PROJECT_DIR/tools/capture_serial.py" \
   --baud 115200 \
   --output "$OUTPUT_PATH" \
   --duration "$DURATION_SECONDS" \
-  --reset-before-capture \
-  --until "BENCH_RUN_COMPLETE" \
-  --require-until \
-  --settle-seconds 2
+  --reset-before-capture

@@ -392,18 +392,11 @@ esp_err_t weather_client_fetch(
 
     bool forecast_thundersnow = is_thundersnow(config, code, (high + low) / 2);
 
+    if (date != NULL && strlen(date) == 10) {
+      memcpy(out_snapshot->forecast[i].date, date, 11);
+    }
     out_snapshot->forecast[i].high = high;
     out_snapshot->forecast[i].low = low;
-    out_snapshot->forecast[i].code = code;
-    out_snapshot->forecast[i].is_day = true;
-    out_snapshot->forecast[i].thundersnow = forecast_thundersnow;
-    describe_weather_code(
-      code,
-      true,
-      forecast_thundersnow,
-      out_snapshot->forecast[i].summary,
-      sizeof(out_snapshot->forecast[i].summary)
-    );
     snprintf(
       out_snapshot->forecast[i].icon_name,
       sizeof(out_snapshot->forecast[i].icon_name),
@@ -412,10 +405,10 @@ esp_err_t weather_client_fetch(
     );
   }
 
-  storm_conditions_config_t conditions_config;
-  storm_conditions_default_config(&conditions_config);
-  conditions_config.metric = is_metric_units(config);
-  conditions_config.time_24h = strings_equal_ignore_case(config->time_format, "24");
+  storm_conditions_config_t conditions_config = {
+    .metric = is_metric_units(config),
+    .time_24h = strings_equal_ignore_case(config->time_format, "24")
+  };
   out_snapshot->has_conditions = storm_conditions_build(
     &conditions_config,
     current_weather,

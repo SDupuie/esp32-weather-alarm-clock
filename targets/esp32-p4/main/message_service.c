@@ -39,6 +39,7 @@
 #define MESSAGE_HEARTBEAT_INTERVAL_MS 5000
 #define MESSAGE_HEARTBEAT_STALE_MS 15000
 #define MESSAGE_CLIENT_REFRESH_INTERVAL_MS 15000
+#define MESSAGE_STORE_SYNC_RETRY_INTERVAL_MS 15000
 #define MESSAGE_RUNTIME_POLL_INTERVAL_MS 250
 #define MESSAGE_PROXY_TIMEOUT_MS 4000
 #define MESSAGE_URL_LEN 1024
@@ -90,6 +91,8 @@ typedef struct {
   int64_t last_heartbeat_sent_ms;
   int64_t last_client_refresh_ms;
   int64_t discovery_deadline_ms;
+  bool store_sync_pending;
+  int64_t next_store_sync_ms;
   int socket_fd;
 } message_runtime_state_t;
 
@@ -112,14 +115,28 @@ typedef struct {
 } http_response_buffer_t;
 
 static SemaphoreHandle_t s_message_mutex;
-static device_config_t s_config_snapshot;
 static httpd_handle_t s_http_server;
 static message_record_t s_messages[MESSAGE_MAX_RECORDS];
+static uint64_t s_store_revision;
 static message_target_t s_targets[MESSAGE_MAX_TARGETS];
 static size_t s_target_count;
 static message_runtime_state_t s_runtime;
 static message_client_cache_t s_client_cache;
 static TaskHandle_t s_runtime_task_handle;
+
+typedef enum {
+  MESSAGE_ACK_IDLE = 0,
+  MESSAGE_ACK_PENDING,
+  MESSAGE_ACK_COMPLETE,
+} message_ack_state_t;
+
+static portMUX_TYPE s_ack_lock = portMUX_INITIALIZER_UNLOCKED;
+static struct {
+  message_ack_state_t state;
+  char device_id[DEVICE_CONFIG_STR_LEN];
+  char message_id[APP_MESSAGE_ID_LEN];
+  esp_err_t result;
+} s_ack;
 
 static void copy_text(char *dest, size_t dest_size, const char *src)
 {
@@ -189,6 +206,12 @@ static bool runtime_should_proxy_locked(void)
     && s_runtime.role == MESSAGE_ROLE_SHARED_CLIENT
     && s_runtime.hub_url[0] != '\0'
     && strcmp(s_runtime.hub_url, s_runtime.local_hub_url) != 0;
+}
+
+static void local_store_changed_locked(void)
+{
+  s_store_revision++;
+  s_runtime.store_sync_pending = true;
 }
 
 static void clear_client_cache_locked(void)
@@ -380,6 +403,7 @@ static int compare_message_order(const message_record_t *a, const message_record
 static int collect_visible_message_indexes(
   const char *device_id,
   bool include_dismissed,
+  bool include_all_targets,
   int *indexes,
   size_t max_indexes,
   uint32_t *out_unread_count,
@@ -392,7 +416,10 @@ static int collect_visible_message_indexes(
 
   for (size_t index = 0; index < MESSAGE_MAX_RECORDS; ++index) {
     message_record_t *record = &s_messages[index];
-    if (!is_visible_to_device(record, device_id)) {
+    bool visible = include_all_targets
+      ? record->in_use && record->active && !is_message_expired(record)
+      : is_visible_to_device(record, device_id);
+    if (!visible) {
       continue;
     }
 
@@ -463,15 +490,6 @@ static int find_insertion_slot(void)
   }
 
   return oldest_index;
-}
-
-static void copy_message_record(message_record_t *dest, const message_record_t *src)
-{
-  if (dest == NULL || src == NULL) {
-    return;
-  }
-
-  *dest = *src;
 }
 
 static bool parse_message_json(cJSON *json, message_record_t *out_record)
@@ -558,20 +576,15 @@ static void merge_message_record_locked(const message_record_t *incoming)
     return;
   }
 
+  local_store_changed_locked();
   int index = find_message_index_by_id(incoming->id);
   if (index < 0) {
     index = find_insertion_slot();
-    memset(&s_messages[index], 0, sizeof(s_messages[index]));
-    copy_message_record(&s_messages[index], incoming);
+    s_messages[index] = *incoming;
     return;
   }
 
   message_record_t *existing = &s_messages[index];
-  if (!existing->in_use) {
-    copy_message_record(existing, incoming);
-    return;
-  }
-
   if (existing->text[0] == '\0' && incoming->text[0] != '\0') {
     copy_text(existing->text, sizeof(existing->text), incoming->text);
   }
@@ -926,22 +939,8 @@ static esp_err_t proxy_request_to_hub(httpd_req_t *req)
   }
 
   char url[MESSAGE_URL_LEN] = "";
-  int query_len = httpd_req_get_url_query_len(req);
-  if (query_len > 0) {
-    char *query = calloc((size_t) query_len + 1, sizeof(char));
-    if (query == NULL) {
-      free(body);
-      return send_error_response(req, 500, "Out of memory");
-    }
-    if (httpd_req_get_url_query_str(req, query, (size_t) query_len + 1) == ESP_OK) {
-      snprintf(url, sizeof(url), "%s%s?%s", hub_url, req->uri, query);
-    } else {
-      snprintf(url, sizeof(url), "%s%s", hub_url, req->uri);
-    }
-    free(query);
-  } else {
-    snprintf(url, sizeof(url), "%s%s", hub_url, req->uri);
-  }
+  // ESP-IDF includes the query string in req->uri.
+  snprintf(url, sizeof(url), "%s%s", hub_url, req->uri);
 
   int status_code = 500;
   http_response_buffer_t response = {0};
@@ -1041,16 +1040,16 @@ static esp_err_t refresh_remote_client_cache(void)
       }
 
       next_cache.snapshot.available = true;
-      next_cache.snapshot.important = important;
       copy_text(next_cache.snapshot.id, sizeof(next_cache.snapshot.id), id_item->valuestring);
       copy_text(next_cache.snapshot.text, sizeof(next_cache.snapshot.text), text_item->valuestring);
+      char sender[APP_MESSAGE_SENDER_LEN];
       copy_text(
-        next_cache.snapshot.sender,
-        sizeof(next_cache.snapshot.sender),
+        sender,
+        sizeof(sender),
         cJSON_IsString(sender_item) ? sender_item->valuestring : ""
       );
       format_message_meta_values(
-        next_cache.snapshot.sender,
+        sender,
         cJSON_IsString(created_item) ? created_item->valuestring : "",
         next_cache.snapshot.meta,
         sizeof(next_cache.snapshot.meta)
@@ -1067,9 +1066,9 @@ static esp_err_t refresh_remote_client_cache(void)
   return ESP_OK;
 }
 
-static esp_err_t sync_local_store_to_hub(const char *hub_url)
+static esp_err_t sync_local_store_to_hub(const char *hub_url, uint64_t *out_store_revision)
 {
-  if (hub_url == NULL || hub_url[0] == '\0') {
+  if (hub_url == NULL || hub_url[0] == '\0' || out_store_revision == NULL) {
     return ESP_ERR_INVALID_ARG;
   }
 
@@ -1080,6 +1079,7 @@ static esp_err_t sync_local_store_to_hub(const char *hub_url)
 
   xSemaphoreTake(s_message_mutex, portMAX_DELAY);
   cJSON *messages = build_store_messages_array_locked();
+  *out_store_revision = s_store_revision;
   xSemaphoreGive(s_message_mutex);
 
   if (messages == NULL) {
@@ -1118,6 +1118,34 @@ static esp_err_t sync_local_store_to_hub(const char *hub_url)
   return ESP_OK;
 }
 
+static void process_pending_store_sync(int64_t current_ms)
+{
+  char hub_url[MESSAGE_HUB_URL_LEN] = "";
+
+  xSemaphoreTake(s_message_mutex, portMAX_DELAY);
+  if (!runtime_should_proxy_locked() || !s_runtime.store_sync_pending
+      || current_ms < s_runtime.next_store_sync_ms) {
+    xSemaphoreGive(s_message_mutex);
+    return;
+  }
+
+  copy_text(hub_url, sizeof(hub_url), s_runtime.hub_url);
+  xSemaphoreGive(s_message_mutex);
+
+  uint64_t sent_revision = 0;
+  esp_err_t result = sync_local_store_to_hub(hub_url, &sent_revision);
+
+  xSemaphoreTake(s_message_mutex, portMAX_DELAY);
+  /* A local operation may finish while HTTP is pending. Keep that later
+   * change queued rather than treating the older snapshot as delivered. */
+  s_runtime.store_sync_pending = result != ESP_OK || sent_revision != s_store_revision;
+  s_runtime.next_store_sync_ms = now_ms() + MESSAGE_STORE_SYNC_RETRY_INTERVAL_MS;
+  xSemaphoreGive(s_message_mutex);
+  if (result != ESP_OK) {
+    ESP_LOGW(TAG, "Retained message transfer to %s failed: %s", hub_url, esp_err_to_name(result));
+  }
+}
+
 static void runtime_close_socket_locked(void)
 {
   if (s_runtime.socket_fd >= 0) {
@@ -1154,29 +1182,39 @@ static esp_err_t runtime_send_discovery_payload_locked(const char *type, const s
     return ESP_ERR_INVALID_STATE;
   }
 
-  char payload[320];
-  int written = snprintf(
-    payload,
-    sizeof(payload),
-    "{\"type\":\"%s\",\"version\":%d,\"deviceId\":\"%s\",\"roomName\":\"%s\",\"hubUrl\":\"%s\"}",
-    type,
-    MESSAGE_DISCOVERY_VERSION,
-    s_runtime.device_id,
-    s_runtime.room_name,
-    s_runtime.local_hub_url
-  );
-  if (written <= 0 || written >= (int) sizeof(payload)) {
+  cJSON *root = cJSON_CreateObject();
+  if (root == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+  if (cJSON_AddStringToObject(root, "type", type) == NULL
+      || cJSON_AddNumberToObject(root, "version", MESSAGE_DISCOVERY_VERSION) == NULL
+      || cJSON_AddStringToObject(root, "deviceId", s_runtime.device_id) == NULL
+      || cJSON_AddStringToObject(root, "roomName", s_runtime.room_name) == NULL
+      || cJSON_AddStringToObject(root, "hubUrl", s_runtime.local_hub_url) == NULL) {
+    cJSON_Delete(root);
+    return ESP_ERR_NO_MEM;
+  }
+  char *payload = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  if (payload == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  size_t written = strlen(payload);
+  if (written == 0 || written >= 320) {
+    cJSON_free(payload);
     return ESP_ERR_INVALID_SIZE;
   }
 
   ssize_t send_result = sendto(
     s_runtime.socket_fd,
     payload,
-    (size_t) written,
+    written,
     0,
     (const struct sockaddr *) destination,
     sizeof(*destination)
   );
+  cJSON_free(payload);
   if (send_result < 0) {
     ESP_LOGW(TAG, "Discovery send failed: errno=%d", errno);
     return ESP_FAIL;
@@ -1232,18 +1270,13 @@ static void runtime_become_shared_client_locked(
   const char *hub_url,
   const char *hub_device_id,
   const char *hub_room_name,
-  int64_t current_ms,
-  bool *out_should_sync,
-  char *out_sync_url,
-  size_t out_sync_url_size
+  int64_t current_ms
 )
 {
-  bool should_sync = false;
-  if (s_runtime.role == MESSAGE_ROLE_SHARED_HUB
-      && hub_url != NULL
-      && hub_url[0] != '\0'
-      && strcmp(hub_url, s_runtime.local_hub_url) != 0) {
-    should_sync = true;
+  if (s_runtime.role != MESSAGE_ROLE_SHARED_CLIENT
+      || strcmp(s_runtime.hub_url, hub_url) != 0
+      || strcmp(s_runtime.hub_device_id, hub_device_id) != 0) {
+    s_runtime.next_store_sync_ms = 0;
   }
 
   s_runtime.role = MESSAGE_ROLE_SHARED_CLIENT;
@@ -1258,13 +1291,6 @@ static void runtime_become_shared_client_locked(
   );
   clear_client_cache_locked();
   update_known_target(s_runtime.hub_device_id, s_runtime.hub_room_name);
-
-  if (out_should_sync != NULL) {
-    *out_should_sync = should_sync;
-  }
-  if (should_sync && out_sync_url != NULL && out_sync_url_size > 0) {
-    copy_text(out_sync_url, out_sync_url_size, hub_url);
-  }
 
   ESP_LOGI(
     TAG,
@@ -1329,6 +1355,7 @@ static void runtime_reset_network_locked(void)
   s_runtime.last_hub_heartbeat_ms = 0;
   s_runtime.last_heartbeat_sent_ms = 0;
   s_runtime.last_client_refresh_ms = 0;
+  s_runtime.next_store_sync_ms = 0;
   clear_client_cache_locked();
 
   if (runtime_is_shared_locked()) {
@@ -1342,10 +1369,7 @@ static void handle_hub_signal_locked(
   const char *hub_url,
   const char *hub_device_id,
   const char *hub_room_name,
-  int64_t current_ms,
-  bool *out_should_sync,
-  char *out_sync_url,
-  size_t out_sync_url_size
+  int64_t current_ms
 )
 {
   if (hub_url == NULL || hub_url[0] == '\0' || hub_device_id == NULL || hub_device_id[0] == '\0') {
@@ -1364,10 +1388,7 @@ static void handle_hub_signal_locked(
         hub_url,
         hub_device_id,
         hub_room_name,
-        current_ms,
-        out_should_sync,
-        out_sync_url,
-        out_sync_url_size
+        current_ms
       );
     }
     return;
@@ -1375,15 +1396,14 @@ static void handle_hub_signal_locked(
 
   if (s_runtime.hub_device_id[0] == '\0'
       || compare_hub_priority(hub_device_id, s_runtime.hub_device_id) < 0
+      || (strcmp(hub_device_id, s_runtime.hub_device_id) == 0
+          && strcmp(hub_url, s_runtime.hub_url) != 0)
       || s_runtime.role == MESSAGE_ROLE_SHARED_DISCOVERING) {
     runtime_become_shared_client_locked(
       hub_url,
       hub_device_id,
       hub_room_name,
-      current_ms,
-      out_should_sync,
-      out_sync_url,
-      out_sync_url_size
+      current_ms
     );
   } else if (strcmp(hub_device_id, s_runtime.hub_device_id) == 0) {
     s_runtime.last_hub_heartbeat_ms = current_ms;
@@ -1424,8 +1444,6 @@ static void process_discovery_packet(
   const char *packet_room_name = cJSON_IsString(room_name_item) ? room_name_item->valuestring : packet_device_id;
   const char *packet_hub_url = cJSON_IsString(hub_url_item) ? hub_url_item->valuestring : "";
 
-  bool should_sync = false;
-  char sync_url[MESSAGE_HUB_URL_LEN] = "";
   bool should_reply = false;
 
   xSemaphoreTake(s_message_mutex, portMAX_DELAY);
@@ -1441,10 +1459,7 @@ static void process_discovery_packet(
       packet_hub_url,
       packet_device_id,
       packet_room_name,
-      current_ms,
-      &should_sync,
-      sync_url,
-      sizeof(sync_url)
+      current_ms
     );
   }
   xSemaphoreGive(s_message_mutex);
@@ -1453,10 +1468,6 @@ static void process_discovery_packet(
     xSemaphoreTake(s_message_mutex, portMAX_DELAY);
     (void) runtime_send_discovery_payload_locked("weather-clock-message-hub", source_addr);
     xSemaphoreGive(s_message_mutex);
-  }
-
-  if (should_sync && sync_url[0] != '\0') {
-    (void) sync_local_store_to_hub(sync_url);
   }
 
   cJSON_Delete(root);
@@ -1483,17 +1494,42 @@ static void runtime_init_locked(const device_config_t *config)
   clear_client_cache_locked();
 }
 
+/* Acknowledge the displayed record only from the existing message worker. */
+static esp_err_t message_service_acknowledge(const char *device_id, const char *message_id);
+
+static void process_pending_acknowledgment(void)
+{
+  char device_id[DEVICE_CONFIG_STR_LEN];
+  char message_id[APP_MESSAGE_ID_LEN];
+  portENTER_CRITICAL(&s_ack_lock);
+  if (s_ack.state != MESSAGE_ACK_PENDING) {
+    portEXIT_CRITICAL(&s_ack_lock);
+    return;
+  }
+  memcpy(device_id, s_ack.device_id, sizeof(device_id));
+  memcpy(message_id, s_ack.message_id, sizeof(message_id));
+  portEXIT_CRITICAL(&s_ack_lock);
+
+  /* Only the existing message worker executes this operation. The slot stays
+   * occupied until completion is published and then consumed. */
+  esp_err_t result = message_service_acknowledge(device_id, message_id);
+
+  portENTER_CRITICAL(&s_ack_lock);
+  s_ack.result = result;
+  s_ack.state = MESSAGE_ACK_COMPLETE;
+  portEXIT_CRITICAL(&s_ack_lock);
+}
+
 static void message_runtime_task(void *arg)
 {
   (void) arg;
 
   while (true) {
+    process_pending_acknowledgment();
     bool wifi_connected = connectivity_is_wifi_connected();
     char local_ip[MESSAGE_LOCAL_IP_LEN] = "";
     bool have_local_ip = connectivity_get_local_ipv4(local_ip, sizeof(local_ip));
     int socket_fd = -1;
-    bool should_sync = false;
-    char sync_url[MESSAGE_HUB_URL_LEN] = "";
     bool should_refresh_remote = false;
 
     int64_t current_ms = now_ms();
@@ -1568,9 +1604,7 @@ static void message_runtime_task(void *arg)
       }
     }
 
-    if (should_sync && sync_url[0] != '\0') {
-      (void) sync_local_store_to_hub(sync_url);
-    }
+    process_pending_store_sync(now_ms());
 
     if (should_refresh_remote) {
       (void) refresh_remote_client_cache();
@@ -1673,6 +1707,7 @@ static esp_err_t messages_get_handler(httpd_req_t *req)
   int count = collect_visible_message_indexes(
     resolved_device_id,
     include_acknowledged,
+    include_acknowledged && strcmp(resolved_device_id, "all") == 0,
     indexes,
     MESSAGE_MAX_RECORDS,
     &unread_count,
@@ -1793,6 +1828,7 @@ static esp_err_t messages_post_handler(httpd_req_t *req)
   s_messages[slot].has_expires_at = has_expires_at;
   s_messages[slot].expires_at_epoch = expires_at_epoch;
   copy_text(s_messages[slot].expires_at, sizeof(s_messages[slot].expires_at), expires_at);
+  local_store_changed_locked();
   update_known_target(s_runtime.device_id, s_runtime.room_name);
   if (strcmp(target_value, "all") != 0) {
     update_known_target(target_value, target_value);
@@ -1854,7 +1890,10 @@ static esp_err_t message_action_handler(httpd_req_t *req)
 
   message_record_t *record = &s_messages[message_index];
   if (strcmp(action, "deactivate") == 0) {
-    record->active = false;
+    if (record->active) {
+      record->active = false;
+      local_store_changed_locked();
+    }
     cJSON *json = cJSON_CreateObject();
     cJSON_AddBoolToObject(json, "ok", true);
     cJSON_AddStringToObject(json, "id", message_id);
@@ -1910,6 +1949,7 @@ static esp_err_t message_action_handler(httpd_req_t *req)
       device_item->valuestring
     );
     record->acknowledged_count++;
+    local_store_changed_locked();
   }
 
   const char *resolved_room_name = strcmp(device_item->valuestring, s_runtime.device_id) == 0
@@ -2094,7 +2134,6 @@ esp_err_t message_service_init(const device_config_t *config)
   }
 
   xSemaphoreTake(s_message_mutex, portMAX_DELAY);
-  s_config_snapshot = *config;
   if (s_target_count == 0) {
     update_known_target(config->device_id, config->room_name);
   }
@@ -2153,6 +2192,7 @@ esp_err_t message_service_get_snapshot(
   int count = collect_visible_message_indexes(
     device_id != NULL && device_id[0] != '\0' ? device_id : s_runtime.device_id,
     false,
+    false,
     indexes,
     MESSAGE_MAX_RECORDS,
     out_unread_count,
@@ -2162,10 +2202,8 @@ esp_err_t message_service_get_snapshot(
   if (count > 0) {
     const message_record_t *record = &s_messages[indexes[0]];
     out_snapshot->available = true;
-    out_snapshot->important = record->important;
     copy_text(out_snapshot->id, sizeof(out_snapshot->id), record->id);
     copy_text(out_snapshot->text, sizeof(out_snapshot->text), record->text);
-    copy_text(out_snapshot->sender, sizeof(out_snapshot->sender), record->sender);
     format_message_meta(record, out_snapshot->meta, sizeof(out_snapshot->meta));
   }
 
@@ -2173,7 +2211,7 @@ esp_err_t message_service_get_snapshot(
   return ESP_OK;
 }
 
-esp_err_t message_service_acknowledge(const char *device_id, const char *message_id)
+static esp_err_t message_service_acknowledge(const char *device_id, const char *message_id)
 {
   if (device_id == NULL || device_id[0] == '\0' || message_id == NULL || message_id[0] == '\0' || s_message_mutex == NULL) {
     return ESP_ERR_INVALID_ARG;
@@ -2235,10 +2273,57 @@ esp_err_t message_service_acknowledge(const char *device_id, const char *message
   if (!is_acknowledged_for_device(record, device_id) && record->acknowledged_count < MESSAGE_MAX_ACKS) {
     copy_text(record->acknowledged_by[record->acknowledged_count], sizeof(record->acknowledged_by[0]), device_id);
     record->acknowledged_count++;
+    local_store_changed_locked();
   }
   update_known_target(device_id, strcmp(device_id, s_runtime.device_id) == 0 ? s_runtime.room_name : device_id);
   ESP_LOGI(TAG, "Acknowledged displayed message %s for %s", record->id, device_id);
 
   xSemaphoreGive(s_message_mutex);
   return ESP_OK;
+}
+
+esp_err_t message_service_submit_acknowledgment(
+  const char *device_id,
+  const char *message_id
+)
+{
+  if (device_id == NULL || device_id[0] == '\0'
+      || message_id == NULL || message_id[0] == '\0') {
+    return ESP_ERR_INVALID_ARG;
+  }
+  size_t device_length = strlen(device_id);
+  size_t message_length = strlen(message_id);
+  if (device_length >= DEVICE_CONFIG_STR_LEN || message_length >= APP_MESSAGE_ID_LEN) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (s_runtime_task_handle == NULL) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  portENTER_CRITICAL(&s_ack_lock);
+  if (s_ack.state != MESSAGE_ACK_IDLE) {
+    portEXIT_CRITICAL(&s_ack_lock);
+    return ESP_ERR_TIMEOUT;
+  }
+  memcpy(s_ack.device_id, device_id, device_length + 1);
+  memcpy(s_ack.message_id, message_id, message_length + 1);
+  s_ack.state = MESSAGE_ACK_PENDING;
+  portEXIT_CRITICAL(&s_ack_lock);
+  return ESP_OK;
+}
+
+bool message_service_take_acknowledgment_result(esp_err_t *out_result)
+{
+  if (out_result == NULL) {
+    return false;
+  }
+  portENTER_CRITICAL(&s_ack_lock);
+  if (s_ack.state != MESSAGE_ACK_COMPLETE) {
+    portEXIT_CRITICAL(&s_ack_lock);
+    return false;
+  }
+  *out_result = s_ack.result;
+  s_ack.state = MESSAGE_ACK_IDLE;
+  portEXIT_CRITICAL(&s_ack_lock);
+  return true;
 }

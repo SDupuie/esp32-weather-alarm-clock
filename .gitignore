@@ -6,7 +6,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Electron / build outputs
+# Build outputs
 dist/
 out/
 release/
@@ -18,30 +18,9 @@ build/
 # Local backups
 *.bak
 
-# Local config / secrets
-targets/pi/config*.json
-!shared/spec/config.example.json
-targets/pi/messages.json
-
-# User-provided background overrides
-shared/assets/background.jpg
-shared/assets/background.png
-shared/assets/background.webp
-shared/assets/background-day.jpg
-shared/assets/background-day.png
-shared/assets/background-day.webp
-shared/assets/background-night.jpg
-shared/assets/background-night.png
-shared/assets/background-night.webp
-
-# Optional icon themes and local backups
-shared/assets/icon-themes/
-shared/assets/icons.base/
-
 # ESP-IDF generated files
 .esp-idf/
-# Covers build/, build-benchmark/, build-benchmark-tuned/, build-parity-lab/,
-# and any future build-* variant -- not just the default build/ dir.
+# ESP-IDF build directories, including local variants
 targets/esp32-p4/build*/
 targets/esp32-p4/managed_components/
 targets/esp32-p4/sdkconfig
@@ -54,7 +33,7 @@ targets/esp32-p4/backups/
 
 # Debug/diagnostic serial captures from development sessions -- useful
 # locally, not meant to accumulate forever in permanent repo history. Key
-# findings from these are written up in shared/spec/ instead.
+# findings from these remain in local .reviews/ reports.
 targets/esp32-p4/benchmark-logs/
 targets/esp32-p4/runtime-logs/
 

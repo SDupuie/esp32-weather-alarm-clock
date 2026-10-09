@@ -58,6 +58,5 @@ render_stage_asset round_stage day round_stage_day
 render_stage_asset round_stage night round_stage_night
 render_alpha_asset forecast_frame day forecast_tomorrow_frame_day
 render_alpha_asset forecast_frame night forecast_tomorrow_frame_night
-"$SCRIPT_DIR/update-asset-source-manifest.sh"
 
 echo "Screen parity assets regenerated."
