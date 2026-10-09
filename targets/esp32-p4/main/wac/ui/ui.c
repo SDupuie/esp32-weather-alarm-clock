@@ -1,4 +1,5 @@
 #include "app_ui.h"
+#include "ui_private.h"
 #include "sdkconfig.h"
 
 #include <ctype.h>
@@ -133,8 +134,8 @@
 #define DIGITAL_DATE_TOP 115
 /* 150 was correct for the old scaled lv_font_montserrat_48 (line_height 52,
  * base_line 9, scaled 3x -> effective line_height 156 / base_line 27, baseline
- * at 150+156-27=279). lv_font_clock_time_144 -- generated from only digits
- * and ':', with no descenders/tall accents to reserve room for -- reports a
+ * at 150+156-27=279). lv_font_clock_time_144 -- generated from digits, ':'
+ * and '-', with no descenders/tall accents to reserve room for -- reports a
  * much tighter line_height 104 / base_line 2, landing the baseline at
  * 150+104-2=252: 27px higher, which read as the time floating away from the
  * PM/divider line below it. +27 restores the original baseline position. */
@@ -205,23 +206,11 @@
 #define CONDITIONS_EDGE_INDICATOR_Y 107
 #define DAY_COUNT APP_FORECAST_DAYS
 #define FORECAST_ROW_COUNT 4
-#define SETUP_KEYBOARD_BOTTOM_OFFSET -150
-#define SETUP_KEYBOARD_HEIGHT 200
-#define SETUP_KEYBOARD_WIDTH 620
-#define SETUP_NETWORK_LIST_HEIGHT 250
-#define SETUP_SCAN_MAX_RESULTS 8
-#define SETUP_SCAN_TASK_PRIORITY 5
-#define SETUP_SCAN_TASK_STACK_SIZE 6144
-#define SETUP_LOCATION_TASK_PRIORITY 5
-#define SETUP_LOCATION_TASK_STACK_SIZE 8192
-#define SETUP_RESTART_DELAY_MS 1200
 #define SWIPE_THRESHOLD_PX 70
 #define SWIPE_AXIS_RATIO_X10 15
 #define VALID_CLOCK_EPOCH 1704067200
 #define CLOCK_STALE_WARNING_MS (135ULL * 1000ULL)
 #define STAGE_PADDING 28
-#define UI_ASYNC_LOCK_TIMEOUT_MS 250
-#define SETUP_KB_BTN(width) (LV_BUTTONMATRIX_CTRL_POPOVER | (width))
 
 typedef enum {
   APP_VIEW_ANALOG = 0,
@@ -240,30 +229,7 @@ typedef struct {
   lv_obj_t *message_view;
   lv_obj_t *gesture_layer;
   lv_obj_t *night_overlay;
-  lv_obj_t *debug_direct_weather_icon;
-  lv_obj_t *setup_overlay;
-  lv_obj_t *setup_scan_panel;
-  lv_obj_t *setup_credentials_panel;
-  lv_obj_t *setup_location_panel;
-  lv_obj_t *setup_scan_status_label;
-  lv_obj_t *setup_network_list;
-  lv_obj_t *setup_status_label;
-  lv_obj_t *setup_location_status_label;
-  lv_obj_t *setup_ssid_textarea;
-  lv_obj_t *setup_password_textarea;
-  lv_obj_t *setup_location_textarea;
-  lv_obj_t *setup_room_name_textarea;
-  lv_obj_t *setup_device_id_textarea;
-  lv_obj_t *setup_keyboard;
-  lv_obj_t *setup_message_sharing_button;
-  lv_obj_t *setup_face_button;
-  lv_obj_t *setup_time_format_button;
-  lv_obj_t *setup_leading_zero_button;
-  lv_obj_t *setup_units_button;
-  lv_obj_t *setup_night_shift_button;
-  lv_obj_t *setup_prompt_button;
-  lv_obj_t *setup_settings_button;
-  lv_obj_t *setup_scan_nav_button;
+  wac_settings_view_t settings_view;
   lv_obj_t *status_stack;
   lv_obj_t *clock_status_label;
   lv_obj_t *weather_status_label;
@@ -348,15 +314,10 @@ typedef struct {
    * row; the new order applies from the next swipe out of home. */
   app_view_mode_t weather_row[2];
   bool weather_alert_active;
-  lv_point_t setup_gesture_start;
-  bool setup_gesture_tracking;
   lv_point_t gesture_start;
   bool gesture_tracking;
   bool clock_is_estimated;
   bool night_overlay_active;
-  bool setup_scan_in_progress;
-  bool setup_location_lookup_in_progress;
-  bool setup_restart_pending;
   bool has_unread_messages;
   char displayed_message_id[APP_MESSAGE_ID_LEN];
   bool has_important_messages;
@@ -369,22 +330,13 @@ typedef struct {
   app_weather_snapshot_t weather;
   char forecast_labels[APP_FORECAST_DAYS][8];
   device_config_t config_snapshot;
-  connectivity_scan_result_t scan_results[SETUP_SCAN_MAX_RESULTS];
-  size_t scan_result_count;
-  time_t fallback_epoch;
   int last_displayed_minute_key;
   int64_t last_minute_advance_ms;
-  device_config_t setup_edit_config;
   time_t last_logged_weather_updated_at;
 } app_ui_state_t;
 
 static app_ui_state_t s_ui;
 static const char *TAG = "rwd_app_ui";
-
-typedef struct {
-  device_config_t pending_config;
-  char query[DEVICE_CONFIG_STR_LEN];
-} setup_location_lookup_request_t;
 
 static const char *const WEEKDAY_NAMES[] = {
   "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
@@ -399,106 +351,9 @@ static const char *const MONTH_NAMES[] = {
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
-static const char *const SETUP_KEYBOARD_LOWER_MAP[] = {
-  "1#", "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", LV_SYMBOL_BACKSPACE, "\n",
-  "ABC", "a", "s", "d", "f", "g", "h", "j", "k", "l", LV_SYMBOL_NEW_LINE, "\n",
-  "_", "-", "^", "z", "x", "c", "v", "b", "n", "m", ".", ",", "\n",
-  LV_SYMBOL_KEYBOARD,
-#if LV_USE_ARABIC_PERSIAN_CHARS == 1
-  LV_KEYBOARD_CTRL_BUTTON_MODE_TEXT_ARABIC,
-#endif
-  LV_SYMBOL_LEFT, " ", LV_SYMBOL_RIGHT, LV_SYMBOL_OK, ""
-};
-
-static const lv_buttonmatrix_ctrl_t SETUP_KEYBOARD_LOWER_CTRL_MAP[] = {
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 5, SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4),
-  SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4),
-  LV_BUTTONMATRIX_CTRL_CHECKED | 7,
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 6, SETUP_KB_BTN(3), SETUP_KB_BTN(3), SETUP_KB_BTN(3), SETUP_KB_BTN(3),
-  SETUP_KB_BTN(3), SETUP_KB_BTN(3), SETUP_KB_BTN(3), SETUP_KB_BTN(3), SETUP_KB_BTN(3),
-  LV_BUTTONMATRIX_CTRL_CHECKED | 7,
-  LV_BUTTONMATRIX_CTRL_CHECKED | SETUP_KB_BTN(1), LV_BUTTONMATRIX_CTRL_CHECKED | SETUP_KB_BTN(1),
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1),
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1), LV_BUTTONMATRIX_CTRL_CHECKED | SETUP_KB_BTN(1),
-  LV_BUTTONMATRIX_CTRL_CHECKED | SETUP_KB_BTN(1), LV_BUTTONMATRIX_CTRL_CHECKED | SETUP_KB_BTN(1),
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2,
-#if LV_USE_ARABIC_PERSIAN_CHARS == 1
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2,
-#endif
-  LV_BUTTONMATRIX_CTRL_CHECKED | 2, 6, LV_BUTTONMATRIX_CTRL_CHECKED | 2, LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2
-};
-
-static const char *const SETUP_KEYBOARD_UPPER_MAP[] = {
-  "1#", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", LV_SYMBOL_BACKSPACE, "\n",
-  "abc", "A", "S", "D", "F", "G", "H", "J", "K", "L", LV_SYMBOL_NEW_LINE, "\n",
-  "_", "-", "^", "Z", "X", "C", "V", "B", "N", "M", ".", ",", "\n",
-  LV_SYMBOL_CLOSE,
-#if LV_USE_ARABIC_PERSIAN_CHARS == 1
-  LV_KEYBOARD_CTRL_BUTTON_MODE_TEXT_ARABIC,
-#endif
-  LV_SYMBOL_LEFT, " ", LV_SYMBOL_RIGHT, LV_SYMBOL_OK, ""
-};
-
-static const lv_buttonmatrix_ctrl_t SETUP_KEYBOARD_UPPER_CTRL_MAP[] = {
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 5, SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4),
-  SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4), SETUP_KB_BTN(4),
-  LV_BUTTONMATRIX_CTRL_CHECKED | 7,
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 6, SETUP_KB_BTN(3), SETUP_KB_BTN(3), SETUP_KB_BTN(3), SETUP_KB_BTN(3),
-  SETUP_KB_BTN(3), SETUP_KB_BTN(3), SETUP_KB_BTN(3), SETUP_KB_BTN(3), SETUP_KB_BTN(3),
-  LV_BUTTONMATRIX_CTRL_CHECKED | 7,
-  LV_BUTTONMATRIX_CTRL_CHECKED | SETUP_KB_BTN(1), LV_BUTTONMATRIX_CTRL_CHECKED | SETUP_KB_BTN(1),
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1),
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1), LV_BUTTONMATRIX_CTRL_CHECKED | SETUP_KB_BTN(1),
-  LV_BUTTONMATRIX_CTRL_CHECKED | SETUP_KB_BTN(1), LV_BUTTONMATRIX_CTRL_CHECKED | SETUP_KB_BTN(1),
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2,
-#if LV_USE_ARABIC_PERSIAN_CHARS == 1
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2,
-#endif
-  LV_BUTTONMATRIX_CTRL_CHECKED | 2, 6, LV_BUTTONMATRIX_CTRL_CHECKED | 2, LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2
-};
-
-static const char *const SETUP_KEYBOARD_SPECIAL_MAP[] = {
-  "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", LV_SYMBOL_BACKSPACE, "\n",
-  "abc", "+", "&", "/", "*", "=", "%", "!", "?", "#", "<", ">", "\n",
-  "\\", "@", "$", "(", ")", "{", "}", "[", "]", ";", "\"", "'", "\n",
-  LV_SYMBOL_KEYBOARD,
-#if LV_USE_ARABIC_PERSIAN_CHARS == 1
-  LV_KEYBOARD_CTRL_BUTTON_MODE_TEXT_ARABIC,
-#endif
-  LV_SYMBOL_LEFT, " ", LV_SYMBOL_RIGHT, "^", LV_SYMBOL_OK, ""
-};
-
-static const lv_buttonmatrix_ctrl_t SETUP_KEYBOARD_SPECIAL_CTRL_MAP[] = {
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1),
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1),
-  LV_BUTTONMATRIX_CTRL_CHECKED | 2,
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2, SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1),
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1),
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1),
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1),
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1), SETUP_KB_BTN(1),
-  SETUP_KB_BTN(1), SETUP_KB_BTN(1),
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2,
-#if LV_USE_ARABIC_PERSIAN_CHARS == 1
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2,
-#endif
-  LV_BUTTONMATRIX_CTRL_CHECKED | 2, 5, LV_BUTTONMATRIX_CTRL_CHECKED | 2, SETUP_KB_BTN(1),
-  LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2
-};
-
 static lv_color_t color_bg(void)
 {
   return lv_color_hex(0x07101c);
-}
-
-static lv_color_t color_panel(void)
-{
-  return lv_color_hex(0x0f1c2d);
-}
-
-static lv_color_t color_panel_border(void)
-{
-  return lv_color_hex(0x253a57);
 }
 
 static lv_color_t color_text_primary(void)
@@ -539,16 +394,6 @@ static lv_color_t color_night_primary(void)
 static lv_color_t color_night_muted(void)
 {
   return lv_color_hex(0xc17a7a);
-}
-
-static lv_color_t color_success(void)
-{
-  return lv_color_hex(0x9eea8b);
-}
-
-static lv_color_t color_warning(void)
-{
-  return lv_color_hex(0xf8c298);
 }
 
 static lv_color_t color_important(void)
@@ -644,10 +489,12 @@ static int parse_hhmm_minutes(const char *value)
 
 static bool is_night_shift_active(const device_config_t *config, const struct tm *local_time)
 {
-  if (config == NULL || local_time == NULL || !config->night_shift_enabled) {
+  if (config == NULL || config->night_shift_mode == DEVICE_CONFIG_NIGHT_OFF || config->night_shift_mode == DEVICE_CONFIG_NIGHT_SOLAR) {
     return false;
   }
 
+  if (config->night_shift_mode == DEVICE_CONFIG_NIGHT_ALWAYS_ON) return true;
+  if (!local_time) return s_ui.night_overlay_active;
   int start = parse_hhmm_minutes(config->night_shift_start);
   int end = parse_hhmm_minutes(config->night_shift_end);
   if (start < 0 || end < 0) {
@@ -696,15 +543,6 @@ static lv_obj_t *create_label(
     lv_obj_set_style_text_font(label, font, 0);
   }
   return label;
-}
-
-static void style_panel(lv_obj_t *obj, int radius, lv_opa_t bg_opa)
-{
-  lv_obj_set_style_bg_color(obj, color_panel(), 0);
-  lv_obj_set_style_bg_opa(obj, bg_opa, 0);
-  lv_obj_set_style_border_color(obj, color_panel_border(), 0);
-  lv_obj_set_style_border_width(obj, 1, 0);
-  lv_obj_set_style_radius(obj, radius, 0);
 }
 
 static void clear_container_chrome(lv_obj_t *obj)
@@ -943,31 +781,6 @@ static void log_analog_hand_state(
   );
 }
 
-static void build_direct_weather_icon_probe(void)
-{
-#if CONFIG_RWD_DEBUG_DIRECT_WEATHER_ICON_TEST
-  if (s_ui.debug_direct_weather_icon != NULL) {
-    return;
-  }
-
-  s_ui.debug_direct_weather_icon = lv_image_create(app_screen_active());
-  lv_image_set_src(s_ui.debug_direct_weather_icon, &weather_icon_clear_day);
-  lv_obj_set_size(
-    s_ui.debug_direct_weather_icon,
-    weather_icon_clear_day.header.w,
-    weather_icon_clear_day.header.h
-  );
-  lv_obj_center(s_ui.debug_direct_weather_icon);
-  log_object_bounds(
-    "DIRECT weather probe",
-    s_ui.debug_direct_weather_icon,
-    "clear-day",
-    &weather_icon_clear_day,
-    false
-  );
-#endif
-}
-
 static void log_digital_weather_diagnostics(bool live_weather)
 {
   if (s_ui.digital_view != NULL) {
@@ -1080,34 +893,6 @@ static void layout_digital_time_group(bool show_meridiem)
   );
 }
 
-static void style_textarea(lv_obj_t *textarea)
-{
-  lv_obj_set_width(textarea, LV_PCT(100));
-  lv_obj_set_height(textarea, 60);
-  style_panel(textarea, 18, LV_OPA_90);
-  lv_obj_set_style_pad_left(textarea, 16, 0);
-  lv_obj_set_style_pad_right(textarea, 16, 0);
-  lv_obj_set_style_pad_top(textarea, 14, 0);
-  lv_obj_set_style_pad_bottom(textarea, 14, 0);
-  lv_obj_set_style_shadow_width(textarea, 0, 0);
-  lv_obj_set_style_text_color(textarea, color_text_primary(), 0);
-  /* LVGL's textarea only draws a visible cursor rect if LV_PART_CURSOR has
-   * a background -- text_color alone (the previous state here) has no
-   * visible effect except very subtly recoloring whatever character
-   * happens to already be under the cursor, which is invisible whenever
-   * the cursor is at the end of the text (i.e. while actively typing).
-   * These must be scoped to LV_STATE_FOCUSED (not bare LV_PART_CURSOR):
-   * lv_textarea starts its cursor blink animation unconditionally at
-   * construction with no focus-gating of its own, so an unscoped style
-   * would render identically in every textarea regardless of which one
-   * is actually focused. */
-  lv_obj_set_style_bg_opa(textarea, LV_OPA_COVER, LV_PART_CURSOR | LV_STATE_FOCUSED);
-  lv_obj_set_style_bg_color(textarea, color_accent(), LV_PART_CURSOR | LV_STATE_FOCUSED);
-  lv_obj_set_style_radius(textarea, 3, LV_PART_CURSOR | LV_STATE_FOCUSED);
-  lv_obj_set_style_text_color(textarea, color_panel(), LV_PART_CURSOR | LV_STATE_FOCUSED);
-  lv_obj_set_style_anim_duration(textarea, 600, LV_PART_CURSOR | LV_STATE_FOCUSED);
-}
-
 static void set_object_opa_anim_cb(void *obj, int32_t value)
 {
   if (obj == NULL) {
@@ -1150,28 +935,12 @@ static void yield_ui_bootstrap(void)
   vTaskDelay(pdMS_TO_TICKS(1));
 }
 
-static void request_setup_scan(void);
-static void hide_setup_keyboard(void);
-static void open_setup_overlay(void);
+static void open_settings(void);
 static void apply_view_night_state(bool active);
 static void apply_conditions_colors(void);
 static void update_weather_indicator_state(void);
 static void update_conditions_view(void);
 static lv_obj_t *create_weather_indicator(lv_obj_t *view);
-static void setup_restart_timer_cb(lv_timer_t *timer);
-static void setup_autopen_timer_cb(lv_timer_t *timer);
-static void setup_keyboard_event_cb(lv_event_t *event);
-static void show_setup_scan_panel(void);
-static void show_setup_credentials_panel(
-  const char *ssid,
-  const char *password,
-  bool focus_password,
-  bool show_keyboard,
-  const char *status_text
-);
-static void show_setup_location_panel(bool show_keyboard, const char *status_text);
-static void populate_setup_network_list(void);
-static void refresh_setup_settings_buttons(void);
 static void refresh_message_ui_state(
   const app_message_snapshot_t *snapshot,
   uint32_t unread_count,
@@ -1209,862 +978,40 @@ static bool clock_is_stale(void)
   return (uint64_t) (now_ms - s_ui.last_minute_advance_ms) > CLOCK_STALE_WARNING_MS;
 }
 
-static bool is_setup_overlay_visible(void)
+static bool settings_visible(void)
 {
-  return s_ui.setup_overlay != NULL && !lv_obj_has_flag(s_ui.setup_overlay, LV_OBJ_FLAG_HIDDEN);
+  return s_ui.settings_view != WAC_SETTINGS_NONE;
 }
 
-static void update_setup_scan_status(const char *text, lv_color_t color)
+void wac_ui_settings_navigate(wac_settings_view_t view)
 {
-  if (s_ui.setup_scan_status_label == NULL) {
+  s_ui.settings_view = view;
+  wac_settings_render(view);
+}
+
+wac_settings_view_t wac_ui_settings_view(void)
+{
+  return s_ui.settings_view;
+}
+
+void wac_ui_settings_close(void)
+{
+  if (!s_ui.config_snapshot.location_ready) {
+    wac_settings_start_weather(&s_ui.config_snapshot);
+    wac_ui_settings_navigate(WAC_SETTINGS_WEATHER);
     return;
   }
-
-  lv_obj_set_style_text_color(s_ui.setup_scan_status_label, color, 0);
-  set_label_text(s_ui.setup_scan_status_label, text);
+  s_ui.settings_view = WAC_SETTINGS_NONE;
+  wac_settings_close();
 }
 
-static void update_setup_status(const char *text, lv_color_t color)
+static void open_settings(void)
 {
-  if (s_ui.setup_status_label == NULL) {
-    return;
-  }
-
-  lv_obj_set_style_text_color(s_ui.setup_status_label, color, 0);
-  set_label_text(s_ui.setup_status_label, text);
-}
-
-static void update_setup_location_status(const char *text, lv_color_t color)
-{
-  if (s_ui.setup_location_status_label == NULL) {
-    return;
-  }
-
-  lv_obj_set_style_text_color(s_ui.setup_location_status_label, color, 0);
-  set_label_text(s_ui.setup_location_status_label, text);
-}
-
-static void set_setup_button_text(lv_obj_t *button, const char *text)
-{
-  if (button == NULL || text == NULL) {
-    return;
-  }
-
-  lv_obj_t *label = lv_obj_get_child(button, 0);
-  if (label == NULL) {
-    return;
-  }
-
-  set_label_text(label, text);
-}
-
-static void refresh_setup_settings_buttons(void)
-{
-  char text[48];
-
-  if (s_ui.setup_face_button != NULL) {
-    snprintf(
-      text,
-      sizeof(text),
-      "Home Screen: %s",
-      strings_equal_ignore_case(s_ui.setup_edit_config.default_clock_face, "analog") ? "Analog" : "Digital"
-    );
-    set_setup_button_text(s_ui.setup_face_button, text);
-  }
-
-  if (s_ui.setup_time_format_button != NULL) {
-    snprintf(
-      text,
-      sizeof(text),
-      "Time Format: %s",
-      strings_equal_ignore_case(s_ui.setup_edit_config.time_format, "24") ? "24-hour" : "12-hour"
-    );
-    set_setup_button_text(s_ui.setup_time_format_button, text);
-  }
-
-  if (s_ui.setup_leading_zero_button != NULL) {
-    snprintf(
-      text,
-      sizeof(text),
-      "Leading Zero: %s",
-      s_ui.setup_edit_config.leading_zero_12h ? "On" : "Off"
-    );
-    set_setup_button_text(s_ui.setup_leading_zero_button, text);
-  }
-
-  if (s_ui.setup_units_button != NULL) {
-    snprintf(
-      text,
-      sizeof(text),
-      "Units: %s",
-      strings_equal_ignore_case(s_ui.setup_edit_config.units, "metric") ? "Metric" : "Imperial"
-    );
-    set_setup_button_text(s_ui.setup_units_button, text);
-  }
-
-  if (s_ui.setup_night_shift_button != NULL) {
-    snprintf(
-      text,
-      sizeof(text),
-      "Night Shift: %s",
-      s_ui.setup_edit_config.night_shift_enabled ? "On" : "Off"
-    );
-    set_setup_button_text(s_ui.setup_night_shift_button, text);
-  }
-
-  if (s_ui.setup_message_sharing_button != NULL) {
-    snprintf(
-      text,
-      sizeof(text),
-      "House Messages: %s",
-      strings_equal_ignore_case(s_ui.setup_edit_config.message_sharing, "shared") ? "Shared" : "Single"
-    );
-    set_setup_button_text(s_ui.setup_message_sharing_button, text);
-  }
-}
-
-static const char *default_location_prompt_text(void)
-{
-  return s_ui.setup_edit_config.location_ready
-    ? "Update the weather location if you want to move this display."
-    : "Enter a city and state, like Cincinnati, Ohio. We'll fill in timezone and coordinates automatically.";
-}
-
-static void schedule_setup_restart(void)
-{
-  s_ui.setup_restart_pending = true;
-  hide_setup_keyboard();
-
-  lv_timer_t *restart_timer = lv_timer_create(setup_restart_timer_cb, SETUP_RESTART_DELAY_MS, NULL);
-  if (restart_timer != NULL) {
-    lv_timer_set_repeat_count(restart_timer, 1);
-  } else {
-    esp_restart();
-  }
-}
-
-static void hide_setup_keyboard(void)
-{
-  if (s_ui.setup_keyboard == NULL) {
-    return;
-  }
-
-  lv_keyboard_set_textarea(s_ui.setup_keyboard, NULL);
-  lv_obj_add_flag(s_ui.setup_keyboard, LV_OBJ_FLAG_HIDDEN);
-}
-
-static void show_setup_keyboard(lv_obj_t *textarea)
-{
-  if (s_ui.setup_keyboard == NULL || textarea == NULL) {
-    return;
-  }
-
-  lv_keyboard_set_textarea(s_ui.setup_keyboard, textarea);
-  lv_keyboard_set_mode(s_ui.setup_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
-  lv_obj_clear_flag(s_ui.setup_keyboard, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_move_foreground(s_ui.setup_keyboard);
-}
-
-static void setup_keyboard_event_cb(lv_event_t *event)
-{
-  lv_event_code_t code = lv_event_get_code(event);
-  if (code == LV_EVENT_CANCEL || code == LV_EVENT_READY) {
-    hide_setup_keyboard();
-  }
-}
-
-static void close_setup_overlay(void)
-{
-  if (s_ui.setup_overlay == NULL) {
-    return;
-  }
-
-  hide_setup_keyboard();
-  lv_obj_add_flag(s_ui.setup_overlay, LV_OBJ_FLAG_HIDDEN);
-}
-
-static void setup_autopen_timer_cb(lv_timer_t *timer)
-{
-  lv_timer_delete(timer);
-  open_setup_overlay();
-}
-
-static void setup_restart_timer_cb(lv_timer_t *timer)
-{
-  lv_timer_delete(timer);
-  esp_restart();
-}
-
-static void show_setup_scan_panel(void)
-{
-  if (s_ui.setup_scan_panel != NULL) {
-    lv_obj_clear_flag(s_ui.setup_scan_panel, LV_OBJ_FLAG_HIDDEN);
-  }
-  if (s_ui.setup_credentials_panel != NULL) {
-    lv_obj_add_flag(s_ui.setup_credentials_panel, LV_OBJ_FLAG_HIDDEN);
-  }
-  if (s_ui.setup_location_panel != NULL) {
-    lv_obj_add_flag(s_ui.setup_location_panel, LV_OBJ_FLAG_HIDDEN);
-  }
-
-  if (s_ui.setup_scan_nav_button != NULL) {
-    set_setup_button_text(s_ui.setup_scan_nav_button, s_ui.setup_edit_config.wifi_ready ? "Back" : "Cancel");
-  }
-
-  hide_setup_keyboard();
-}
-
-static void show_setup_credentials_panel(
-  const char *ssid,
-  const char *password,
-  bool focus_password,
-  bool show_keyboard,
-  const char *status_text
-)
-{
-  if (s_ui.setup_credentials_panel == NULL
-      || s_ui.setup_ssid_textarea == NULL
-      || s_ui.setup_password_textarea == NULL) {
-    return;
-  }
-
-  lv_textarea_set_text(s_ui.setup_ssid_textarea, ssid != NULL ? ssid : "");
-  lv_textarea_set_text(s_ui.setup_password_textarea, password != NULL ? password : "");
-  update_setup_status(status_text != NULL ? status_text : "", color_text_muted());
-
-  if (s_ui.setup_scan_panel != NULL) {
-    lv_obj_add_flag(s_ui.setup_scan_panel, LV_OBJ_FLAG_HIDDEN);
-  }
-  if (s_ui.setup_location_panel != NULL) {
-    lv_obj_add_flag(s_ui.setup_location_panel, LV_OBJ_FLAG_HIDDEN);
-  }
-  lv_obj_clear_flag(s_ui.setup_credentials_panel, LV_OBJ_FLAG_HIDDEN);
-
-  if (show_keyboard) {
-    show_setup_keyboard(focus_password ? s_ui.setup_password_textarea : s_ui.setup_ssid_textarea);
-  } else {
-    hide_setup_keyboard();
-  }
-}
-
-static void show_setup_location_panel(bool show_keyboard, const char *status_text)
-{
-  if (s_ui.setup_location_panel == NULL || s_ui.setup_location_textarea == NULL) {
-    return;
-  }
-
-  if (s_ui.setup_scan_panel != NULL) {
-    lv_obj_add_flag(s_ui.setup_scan_panel, LV_OBJ_FLAG_HIDDEN);
-  }
-  if (s_ui.setup_credentials_panel != NULL) {
-    lv_obj_add_flag(s_ui.setup_credentials_panel, LV_OBJ_FLAG_HIDDEN);
-  }
-
-  if (s_ui.setup_edit_config.location_ready) {
-    lv_textarea_set_text(s_ui.setup_location_textarea, s_ui.setup_edit_config.location);
-  } else if (lv_textarea_get_text(s_ui.setup_location_textarea)[0] == '\0') {
-    lv_textarea_set_text(s_ui.setup_location_textarea, "");
-  }
-
-  update_setup_location_status(status_text != NULL ? status_text : "", color_text_muted());
-  refresh_setup_settings_buttons();
-  lv_obj_clear_flag(s_ui.setup_location_panel, LV_OBJ_FLAG_HIDDEN);
-
-  if (show_keyboard) {
-    show_setup_keyboard(s_ui.setup_location_textarea);
-  } else {
-    hide_setup_keyboard();
-  }
-}
-
-static void setup_textarea_focus_cb(lv_event_t *event)
-{
-  lv_obj_t *target = lv_event_get_target_obj(event);
-  if (target == NULL) {
-    return;
-  }
-
-  show_setup_keyboard(target);
-}
-
-static void setup_network_select_event_cb(lv_event_t *event)
-{
-  size_t index = (size_t) (uintptr_t) lv_event_get_user_data(event);
-  if (index >= s_ui.scan_result_count) {
-    return;
-  }
-
-  const connectivity_scan_result_t *network = &s_ui.scan_results[index];
-  bool selected_existing_network = strcmp(network->ssid, s_ui.setup_edit_config.wifi_ssid) == 0;
-  const char *saved_password = selected_existing_network ? s_ui.setup_edit_config.wifi_password : "";
-
-  show_setup_credentials_panel(
-    network->ssid,
-    saved_password,
-    true,
-    network->requires_password,
-    network->requires_password
-      ? "Network selected. Enter the password, then save to restart."
-      : "Open network selected. The password can stay blank."
-  );
-}
-
-static void show_setup_location_editor(bool show_keyboard)
-{
-  show_setup_location_panel(show_keyboard, default_location_prompt_text());
-}
-
-static void populate_setup_network_list(void)
-{
-  if (s_ui.setup_network_list == NULL) {
-    return;
-  }
-
-  lv_obj_clean(s_ui.setup_network_list);
-
-  if (s_ui.setup_scan_in_progress) {
-    lv_obj_t *label = create_label(
-      s_ui.setup_network_list,
-      &lv_font_montserrat_18,
-      color_text_muted(),
-      LV_TEXT_ALIGN_CENTER,
-      "Scanning nearby networks..."
-    );
-    lv_obj_set_width(label, LV_PCT(100));
-    return;
-  }
-
-  if (s_ui.scan_result_count == 0) {
-    lv_obj_t *label = create_label(
-      s_ui.setup_network_list,
-      &lv_font_montserrat_18,
-      color_text_muted(),
-      LV_TEXT_ALIGN_CENTER,
-      "No nearby networks found.\nRefresh the scan or use Manual Network."
-    );
-    lv_obj_set_width(label, LV_PCT(100));
-    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-    return;
-  }
-
-  for (size_t index = 0; index < s_ui.scan_result_count; ++index) {
-    const connectivity_scan_result_t *network = &s_ui.scan_results[index];
-
-    lv_obj_t *button = lv_button_create(s_ui.setup_network_list);
-    lv_obj_set_width(button, LV_PCT(100));
-    lv_obj_set_height(button, 58);
-    style_panel(button, 18, LV_OPA_80);
-    lv_obj_set_style_pad_left(button, 16, 0);
-    lv_obj_set_style_pad_right(button, 16, 0);
-    lv_obj_set_style_pad_top(button, 0, 0);
-    lv_obj_set_style_pad_bottom(button, 0, 0);
-    lv_obj_set_style_shadow_width(button, 0, 0);
-    lv_obj_set_layout(button, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(button, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(button, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_add_event_cb(button, setup_network_select_event_cb, LV_EVENT_CLICKED, (void *) (uintptr_t) index);
-
-    lv_obj_t *ssid_label = create_label(
-      button,
-      &lv_font_montserrat_18,
-      color_text_primary(),
-      LV_TEXT_ALIGN_LEFT,
-      network->ssid
-    );
-    lv_obj_set_flex_grow(ssid_label, 1);
-    lv_obj_set_width(ssid_label, LV_PCT(70));
-    lv_label_set_long_mode(ssid_label, LV_LABEL_LONG_DOT);
-
-    char meta_text[32];
-    snprintf(
-      meta_text,
-      sizeof(meta_text),
-      "%s %ddBm",
-      network->requires_password ? "Secured" : "Open",
-      network->rssi
-    );
-    create_label(button, LV_FONT_DEFAULT, color_text_muted(), LV_TEXT_ALIGN_RIGHT, meta_text);
-  }
-}
-
-static void setup_scan_task(void *arg)
-{
-  (void) arg;
-
-  connectivity_scan_result_t results[SETUP_SCAN_MAX_RESULTS] = {0};
-  size_t result_count = 0;
-  esp_err_t err = connectivity_scan_networks(results, SETUP_SCAN_MAX_RESULTS, &result_count);
-
-  if (bsp_display_lock(UI_ASYNC_LOCK_TIMEOUT_MS) == ESP_OK) {
-    s_ui.setup_scan_in_progress = false;
-
-    if (err == ESP_OK) {
-      memset(s_ui.scan_results, 0, sizeof(s_ui.scan_results));
-      if (result_count > 0) {
-        memcpy(s_ui.scan_results, results, result_count * sizeof(results[0]));
-      }
-      s_ui.scan_result_count = result_count;
-      populate_setup_network_list();
-
-      if (result_count == 0) {
-        update_setup_scan_status("No nearby networks found yet.", color_text_muted());
-      } else {
-        update_setup_scan_status("Choose your Wi-Fi network, or use Manual Network.", color_text_muted());
-      }
-    } else {
-      char error_text[96];
-      s_ui.scan_result_count = 0;
-      populate_setup_network_list();
-      snprintf(error_text, sizeof(error_text), "Wi-Fi scan failed: %s", esp_err_to_name(err));
-      update_setup_scan_status(error_text, color_warning());
-    }
-
-    bsp_display_unlock();
-  }
-
-  vTaskDelete(NULL);
-}
-
-static void request_setup_scan(void)
-{
-  if (s_ui.setup_scan_in_progress) {
-    return;
-  }
-
-  s_ui.setup_scan_in_progress = true;
-  s_ui.scan_result_count = 0;
-  memset(s_ui.scan_results, 0, sizeof(s_ui.scan_results));
-  update_setup_scan_status("Scanning nearby networks...", color_text_muted());
-  populate_setup_network_list();
-
-  BaseType_t task_created = xTaskCreate(
-    setup_scan_task,
-    "wifi_scan",
-    SETUP_SCAN_TASK_STACK_SIZE,
-    NULL,
-    SETUP_SCAN_TASK_PRIORITY,
-    NULL
-  );
-  if (task_created != pdPASS) {
-    s_ui.setup_scan_in_progress = false;
-    update_setup_scan_status("Could not start the Wi-Fi scan task.", color_warning());
-    populate_setup_network_list();
-  }
-}
-
-static void setup_location_lookup_task(void *arg)
-{
-  setup_location_lookup_request_t *request = (setup_location_lookup_request_t *) arg;
-  char query_copy[DEVICE_CONFIG_STR_LEN];
-  device_config_t pending_config = {0};
-  if (request != NULL) {
-    snprintf(query_copy, sizeof(query_copy), "%s", request->query);
-    pending_config = request->pending_config;
-    free(request);
-  } else {
-    query_copy[0] = '\0';
-  }
-
-  location_lookup_result_t result = {0};
-  esp_err_t lookup_err = location_lookup_resolve(query_copy, &result);
-
-  if (bsp_display_lock(UI_ASYNC_LOCK_TIMEOUT_MS) == ESP_OK) {
-    s_ui.setup_location_lookup_in_progress = false;
-
-    if (lookup_err == ESP_OK) {
-      device_config_t updated = pending_config;
-      snprintf(
-        updated.location,
-        sizeof(updated.location),
-        "%s",
-        result.location[0] != '\0' ? result.location : query_copy
-      );
-      snprintf(updated.timezone, sizeof(updated.timezone), "%s", result.timezone);
-      snprintf(updated.latitude, sizeof(updated.latitude), "%s", result.latitude);
-      snprintf(updated.longitude, sizeof(updated.longitude), "%s", result.longitude);
-      updated.location_ready = true;
-
-      esp_err_t save_err = device_config_save(&updated);
-      if (save_err == ESP_OK) {
-        s_ui.config_snapshot = updated;
-        s_ui.setup_edit_config = updated;
-        update_setup_location_status("Location saved. Restarting for local weather...", color_success());
-        schedule_setup_restart();
-      } else {
-        char error_text[80];
-        snprintf(error_text, sizeof(error_text), "Save failed: %s", esp_err_to_name(save_err));
-        update_setup_location_status(error_text, color_warning());
-      }
-    } else if (lookup_err == ESP_ERR_NOT_FOUND) {
-      update_setup_location_status("Location not found. Try City, State.", color_warning());
-      show_setup_keyboard(s_ui.setup_location_textarea);
-    } else {
-      char error_text[96];
-      snprintf(error_text, sizeof(error_text), "Lookup failed: %s", esp_err_to_name(lookup_err));
-      update_setup_location_status(error_text, color_warning());
-      show_setup_keyboard(s_ui.setup_location_textarea);
-    }
-
-    bsp_display_unlock();
-  }
-
-  vTaskDelete(NULL);
-}
-
-static void open_setup_overlay(void)
-{
-  if (s_ui.setup_overlay == NULL
-      || s_ui.setup_ssid_textarea == NULL
-      || s_ui.setup_password_textarea == NULL
-      || s_ui.setup_location_textarea == NULL
-      || s_ui.setup_room_name_textarea == NULL
-      || s_ui.setup_device_id_textarea == NULL) {
-    return;
-  }
-
-  s_ui.setup_edit_config = s_ui.config_snapshot;
-  lv_textarea_set_text(s_ui.setup_ssid_textarea, s_ui.setup_edit_config.wifi_ssid);
-  lv_textarea_set_text(s_ui.setup_password_textarea, s_ui.setup_edit_config.wifi_password);
-  lv_textarea_set_text(s_ui.setup_location_textarea, s_ui.setup_edit_config.location);
-  lv_textarea_set_text(s_ui.setup_room_name_textarea, s_ui.setup_edit_config.room_name);
-  lv_textarea_set_text(s_ui.setup_device_id_textarea, s_ui.setup_edit_config.device_id);
-  s_ui.setup_restart_pending = false;
-  lv_obj_clear_flag(s_ui.setup_overlay, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_move_foreground(s_ui.setup_overlay);
-
-  if (!s_ui.config_snapshot.wifi_ready) {
-    update_setup_status("This first pass configures Wi-Fi only.", color_text_muted());
-    update_setup_scan_status("Scanning nearby networks...", color_text_muted());
-    show_setup_scan_panel();
-    request_setup_scan();
-    return;
-  }
-
-  show_setup_location_editor(!s_ui.config_snapshot.location_ready);
-}
-
-static void setup_cancel_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  if (s_ui.setup_restart_pending || s_ui.setup_location_lookup_in_progress) {
-    return;
-  }
-
-  close_setup_overlay();
-}
-
-static void setup_prompt_event_cb(lv_event_t *event)
-{
-  (void) event;
-  open_setup_overlay();
-}
-
-static void setup_face_toggle_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  snprintf(
-    s_ui.setup_edit_config.default_clock_face,
-    sizeof(s_ui.setup_edit_config.default_clock_face),
-    "%s",
-    strings_equal_ignore_case(s_ui.setup_edit_config.default_clock_face, "analog") ? "digital" : "analog"
-  );
-  refresh_setup_settings_buttons();
-}
-
-static void setup_time_format_toggle_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  snprintf(
-    s_ui.setup_edit_config.time_format,
-    sizeof(s_ui.setup_edit_config.time_format),
-    "%s",
-    strings_equal_ignore_case(s_ui.setup_edit_config.time_format, "24") ? "12" : "24"
-  );
-  refresh_setup_settings_buttons();
-}
-
-static void setup_leading_zero_toggle_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  s_ui.setup_edit_config.leading_zero_12h = !s_ui.setup_edit_config.leading_zero_12h;
-  refresh_setup_settings_buttons();
-}
-
-static void setup_units_toggle_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  snprintf(
-    s_ui.setup_edit_config.units,
-    sizeof(s_ui.setup_edit_config.units),
-    "%s",
-    strings_equal_ignore_case(s_ui.setup_edit_config.units, "metric") ? "imperial" : "metric"
-  );
-  refresh_setup_settings_buttons();
-}
-
-static void setup_night_shift_toggle_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  s_ui.setup_edit_config.night_shift_enabled = !s_ui.setup_edit_config.night_shift_enabled;
-  refresh_setup_settings_buttons();
-}
-
-static void setup_message_sharing_toggle_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  snprintf(
-    s_ui.setup_edit_config.message_sharing,
-    sizeof(s_ui.setup_edit_config.message_sharing),
-    "%s",
-    strings_equal_ignore_case(s_ui.setup_edit_config.message_sharing, "shared") ? "single" : "shared"
-  );
-  refresh_setup_settings_buttons();
-}
-
-static void setup_manual_network_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  show_setup_credentials_panel(
-    s_ui.setup_edit_config.wifi_ssid,
-    s_ui.setup_edit_config.wifi_password,
-    false,
-    true,
-    "Enter the network name, then add the password and save to restart."
-  );
-}
-
-static void setup_back_event_cb(lv_event_t *event)
-{
-  (void) event;
-  show_setup_scan_panel();
-}
-
-static void setup_scan_nav_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  if (s_ui.config_snapshot.wifi_ready) {
-    show_setup_location_editor(false);
-    return;
-  }
-
-  setup_cancel_event_cb(event);
-}
-
-static void setup_wifi_settings_event_cb(lv_event_t *event)
-{
-  (void) event;
-  show_setup_scan_panel();
-  request_setup_scan();
-}
-
-static void setup_refresh_scan_event_cb(lv_event_t *event)
-{
-  (void) event;
-  request_setup_scan();
-}
-
-static void setup_save_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  if (s_ui.setup_restart_pending || s_ui.setup_ssid_textarea == NULL || s_ui.setup_password_textarea == NULL) {
-    return;
-  }
-
-  const char *ssid = lv_textarea_get_text(s_ui.setup_ssid_textarea);
-  const char *password = lv_textarea_get_text(s_ui.setup_password_textarea);
-  if (ssid == NULL || ssid[0] == '\0') {
-    update_setup_status("Enter a Wi-Fi network name before saving.", color_warning());
-    show_setup_keyboard(s_ui.setup_ssid_textarea);
-    return;
-  }
-
-  device_config_t updated = s_ui.setup_edit_config;
-  snprintf(updated.wifi_ssid, sizeof(updated.wifi_ssid), "%s", ssid);
-  snprintf(updated.wifi_password, sizeof(updated.wifi_password), "%s", password != NULL ? password : "");
-
-  esp_err_t err = device_config_save(&updated);
-  if (err != ESP_OK) {
-    char error_text[80];
-    snprintf(error_text, sizeof(error_text), "Save failed: %s", esp_err_to_name(err));
-    update_setup_status(error_text, color_warning());
-    return;
-  }
-
-  s_ui.config_snapshot = updated;
-  s_ui.setup_edit_config = updated;
-  update_setup_status("Saved. Restarting to join Wi-Fi...", color_success());
-  schedule_setup_restart();
-}
-
-static void setup_location_save_event_cb(lv_event_t *event)
-{
-  (void) event;
-
-  if (s_ui.setup_restart_pending
-      || s_ui.setup_location_lookup_in_progress
-      || s_ui.setup_location_textarea == NULL
-      || s_ui.setup_room_name_textarea == NULL
-      || s_ui.setup_device_id_textarea == NULL) {
-    return;
-  }
-
-  if (!connectivity_is_wifi_connected()) {
-    const char *offline_query = lv_textarea_get_text(s_ui.setup_location_textarea);
-    bool location_changed_while_offline = offline_query != NULL
-      && offline_query[0] != '\0'
-      && strcmp(offline_query, s_ui.config_snapshot.location) != 0;
-    if (location_changed_while_offline || !s_ui.config_snapshot.location_ready) {
-      update_setup_location_status("Wait for Wi-Fi to connect before saving a new location.", color_warning());
-      return;
-    }
-  }
-
-  const char *query = lv_textarea_get_text(s_ui.setup_location_textarea);
-  const char *room_name = lv_textarea_get_text(s_ui.setup_room_name_textarea);
-  const char *device_id = lv_textarea_get_text(s_ui.setup_device_id_textarea);
-  device_config_t pending_config = s_ui.setup_edit_config;
-
-  if (room_name == NULL || room_name[0] == '\0') {
-    update_setup_location_status("Enter a room name before saving.", color_warning());
-    show_setup_keyboard(s_ui.setup_room_name_textarea);
-    return;
-  }
-
-  if (device_id == NULL || device_id[0] == '\0') {
-    update_setup_location_status("Enter a device ID before saving.", color_warning());
-    show_setup_keyboard(s_ui.setup_device_id_textarea);
-    return;
-  }
-
-  if (strings_equal_ignore_case(pending_config.message_sharing, "shared")
-      && strings_equal_ignore_case(device_id, "clock-esp32-p4")) {
-    update_setup_location_status("Set a unique device ID before enabling shared mode.", color_warning());
-    show_setup_keyboard(s_ui.setup_device_id_textarea);
-    return;
-  }
-
-  snprintf(pending_config.room_name, sizeof(pending_config.room_name), "%s", room_name);
-  snprintf(pending_config.device_id, sizeof(pending_config.device_id), "%s", device_id);
-
-  if (query != NULL && query[0] != '\0') {
-    snprintf(pending_config.location, sizeof(pending_config.location), "%s", query);
-  }
-
-  bool location_changed = query != NULL
-    && query[0] != '\0'
-    && (strcmp(query, s_ui.config_snapshot.location) != 0 || !s_ui.config_snapshot.location_ready);
-
-  if (!location_changed) {
-    if ((query == NULL || query[0] == '\0') && !s_ui.config_snapshot.location_ready) {
-      update_setup_location_status("Enter a City, State before saving.", color_warning());
-      show_setup_keyboard(s_ui.setup_location_textarea);
-      return;
-    }
-
-    esp_err_t save_err = device_config_save(&pending_config);
-    if (save_err != ESP_OK) {
-      char error_text[80];
-      snprintf(error_text, sizeof(error_text), "Save failed: %s", esp_err_to_name(save_err));
-      update_setup_location_status(error_text, color_warning());
-      return;
-    }
-
-    s_ui.config_snapshot = pending_config;
-    s_ui.setup_edit_config = pending_config;
-    update_setup_location_status("Settings saved. Restarting...", color_success());
-    schedule_setup_restart();
-    return;
-  }
-
-  if (query == NULL || query[0] == '\0') {
-    update_setup_location_status("Enter a City, State before saving.", color_warning());
-    show_setup_keyboard(s_ui.setup_location_textarea);
-    return;
-  }
-
-  setup_location_lookup_request_t *request = calloc(1, sizeof(*request));
-  if (request == NULL) {
-    update_setup_location_status("Could not start the location lookup.", color_warning());
-    return;
-  }
-
-  request->pending_config = pending_config;
-  snprintf(request->query, sizeof(request->query), "%s", query);
-
-  s_ui.setup_location_lookup_in_progress = true;
-  hide_setup_keyboard();
-  update_setup_location_status("Looking up your location...", color_text_muted());
-
-  BaseType_t task_created = xTaskCreate(
-    setup_location_lookup_task,
-    "loc_lookup",
-    SETUP_LOCATION_TASK_STACK_SIZE,
-    request,
-    SETUP_LOCATION_TASK_PRIORITY,
-    NULL
-  );
-  if (task_created != pdPASS) {
-    s_ui.setup_location_lookup_in_progress = false;
-    free(request);
-    update_setup_location_status("Could not start the location lookup.", color_warning());
-  }
-}
-
-static lv_obj_t *create_setup_button(
-  lv_obj_t *parent,
-  const char *text,
-  lv_color_t bg_color,
-  lv_color_t border_color,
-  lv_event_cb_t event_cb
-)
-{
-  lv_obj_t *button = lv_button_create(parent);
-  lv_obj_set_size(button, 192, 56);
-  lv_obj_set_style_radius(button, 18, 0);
-  lv_obj_set_style_bg_color(button, bg_color, 0);
-  lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_color(button, border_color, 0);
-  lv_obj_set_style_border_width(button, 1, 0);
-  lv_obj_set_style_shadow_width(button, 0, 0);
-  lv_obj_add_event_cb(button, event_cb, LV_EVENT_CLICKED, NULL);
-
-  lv_obj_t *label = create_label(button, &lv_font_montserrat_18, color_text_primary(), LV_TEXT_ALIGN_CENTER, text);
-  lv_obj_center(label);
-  return button;
-}
-
-static void update_setup_prompt(const device_config_t *config)
-{
-  if (s_ui.setup_prompt_button == NULL || s_ui.setup_settings_button == NULL || config == NULL) {
-    return;
-  }
-
-  if (!config->wifi_ready) {
-    set_setup_button_text(s_ui.setup_prompt_button, "Set Up Wi-Fi");
-    lv_obj_clear_flag(s_ui.setup_prompt_button, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_ui.setup_settings_button, LV_OBJ_FLAG_HIDDEN);
-    return;
-  }
-
-  if (!config->location_ready) {
-    set_setup_button_text(s_ui.setup_prompt_button, "Set Location");
-    lv_obj_clear_flag(s_ui.setup_prompt_button, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_ui.setup_settings_button, LV_OBJ_FLAG_HIDDEN);
-    return;
-  }
-
-  lv_obj_add_flag(s_ui.setup_prompt_button, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_add_flag(s_ui.setup_settings_button, LV_OBJ_FLAG_HIDDEN);
+  if (settings_visible()) return;
+  wac_settings_begin(s_ui.stage, &s_ui.config_snapshot);
+  wac_ui_settings_navigate(!s_ui.config_snapshot.location_ready
+    ? (s_ui.config_snapshot.wifi_ready ? WAC_SETTINGS_WEATHER : WAC_SETTINGS_DEVICE_SETUP)
+    : WAC_SETTINGS_ENTRY);
 }
 
 static void format_high_low(char *out, size_t out_size, int high, int low)
@@ -2072,66 +1019,23 @@ static void format_high_low(char *out, size_t out_size, int high, int low)
   snprintf(out, out_size, "H:%d°  L:%d°", high, low);
 }
 
-static int month_index_from_name(const char *month)
-{
-  for (int i = 0; i < 12; ++i) {
-    if (strncmp(month, MONTH_NAMES[i], 3) == 0) {
-      return i;
-    }
-  }
-
-  return 0;
-}
-
-static time_t parse_compile_time_fallback(const char *timezone)
-{
-  connectivity_apply_timezone(timezone);
-
-  struct tm tm_value = {0};
-  char month[4] = {0};
-  int day = 1;
-  int year = 2024;
-  int hour = 12;
-  int minute = 0;
-  int second = 0;
-
-  (void) sscanf(__DATE__, "%3s %d %d", month, &day, &year);
-  (void) sscanf(__TIME__, "%d:%d:%d", &hour, &minute, &second);
-
-  tm_value.tm_year = year - 1900;
-  tm_value.tm_mon = month_index_from_name(month);
-  tm_value.tm_mday = day;
-  tm_value.tm_hour = hour;
-  tm_value.tm_min = minute;
-  tm_value.tm_sec = second;
-  tm_value.tm_isdst = -1;
-
-  return mktime(&tm_value);
-}
-
 static time_t resolve_display_time(const device_config_t *config, uint32_t uptime_seconds)
 {
+  (void) config;
+  (void) uptime_seconds;
   time_t now = time(NULL);
-  if (now >= VALID_CLOCK_EPOCH) {
-    s_ui.clock_is_estimated = false;
-    return now;
-  }
-
-  if (s_ui.fallback_epoch <= 0) {
-    s_ui.fallback_epoch = parse_compile_time_fallback(config->timezone);
-  }
-
-  s_ui.clock_is_estimated = true;
-  return s_ui.fallback_epoch + (time_t) uptime_seconds;
+  s_ui.clock_is_estimated = now < VALID_CLOCK_EPOCH;
+  return s_ui.clock_is_estimated ? 0 : now;
 }
 
 static void update_pending_weather_labels(bool location_ready)
 {
-  const char *summary = location_ready ? "Loading Weather" : "Set Location";
-  const char *detail = location_ready ? "Please wait" : "Save City/State";
-  const char *forecast_summary = location_ready ? "Updating..." : "Finish setup";
+  (void) location_ready;
+  const char *summary = "Loading Weather";
+  const char *detail = "Please wait";
+  const char *forecast_summary = "Updating...";
   const char *pending_temp = "--";
-  const char *pending_range = location_ready ? "Please wait" : "Local weather off";
+  const char *pending_range = "Please wait";
   const lv_image_dsc_t *fallback_icon = weather_icon_image_for_name(weather_icon_fallback_name());
 
   if (s_ui.analog_summary_label != NULL) {
@@ -2582,7 +1486,7 @@ static int weather_row_index(app_view_mode_t view)
  * Swipe up from home is reserved for a future view below home. */
 static void handle_swipe(int delta_x, int delta_y)
 {
-  if (is_setup_overlay_visible()) {
+  if (settings_visible()) {
     return;
   }
 
@@ -2619,7 +1523,7 @@ static void handle_swipe(int delta_x, int delta_y)
 
   if (abs_y >= SWIPE_THRESHOLD_PX && (abs_y * 10) > (abs_x * SWIPE_AXIS_RATIO_X10)) {
     if (is_home && delta_y > 0) {
-      open_setup_overlay();
+      open_settings();
     }
   }
 }
@@ -3504,25 +2408,7 @@ static void build_status_stack(lv_obj_t *parent)
   lv_obj_set_style_text_letter_space(s_ui.weather_status_label, 1, 0);
   lv_obj_add_flag(s_ui.weather_status_label, LV_OBJ_FLAG_HIDDEN);
 
-  s_ui.setup_prompt_button = create_setup_button(
-    s_ui.status_stack,
-    "Set Up Wi-Fi",
-    lv_color_hex(0x245289),
-    color_accent(),
-    setup_prompt_event_cb
-  );
-  lv_obj_set_width(s_ui.setup_prompt_button, 260);
-  lv_obj_add_flag(s_ui.setup_prompt_button, LV_OBJ_FLAG_HIDDEN);
 
-  s_ui.setup_settings_button = create_setup_button(
-    s_ui.status_stack,
-    "Settings",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_prompt_event_cb
-  );
-  lv_obj_set_width(s_ui.setup_settings_button, 200);
-  lv_obj_add_flag(s_ui.setup_settings_button, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void build_gesture_layer(lv_obj_t *parent)
@@ -3546,406 +2432,6 @@ static void build_night_overlay(lv_obj_t *parent)
   lv_obj_set_style_bg_opa(s_ui.night_overlay, LV_OPA_30, 0);
   lv_obj_set_style_border_width(s_ui.night_overlay, 0, 0);
   lv_obj_add_flag(s_ui.night_overlay, LV_OBJ_FLAG_HIDDEN);
-}
-
-/* Settings sits above home: swipe up returns, like the Pi. Only presses on
- * the overlay's own background reach this -- its panels, list, keyboard and
- * buttons don't bubble events up -- so scrolling and typing stay theirs. */
-static void setup_overlay_gesture_cb(lv_event_t *event)
-{
-  lv_event_code_t code = lv_event_get_code(event);
-  lv_indev_t *indev = lv_indev_active();
-  if (indev == NULL || lv_event_get_target(event) != s_ui.setup_overlay) {
-    return;
-  }
-
-  lv_point_t point;
-  lv_indev_get_point(indev, &point);
-  if (code == LV_EVENT_PRESSED) {
-    s_ui.setup_gesture_tracking = true;
-    s_ui.setup_gesture_start = point;
-    return;
-  }
-
-  if ((code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) && s_ui.setup_gesture_tracking) {
-    s_ui.setup_gesture_tracking = false;
-    int delta_x = point.x - s_ui.setup_gesture_start.x;
-    int delta_y = point.y - s_ui.setup_gesture_start.y;
-    if (-delta_y >= SWIPE_THRESHOLD_PX && (LV_ABS(delta_y) * 10) > (LV_ABS(delta_x) * SWIPE_AXIS_RATIO_X10)) {
-      setup_cancel_event_cb(event);
-    }
-  }
-}
-
-static void build_setup_overlay(lv_obj_t *parent)
-{
-  s_ui.setup_overlay = lv_obj_create(parent);
-  lv_obj_set_size(s_ui.setup_overlay, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(s_ui.setup_overlay, lv_color_hex(0x02060d), 0);
-  lv_obj_set_style_bg_opa(s_ui.setup_overlay, LV_OPA_80, 0);
-  lv_obj_set_style_border_width(s_ui.setup_overlay, 0, 0);
-  lv_obj_set_style_pad_all(s_ui.setup_overlay, 0, 0);
-  lv_obj_set_scrollbar_mode(s_ui.setup_overlay, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_add_flag(s_ui.setup_overlay, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_flag(s_ui.setup_overlay, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_add_event_cb(s_ui.setup_overlay, setup_overlay_gesture_cb, LV_EVENT_PRESSED, NULL);
-  lv_obj_add_event_cb(s_ui.setup_overlay, setup_overlay_gesture_cb, LV_EVENT_RELEASED, NULL);
-  lv_obj_add_event_cb(s_ui.setup_overlay, setup_overlay_gesture_cb, LV_EVENT_PRESS_LOST, NULL);
-
-  lv_obj_t *title = create_label(
-    s_ui.setup_overlay,
-    &lv_font_montserrat_24,
-    color_text_primary(),
-    LV_TEXT_ALIGN_CENTER,
-    "Device Setup"
-  );
-  lv_obj_set_width(title, LV_PCT(100));
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 28);
-
-  lv_obj_t *body = create_label(
-    s_ui.setup_overlay,
-    LV_FONT_DEFAULT,
-    color_text_muted(),
-    LV_TEXT_ALIGN_CENTER,
-    "Connect Wi-Fi, then choose the weather location you want this display to use."
-  );
-  lv_obj_set_width(body, LV_PCT(100));
-  lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
-  lv_obj_align_to(body, title, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
-
-  s_ui.setup_scan_panel = lv_obj_create(s_ui.setup_overlay);
-  lv_obj_set_size(s_ui.setup_scan_panel, 660, 460);
-  lv_obj_align(s_ui.setup_scan_panel, LV_ALIGN_TOP_MID, 0, 100);
-  style_panel(s_ui.setup_scan_panel, 32, LV_OPA_COVER);
-  lv_obj_set_style_pad_all(s_ui.setup_scan_panel, 24, 0);
-  lv_obj_set_style_pad_row(s_ui.setup_scan_panel, 14, 0);
-  lv_obj_set_layout(s_ui.setup_scan_panel, LV_LAYOUT_FLEX);
-  lv_obj_set_flex_flow(s_ui.setup_scan_panel, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_scrollbar_mode(s_ui.setup_scan_panel, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_set_style_shadow_width(s_ui.setup_scan_panel, 0, 0);
-
-  lv_obj_t *scan_title = create_label(
-    s_ui.setup_scan_panel,
-    &lv_font_montserrat_18,
-    color_text_primary(),
-    LV_TEXT_ALIGN_CENTER,
-    "Nearby Networks"
-  );
-  lv_obj_set_width(scan_title, LV_PCT(100));
-
-  s_ui.setup_scan_status_label = create_label(
-    s_ui.setup_scan_panel,
-    LV_FONT_DEFAULT,
-    color_text_muted(),
-    LV_TEXT_ALIGN_CENTER,
-    "Scanning nearby networks..."
-  );
-  lv_obj_set_width(s_ui.setup_scan_status_label, LV_PCT(100));
-  lv_label_set_long_mode(s_ui.setup_scan_status_label, LV_LABEL_LONG_WRAP);
-
-  s_ui.setup_network_list = lv_obj_create(s_ui.setup_scan_panel);
-  lv_obj_set_width(s_ui.setup_network_list, LV_PCT(100));
-  lv_obj_set_height(s_ui.setup_network_list, SETUP_NETWORK_LIST_HEIGHT);
-  style_panel(s_ui.setup_network_list, 24, LV_OPA_70);
-  lv_obj_set_style_pad_all(s_ui.setup_network_list, 12, 0);
-  lv_obj_set_style_pad_row(s_ui.setup_network_list, 10, 0);
-  lv_obj_set_layout(s_ui.setup_network_list, LV_LAYOUT_FLEX);
-  lv_obj_set_flex_flow(s_ui.setup_network_list, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_scrollbar_mode(s_ui.setup_network_list, LV_SCROLLBAR_MODE_AUTO);
-  lv_obj_set_style_shadow_width(s_ui.setup_network_list, 0, 0);
-
-  lv_obj_t *scan_button_row = lv_obj_create(s_ui.setup_scan_panel);
-  lv_obj_set_width(scan_button_row, LV_PCT(100));
-  lv_obj_set_height(scan_button_row, LV_SIZE_CONTENT);
-  lv_obj_set_style_bg_opa(scan_button_row, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(scan_button_row, 0, 0);
-  lv_obj_set_style_pad_all(scan_button_row, 0, 0);
-  lv_obj_set_style_pad_column(scan_button_row, 12, 0);
-  lv_obj_set_layout(scan_button_row, LV_LAYOUT_FLEX);
-  lv_obj_set_flex_flow(scan_button_row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(
-    scan_button_row,
-    LV_FLEX_ALIGN_SPACE_BETWEEN,
-    LV_FLEX_ALIGN_CENTER,
-    LV_FLEX_ALIGN_CENTER
-  );
-
-  create_setup_button(
-    scan_button_row,
-    "Refresh",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_refresh_scan_event_cb
-  );
-  create_setup_button(
-    scan_button_row,
-    "Manual Network",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_manual_network_event_cb
-  );
-  s_ui.setup_scan_nav_button = create_setup_button(
-    scan_button_row,
-    "Cancel",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_scan_nav_event_cb
-  );
-
-  s_ui.setup_credentials_panel = lv_obj_create(s_ui.setup_overlay);
-  lv_obj_set_size(s_ui.setup_credentials_panel, 620, LV_SIZE_CONTENT);
-  lv_obj_align(s_ui.setup_credentials_panel, LV_ALIGN_TOP_MID, 0, 116);
-  style_panel(s_ui.setup_credentials_panel, 32, LV_OPA_COVER);
-  lv_obj_set_style_pad_all(s_ui.setup_credentials_panel, 24, 0);
-  lv_obj_set_style_pad_row(s_ui.setup_credentials_panel, 14, 0);
-  lv_obj_set_layout(s_ui.setup_credentials_panel, LV_LAYOUT_FLEX);
-  lv_obj_set_flex_flow(s_ui.setup_credentials_panel, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_scrollbar_mode(s_ui.setup_credentials_panel, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_set_style_shadow_width(s_ui.setup_credentials_panel, 0, 0);
-  lv_obj_add_flag(s_ui.setup_credentials_panel, LV_OBJ_FLAG_HIDDEN);
-
-  lv_obj_t *credentials_title = create_label(
-    s_ui.setup_credentials_panel,
-    &lv_font_montserrat_18,
-    color_text_primary(),
-    LV_TEXT_ALIGN_CENTER,
-    "Network Details"
-  );
-  lv_obj_set_width(credentials_title, LV_PCT(100));
-
-  s_ui.setup_ssid_textarea = lv_textarea_create(s_ui.setup_credentials_panel);
-  style_textarea(s_ui.setup_ssid_textarea);
-  lv_textarea_set_one_line(s_ui.setup_ssid_textarea, true);
-  lv_textarea_set_max_length(s_ui.setup_ssid_textarea, DEVICE_CONFIG_WIFI_LEN - 1);
-  lv_textarea_set_placeholder_text(s_ui.setup_ssid_textarea, "Wi-Fi network name");
-  lv_obj_add_event_cb(s_ui.setup_ssid_textarea, setup_textarea_focus_cb, LV_EVENT_FOCUSED, NULL);
-  lv_obj_add_event_cb(s_ui.setup_ssid_textarea, setup_textarea_focus_cb, LV_EVENT_CLICKED, NULL);
-
-  s_ui.setup_password_textarea = lv_textarea_create(s_ui.setup_credentials_panel);
-  style_textarea(s_ui.setup_password_textarea);
-  lv_textarea_set_one_line(s_ui.setup_password_textarea, true);
-  lv_textarea_set_max_length(s_ui.setup_password_textarea, DEVICE_CONFIG_WIFI_PASS_LEN - 1);
-  lv_textarea_set_password_mode(s_ui.setup_password_textarea, true);
-  lv_textarea_set_placeholder_text(s_ui.setup_password_textarea, "Wi-Fi password");
-  lv_obj_add_event_cb(s_ui.setup_password_textarea, setup_textarea_focus_cb, LV_EVENT_FOCUSED, NULL);
-  lv_obj_add_event_cb(s_ui.setup_password_textarea, setup_textarea_focus_cb, LV_EVENT_CLICKED, NULL);
-
-  lv_obj_t *credentials_button_row = lv_obj_create(s_ui.setup_credentials_panel);
-  lv_obj_set_width(credentials_button_row, LV_PCT(100));
-  lv_obj_set_height(credentials_button_row, LV_SIZE_CONTENT);
-  lv_obj_set_style_bg_opa(credentials_button_row, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(credentials_button_row, 0, 0);
-  lv_obj_set_style_pad_all(credentials_button_row, 0, 0);
-  lv_obj_set_style_pad_column(credentials_button_row, 14, 0);
-  lv_obj_set_layout(credentials_button_row, LV_LAYOUT_FLEX);
-  lv_obj_set_flex_flow(credentials_button_row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(
-    credentials_button_row,
-    LV_FLEX_ALIGN_SPACE_BETWEEN,
-    LV_FLEX_ALIGN_CENTER,
-    LV_FLEX_ALIGN_CENTER
-  );
-
-  create_setup_button(
-    credentials_button_row,
-    "Back",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_back_event_cb
-  );
-  create_setup_button(
-    credentials_button_row,
-    "Save & Restart",
-    lv_color_hex(0x245289),
-    color_accent(),
-    setup_save_event_cb
-  );
-
-  s_ui.setup_status_label = create_label(
-    s_ui.setup_credentials_panel,
-    LV_FONT_DEFAULT,
-    color_text_muted(),
-    LV_TEXT_ALIGN_CENTER,
-    "This first pass configures Wi-Fi only."
-  );
-  lv_obj_set_width(s_ui.setup_status_label, LV_PCT(100));
-  lv_label_set_long_mode(s_ui.setup_status_label, LV_LABEL_LONG_WRAP);
-
-  s_ui.setup_location_panel = lv_obj_create(s_ui.setup_overlay);
-  lv_obj_set_size(s_ui.setup_location_panel, 620, 500);
-  lv_obj_align(s_ui.setup_location_panel, LV_ALIGN_TOP_MID, 0, 116);
-  style_panel(s_ui.setup_location_panel, 32, LV_OPA_COVER);
-  lv_obj_set_style_pad_all(s_ui.setup_location_panel, 24, 0);
-  lv_obj_set_style_pad_row(s_ui.setup_location_panel, 14, 0);
-  lv_obj_set_layout(s_ui.setup_location_panel, LV_LAYOUT_FLEX);
-  lv_obj_set_flex_flow(s_ui.setup_location_panel, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_scrollbar_mode(s_ui.setup_location_panel, LV_SCROLLBAR_MODE_AUTO);
-  lv_obj_set_style_shadow_width(s_ui.setup_location_panel, 0, 0);
-  lv_obj_add_flag(s_ui.setup_location_panel, LV_OBJ_FLAG_HIDDEN);
-
-  lv_obj_t *location_title = create_label(
-    s_ui.setup_location_panel,
-    &lv_font_montserrat_18,
-    color_text_primary(),
-    LV_TEXT_ALIGN_CENTER,
-    "Weather Location"
-  );
-  lv_obj_set_width(location_title, LV_PCT(100));
-
-  s_ui.setup_location_textarea = lv_textarea_create(s_ui.setup_location_panel);
-  style_textarea(s_ui.setup_location_textarea);
-  lv_textarea_set_one_line(s_ui.setup_location_textarea, true);
-  lv_textarea_set_max_length(s_ui.setup_location_textarea, DEVICE_CONFIG_STR_LEN - 1);
-  lv_textarea_set_placeholder_text(s_ui.setup_location_textarea, "City, State");
-  lv_obj_add_event_cb(s_ui.setup_location_textarea, setup_textarea_focus_cb, LV_EVENT_FOCUSED, NULL);
-  lv_obj_add_event_cb(s_ui.setup_location_textarea, setup_textarea_focus_cb, LV_EVENT_CLICKED, NULL);
-
-  s_ui.setup_room_name_textarea = lv_textarea_create(s_ui.setup_location_panel);
-  style_textarea(s_ui.setup_room_name_textarea);
-  lv_textarea_set_one_line(s_ui.setup_room_name_textarea, true);
-  lv_textarea_set_max_length(s_ui.setup_room_name_textarea, DEVICE_CONFIG_STR_LEN - 1);
-  lv_textarea_set_placeholder_text(s_ui.setup_room_name_textarea, "Room name");
-  lv_obj_add_event_cb(s_ui.setup_room_name_textarea, setup_textarea_focus_cb, LV_EVENT_FOCUSED, NULL);
-  lv_obj_add_event_cb(s_ui.setup_room_name_textarea, setup_textarea_focus_cb, LV_EVENT_CLICKED, NULL);
-
-  s_ui.setup_device_id_textarea = lv_textarea_create(s_ui.setup_location_panel);
-  style_textarea(s_ui.setup_device_id_textarea);
-  lv_textarea_set_one_line(s_ui.setup_device_id_textarea, true);
-  lv_textarea_set_max_length(s_ui.setup_device_id_textarea, DEVICE_CONFIG_STR_LEN - 1);
-  lv_textarea_set_placeholder_text(s_ui.setup_device_id_textarea, "Device ID");
-  lv_obj_add_event_cb(s_ui.setup_device_id_textarea, setup_textarea_focus_cb, LV_EVENT_FOCUSED, NULL);
-  lv_obj_add_event_cb(s_ui.setup_device_id_textarea, setup_textarea_focus_cb, LV_EVENT_CLICKED, NULL);
-
-  s_ui.setup_message_sharing_button = create_setup_button(
-    s_ui.setup_location_panel,
-    "House Messages: Single",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_message_sharing_toggle_event_cb
-  );
-  lv_obj_set_width(s_ui.setup_message_sharing_button, LV_PCT(100));
-
-  s_ui.setup_face_button = create_setup_button(
-    s_ui.setup_location_panel,
-    "Home Screen: Digital",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_face_toggle_event_cb
-  );
-  lv_obj_set_width(s_ui.setup_face_button, LV_PCT(100));
-
-  s_ui.setup_time_format_button = create_setup_button(
-    s_ui.setup_location_panel,
-    "Time Format: 12-hour",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_time_format_toggle_event_cb
-  );
-  lv_obj_set_width(s_ui.setup_time_format_button, LV_PCT(100));
-
-  s_ui.setup_leading_zero_button = create_setup_button(
-    s_ui.setup_location_panel,
-    "Leading Zero: On",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_leading_zero_toggle_event_cb
-  );
-  lv_obj_set_width(s_ui.setup_leading_zero_button, LV_PCT(100));
-
-  s_ui.setup_units_button = create_setup_button(
-    s_ui.setup_location_panel,
-    "Units: Imperial",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_units_toggle_event_cb
-  );
-  lv_obj_set_width(s_ui.setup_units_button, LV_PCT(100));
-
-  s_ui.setup_night_shift_button = create_setup_button(
-    s_ui.setup_location_panel,
-    "Night Shift: Off",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_night_shift_toggle_event_cb
-  );
-  lv_obj_set_width(s_ui.setup_night_shift_button, LV_PCT(100));
-
-  lv_obj_t *location_button_row = lv_obj_create(s_ui.setup_location_panel);
-  lv_obj_set_width(location_button_row, LV_PCT(100));
-  lv_obj_set_height(location_button_row, LV_SIZE_CONTENT);
-  lv_obj_set_style_bg_opa(location_button_row, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(location_button_row, 0, 0);
-  lv_obj_set_style_pad_all(location_button_row, 0, 0);
-  lv_obj_set_style_pad_column(location_button_row, 14, 0);
-  lv_obj_set_layout(location_button_row, LV_LAYOUT_FLEX);
-  lv_obj_set_flex_flow(location_button_row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(
-    location_button_row,
-    LV_FLEX_ALIGN_SPACE_BETWEEN,
-    LV_FLEX_ALIGN_CENTER,
-    LV_FLEX_ALIGN_CENTER
-  );
-
-  create_setup_button(
-    location_button_row,
-    "Wi-Fi",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_wifi_settings_event_cb
-  );
-  create_setup_button(
-    location_button_row,
-    "Cancel",
-    lv_color_hex(0x17263b),
-    color_panel_border(),
-    setup_cancel_event_cb
-  );
-  create_setup_button(
-    location_button_row,
-    "Save & Restart",
-    lv_color_hex(0x245289),
-    color_accent(),
-    setup_location_save_event_cb
-  );
-
-  s_ui.setup_location_status_label = create_label(
-    s_ui.setup_location_panel,
-    LV_FONT_DEFAULT,
-    color_text_muted(),
-    LV_TEXT_ALIGN_CENTER,
-    "Enter a city and state, like Cincinnati, Ohio. We'll look up timezone and coordinates automatically."
-  );
-  lv_obj_set_width(s_ui.setup_location_status_label, LV_PCT(100));
-  lv_label_set_long_mode(s_ui.setup_location_status_label, LV_LABEL_LONG_WRAP);
-
-  s_ui.setup_keyboard = lv_keyboard_create(s_ui.setup_overlay);
-  lv_obj_set_size(s_ui.setup_keyboard, SETUP_KEYBOARD_WIDTH, SETUP_KEYBOARD_HEIGHT);
-  lv_obj_align(s_ui.setup_keyboard, LV_ALIGN_BOTTOM_MID, 0, SETUP_KEYBOARD_BOTTOM_OFFSET);
-  lv_keyboard_set_map(
-    s_ui.setup_keyboard,
-    LV_KEYBOARD_MODE_TEXT_LOWER,
-    SETUP_KEYBOARD_LOWER_MAP,
-    SETUP_KEYBOARD_LOWER_CTRL_MAP
-  );
-  lv_keyboard_set_map(
-    s_ui.setup_keyboard,
-    LV_KEYBOARD_MODE_TEXT_UPPER,
-    SETUP_KEYBOARD_UPPER_MAP,
-    SETUP_KEYBOARD_UPPER_CTRL_MAP
-  );
-  lv_keyboard_set_map(
-    s_ui.setup_keyboard,
-    LV_KEYBOARD_MODE_SPECIAL,
-    SETUP_KEYBOARD_SPECIAL_MAP,
-    SETUP_KEYBOARD_SPECIAL_CTRL_MAP
-  );
-  lv_keyboard_set_popovers(s_ui.setup_keyboard, true);
-  lv_obj_set_style_radius(s_ui.setup_keyboard, 24, 0);
-  lv_obj_set_style_border_color(s_ui.setup_keyboard, color_panel_border(), 0);
-  lv_obj_set_style_border_width(s_ui.setup_keyboard, 1, 0);
-  lv_obj_add_event_cb(s_ui.setup_keyboard, setup_keyboard_event_cb, LV_EVENT_READY, NULL);
-  lv_obj_add_event_cb(s_ui.setup_keyboard, setup_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
-  lv_obj_add_flag(s_ui.setup_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void update_analog_clock(const struct tm *local_time)
@@ -4475,8 +2961,6 @@ static void build_app_shell(const device_config_t *config)
   build_gesture_layer(s_ui.stage);
   build_status_stack(s_ui.stage);
   build_night_overlay(s_ui.stage);
-  build_setup_overlay(s_ui.stage);
-  build_direct_weather_icon_probe();
 
   if (strings_equal_ignore_case(config->default_clock_face, "analog")) {
     s_ui.last_home_view = APP_VIEW_ANALOG;
@@ -4514,14 +2998,7 @@ esp_err_t app_ui_show_boot_screen(const device_config_t *config, bool touch_read
     return err;
   }
 
-  if ((!config->wifi_ready || !config->location_ready) && touch_ready) {
-    lv_timer_t *setup_timer = lv_timer_create(setup_autopen_timer_cb, 120, NULL);
-    if (setup_timer != NULL) {
-      lv_timer_set_repeat_count(setup_timer, 1);
-    } else {
-      open_setup_overlay();
-    }
-  }
+  if (!config->location_ready && touch_ready) open_settings();
 
   return ESP_OK;
 }
@@ -4552,13 +3029,29 @@ esp_err_t app_ui_update_runtime(
   time_t display_time = resolve_display_time(config, uptime_seconds);
   refresh_forecast_labels(display_time);
 
-  struct tm local_time;
-  localtime_r(&display_time, &local_time);
-
-  update_day_labels(&local_time);
-  update_digital_clock(config, &local_time);
-  update_analog_clock(&local_time);
-  update_clock_health(&local_time);
+  struct tm local_time = {0};
+  bool time_available = display_time != 0;
+  if (time_available) {
+    localtime_r(&display_time, &local_time);
+    update_day_labels(&local_time);
+    update_digital_clock(config, &local_time);
+    update_analog_clock(&local_time);
+    update_clock_health(&local_time);
+  } else {
+    set_label_text(s_ui.digital_time_label, "--:--");
+    set_label_text(s_ui.digital_meridiem_label, "");
+    layout_digital_time_group(false);
+    set_label_text(s_ui.analog_day_label, "Waiting for time");
+    set_label_text(s_ui.analog_date_label, "");
+    set_label_text(s_ui.digital_day_label, "Waiting for time");
+    set_label_text(s_ui.digital_date_label, "");
+  }
+  lv_obj_t *hands[] = {s_ui.second_hand, s_ui.analog_hour_asset, s_ui.analog_minute_asset};
+  for (size_t i = 0; i < sizeof(hands) / sizeof(hands[0]); ++i) {
+    if (!hands[i]) continue;
+    if (time_available) lv_obj_remove_flag(hands[i], LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(hands[i], LV_OBJ_FLAG_HIDDEN);
+  }
   if (s_ui.weather.valid) {
     update_weather_labels();
     if (weather_changed || s_ui.last_logged_weather_updated_at != s_ui.weather.updated_at) {
@@ -4574,10 +3067,26 @@ esp_err_t app_ui_update_runtime(
     }
   }
   refresh_message_ui_state(&runtime->message, runtime->unread_message_count, runtime->has_important_message);
-  update_night_overlay(config, &local_time);
+  update_night_overlay(config, time_available ? &local_time : NULL);
   update_clock_status(s_ui.clock_is_estimated);
   update_weather_status(runtime->weather_status);
-  update_setup_prompt(config);
+  s_ui.config_snapshot = *config;
+  wac_settings_poll();
 
   return ESP_OK;
+}
+
+void app_ui_show_storage_error(esp_err_t error)
+{
+  lv_obj_t *screen = app_screen_active();
+  lv_obj_clean(screen);
+  lv_obj_set_style_bg_color(screen, color_bg(), 0);
+  lv_obj_t *title = create_label(screen, &lv_font_montserrat_32, color_text_primary(), LV_TEXT_ALIGN_CENTER, "Settings storage unavailable");
+  lv_obj_set_width(title, 520);
+  lv_obj_align(title, LV_ALIGN_CENTER, 0, -70);
+  char text[160];
+  snprintf(text, sizeof(text), "Could not read settings (%s).\nRestart after checking storage.\nExisting settings have not been erased.", esp_err_to_name(error));
+  lv_obj_t *detail = create_label(screen, &lv_font_montserrat_24, color_text_muted(), LV_TEXT_ALIGN_CENTER, text);
+  lv_obj_set_width(detail, 520);
+  lv_obj_align(detail, LV_ALIGN_CENTER, 0, 65);
 }

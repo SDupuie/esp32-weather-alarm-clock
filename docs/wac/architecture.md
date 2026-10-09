@@ -1,6 +1,6 @@
 # Weather alarm clock architecture and product specification
 
-Revised October 8, 2026. This is the single authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. It is not an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
+Revised October 9, 2026. This is the single authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. It is not an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
 
 Build the weather alarm clock for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C using the existing ESP-IDF application. Only ESP32-P4 is supported. There is no requirement to maintain Raspberry Pi behavior, another firmware implementation, or backward compatibility with their settings or interfaces.
 
@@ -27,7 +27,7 @@ Keep the existing weather, storm, location selection, Wi-Fi and House Messages c
 
 Use ordinary saves with ESP-IDF storage.
 
-Cancel discards edits. Nested Done returns to the parent draft without saving. Alarm Save applies without restart; the Settings-entry alarm toggle applies immediately. Device Setup and Wi-Fi share pending edits for Save & Restart; Weather Location has its independent Save & Restart, including location, coordinates, timezone and units. Save only changes made in that editor, preserving unrelated applied choices. Validation errors remain in the editor; save failure retains the draft and does not automatically restart.
+Cancel discards edits. Nested Done returns to the parent draft without saving. Alarm Save applies without restart; the Settings-entry alarm toggle applies immediately. Device Setup and Wi-Fi share pending edits for Save & Restart; Weather Location has its independent Save & Restart, including location, coordinates, timezone and units. Apply only changes made in that editor, preserving unrelated applied choices. Validation errors remain in the editor; save failure retains the draft and does not automatically restart.
 
 - Validate settings, perform ordinary saves, and report returned errors.
 - Save user settings only when the user explicitly applies a change: for example, pressing Save or using a control intended to apply immediately, such as enabling an alarm.
@@ -69,6 +69,8 @@ Apply Snooze, Dismiss and missed-notice transitions in memory even if their oper
 Ringing preempts menus, notices and previews; preemption alone does not acknowledge a notice or apply a draft.
 
 The single approved visual entry point is [mockups/alarm-design.html](../../mockups/alarm-design.html). It contains the complete combined device preview and the House Messages browser preview, selected using the controls above the previews. Images, fonts and both previews are embedded in that file. It owns appearance and controls; this specification owns behavior, defaults and source placement. Preview selectors and sample values are not production features. The digital ringing layout is the chosen ringing presentation; carousel alternatives are not additional screens.
+
+Use the existing LVGL keyboard with the original lowercase, uppercase and symbols layouts, including `^` on each. Add `:` beside `^` on the symbols layout so both characters remain available. Show the enlarged character while a key is pressed. Retain the current settings keyboard size and position for this input correction.
 
 ### Night Shift
 
@@ -346,7 +348,7 @@ Use the existing NVS partition and ordinary typed NVS operations. Settings stay 
 
 Extend the existing configuration structure for the approved settings. Use one Night Shift mode value, not both a mode and an independent enable flag. Derive readiness from the settings needed by the feature without a separate setup-version gate or location-confirmed flag. `device_config` validates saved location values against the [location output rules](#output-rules) and Shared-mode identity against the [message contract](#message-contract); the settings UI enforces the [first-time setup decision](#first-time-weather-location-setup) using the existing editor. Initialize the enhanced application independently of original-firmware settings, as required by the compatibility scope in AGENTS.md.
 
-Use explicit update operations for the actual Save actions. The settings UI owns its current draft and the values with which editing began; nested editors share that draft. `device_config` applies only the submitted changes to its latest configuration. Comparing the known fields is sufficient; no reusable session manager, revision system, or public generic patch format is required. Alarm preemption does not make a draft authoritative. Closing/canceling an editor must not publish it.
+Use explicit update operations for the actual Save actions. The settings UI owns its current draft and the values with which editing began; nested editors share that draft. `device_config` applies only the submitted changes to its latest configuration. Comparing the known fields is sufficient for applying edits; no reusable session manager, revision system, or public generic patch format is required. Each explicit Device, Weather or Alarm Save then writes all entries belonging to that group, including unchanged values, using ordinary individual writes. The immediate alarm toggle writes only the enabled entry. Do not compare against running settings to skip storage writes. This accepts extra writes on infrequent explicit saves and keeps retries straightforward; it does not rewrite other groups or add background saving. Alarm preemption does not make a draft authoritative. Closing/canceling an editor must not publish it.
 
 Serialize settings writers. Validate before writing, check NVS return values, and publish a new in-memory configuration after a successful save. Use a short lock for copying the published configuration, distinct from the slow save operation. On failure, follow the [editing and saving rules](#editing-and-saving-user-settings) and keep the previously applied running configuration; do not report rollback. Some stored keys may already have changed and will be read on the next normal startup, as allowed under [Editing and saving user settings](#editing-and-saving-user-settings).
 
@@ -442,4 +444,4 @@ During implementation, use focused tests for settings validation/save errors, DS
 
 Build with the preserved ESP-IDF 5.5.5 environment. Hardware is required to establish touch behavior, rendering, RTC operation, audible sound, brightness and physical power-cut results. Task timing, stack/memory use and asset sizes are implementation checks, not claims established by this document.
 
-Enhancement implementation has not begun. This plan is not evidence of passing firmware tests.
+Current implementation status is reported in [README.md](../../README.md). This specification is not evidence of passing firmware tests.

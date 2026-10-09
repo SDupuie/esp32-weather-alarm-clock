@@ -14,3 +14,5 @@ esp_err_t app_ui_update_runtime(
   const app_runtime_state_t *runtime,
   uint32_t uptime_seconds
 );
+
+void app_ui_show_storage_error(esp_err_t error);

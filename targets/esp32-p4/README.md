@@ -2,7 +2,7 @@
 
 This target is the native firmware path for the Waveshare `ESP32-P4-WIFI6-Touch-LCD-3.4C` board family.
 
-The [architecture and product specification](../../docs/wac/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. This checkout contains baseline firmware; the planned enhancements are not implemented yet.
+The [architecture and product specification](../../docs/wac/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. This checkout implements settings persistence and Save handling. Alarm/audio, RTC, full Night Shift runtime and the broader visual redesign remain pending; see the root [implementation status](../../README.md).
 
 ## Prepare the environment (no board needed)
 
@@ -68,12 +68,14 @@ Sources:
   Managed component dependencies
 - `main/main.c`
   Firmware entrypoint
-- `main/app_ui.*`
-  Native LVGL UI: analog/digital/forecast/message screens and on-device setup flow
+- `main/app_ui.h` and `main/wac/ui/`
+  Public UI interface, retained clock/weather/message rendering and settings draft editors
 - `main/connectivity.*`
   WiFi station connect, scanning, and time sync
 - `main/device_config.*`
-  NVS-backed config (WiFi, location, room/device id, message sharing mode, display prefs)
+  Applied settings, validation and typed NVS saves
+- `main/wac/time.*`
+  System timezone application; RTC/time-trust implementation remains pending
 - `main/location_lookup.*`
   On-device Open-Meteo geocoding for the setup UI
 - `main/message_service.*`

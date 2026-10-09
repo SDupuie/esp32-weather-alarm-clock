@@ -131,8 +131,10 @@ esp_err_t location_lookup_resolve(const char *query, location_lookup_result_t *o
     return ESP_ERR_INVALID_ARG;
   }
 
-  char encoded_query[128];
-  url_encode_component(query_parts.name, encoded_query, sizeof(encoded_query));
+  char search_name[LOCATION_SCORING_STR_LEN * 2 + 1];
+  location_scoring_format_search_name(&query_parts, search_name, sizeof(search_name));
+  char encoded_query[sizeof(search_name) * 3];
+  url_encode_component(search_name, encoded_query, sizeof(encoded_query));
   char country_code_filter[8];
   copy_uppercase_string(country_code_filter, sizeof(country_code_filter), query_parts.country);
 

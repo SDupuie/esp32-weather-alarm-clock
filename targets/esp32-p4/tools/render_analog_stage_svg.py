@@ -3,38 +3,23 @@
 from __future__ import annotations
 
 import argparse
-import math
 from pathlib import Path
 
 STAGE_SIZE = 800
 CENTER = STAGE_SIZE // 2
 # Baked-in equivalent of the old runtime STAGE_Y_TRIM=-18 lv_obj_align offset
-# in app_ui.c. Shifting the *asset* instead of shifting the LVGL image object
+# in wac/ui/ui.c. Shifting the *asset* instead of shifting the LVGL image object
 # at runtime avoids an LVGL rendering artifact confirmed on-device: an
 # offset-aligned image object consistently produced a bright horizontal line
 # at the bottom of the visible content that disappeared entirely when the
 # image was hidden (everything else about the scene unchanged), pointing at
 # the runtime align-offset mechanism itself rather than anything drawn in
 # the image or anything physical. Only this baked-image circle moves — the
-# procedural ticks/numerals in app_ui.c were never shifted (confirmed fine
+# procedural ticks/numerals in wac/ui/ui.c were never shifted (confirmed fine
 # as-is) and must stay exactly where they are, at the true canvas center.
 STAGE_Y_TRIM = -18
 FACE_CY = CENTER + STAGE_Y_TRIM
 FACE_RADIUS = 380
-TICK_OUTER_RADIUS = 348
-NUMERAL_RADIUS = 286
-MINOR_TICK_LENGTH = 16
-MAJOR_TICK_LENGTH = 24
-QUARTER_TICK_LENGTH = 26
-
-MAJOR_NUMERALS = {12, 3, 6, 9}
-OPTICAL_OFFSETS = {
-    12: (0, -2),
-    3: (1, 0),
-    6: (0, 2),
-    9: (-1, 0),
-}
-
 PALETTE_DAY = {
     "stage_start": "rgba(39, 53, 79, 0.55)",
     "stage_mid": "rgba(8, 12, 18, 0.96)",
@@ -74,58 +59,6 @@ PALETTE_NIGHT = {
 }
 
 
-def polar_point(angle_deg: float, radius: float) -> tuple[float, float]:
-    angle_rad = math.radians(angle_deg - 90.0)
-    return (
-        CENTER + math.cos(angle_rad) * radius,
-        CENTER + math.sin(angle_rad) * radius,
-    )
-
-
-def render_ticks(palette: dict[str, str]) -> str:
-    lines: list[str] = []
-    for tick in range(60):
-        angle = tick * 6
-        tick_length = MINOR_TICK_LENGTH
-        stroke = palette["minor_tick"]
-        stroke_width = 2
-
-        if tick % 5 == 0:
-            tick_length = MAJOR_TICK_LENGTH
-            stroke = palette["major_tick"]
-            stroke_width = 4
-
-        if tick % 15 == 0:
-            tick_length = QUARTER_TICK_LENGTH
-            stroke = palette["quarter_tick"]
-
-        outer_x, outer_y = polar_point(angle, TICK_OUTER_RADIUS)
-        inner_x, inner_y = polar_point(angle, TICK_OUTER_RADIUS - tick_length)
-        lines.append(
-            "    "
-            f'<line x1="{outer_x:.2f}" y1="{outer_y:.2f}" x2="{inner_x:.2f}" y2="{inner_y:.2f}" '
-            f'stroke="{stroke}" stroke-width="{stroke_width}" stroke-linecap="round"/>'
-        )
-    return "\n".join(lines)
-
-
-def render_numerals(palette: dict[str, str]) -> str:
-    numerals: list[str] = []
-    for hour in range(12):
-        display_hour = 12 if hour == 0 else hour
-        x, y = polar_point(hour * 30, NUMERAL_RADIUS)
-        offset_x, offset_y = OPTICAL_OFFSETS.get(display_hour, (0, 0))
-        font_size = 48 if display_hour in MAJOR_NUMERALS else 34
-        font_weight = 500 if display_hour in MAJOR_NUMERALS else 450
-        fill = palette["major_numeral"] if display_hour in MAJOR_NUMERALS else palette["minor_numeral"]
-        numerals.append(
-            "    "
-            f'<text x="{x + offset_x:.2f}" y="{y + offset_y:.2f}" font-size="{font_size}" '
-            f'font-weight="{font_weight}" fill="{fill}">{display_hour}</text>'
-        )
-    return "\n".join(numerals)
-
-
 def render_stage_layer(palette: dict[str, str]) -> str:
     return f"""  <rect width="{STAGE_SIZE}" height="{STAGE_SIZE}" fill="url(#stage-bg)"/>
 
@@ -137,28 +70,9 @@ def render_stage_layer(palette: dict[str, str]) -> str:
   </g>"""
 
 
-def render_dial_overlay_layer(palette: dict[str, str]) -> str:
-    return f"""  <g>
-{render_ticks(palette)}
-  </g>
-
-  <g
-    font-family="Avenir Next, Helvetica Neue, Arial, sans-serif"
-    text-anchor="middle"
-    dominant-baseline="middle"
-    paint-order="stroke fill"
-    stroke="rgba(0, 0, 0, 0.14)"
-    stroke-width="1">
-{render_numerals(palette)}
-  </g>"""
-
-
-def build_svg(mode: str, layer: str) -> str:
+def build_svg(mode: str) -> str:
     palette = PALETTE_NIGHT if mode == "night" else PALETTE_DAY
-    if layer == "overlay":
-        body = render_dial_overlay_layer(palette)
-    else:
-        body = render_stage_layer(palette)
+    body = render_stage_layer(palette)
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="{STAGE_SIZE}" height="{STAGE_SIZE}" viewBox="0 0 {STAGE_SIZE} {STAGE_SIZE}">
@@ -203,20 +117,14 @@ def build_svg(mode: str, layer: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Render the Pi-style analog stage SVG source.")
+    parser = argparse.ArgumentParser(description="Render the analog clock stage SVG source.")
     parser.add_argument("--output", required=True, help="Destination SVG path")
     parser.add_argument("--mode", choices=("day", "night"), default="day", help="Palette mode")
-    parser.add_argument(
-        "--layer",
-        choices=("stage", "overlay"),
-        default="stage",
-        help="Which analog layer to render",
-    )
     args = parser.parse_args()
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(build_svg(args.mode, args.layer), encoding="utf-8")
+    output_path.write_text(build_svg(args.mode), encoding="utf-8")
     return 0
 
 

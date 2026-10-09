@@ -4,7 +4,7 @@ A round touchscreen clock for your nightstand or desk, with weather forecasts, c
 
 Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 
-**Development status:** The current firmware provides the original weather clock and House Messages. The alarm, DS3231 backup clock, expanded Night Shift controls, and redesigned interface are approved but not implemented yet. The setup and usage instructions below describe the current firmware.
+**Development status:** Settings persistence, draft editors and production Save handling are implemented and checked natively. Weather and House Messages remain available. Alarm playback, the DS3231 backup clock, solar Night Shift, brightness/fades and the full approved visual redesign remain pending. No board is available; firmware compilation and native checks do not establish hardware behavior.
 
 - [Features](#features)
 - [Hardware](#hardware)
@@ -26,9 +26,9 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 - An edge indicator for approaching storm conditions, with quick access to the conditions screen.
 - Weather from Open-Meteo, with no API key to configure.
 - Time synchronized over Wi-Fi.
-- An optional red Night Shift appearance from 10 PM to 6 AM.
+- A red Night Shift appearance with Off, Always On or Fixed Schedule preferences.
 - Household messages sent from a phone or computer on the same network, with optional sharing among multiple ESP32-P4 clocks.
-- Touchscreen settings for Wi-Fi, location, clock appearance, units, and messaging.
+- Touchscreen settings for Wi-Fi, location, display, messaging and saved alarm/night preferences. Alarm and expanded night runtime work remains pending.
 - Automatic startup when the board receives power.
 
 ### Planned enhancements
@@ -119,10 +119,10 @@ The example port is for macOS. See Espressif's [serial connection instructions](
 
 ### 5. Finish setup on the touchscreen
 
-1. Select your Wi-Fi network, enter its password, and tap **Save & Restart**. Use **Manual Network** if needed.
-2. In the location/settings screen, replace the prefilled location with your own, such as `Cincinnati,OH,US` or `Paris,,FR` (city, empty state, country code).
-3. Choose your clock preferences, then tap **Save & Restart**. Location lookup supplies the coordinates and timezone. If lookup fails, correct the location and try again.
-4. After restart, allow time for network synchronization and the first weather update.
+1. Open **Wi-Fi** under Device Setup, select your network and enter its password. Tap **Save & Restart**. Use **Manual Network** if needed.
+2. In the empty Weather Location field, enter your location, such as `Cincinnati,OH,US` or `Paris,FR`. Tap **Save**. A successful lookup and save restarts the clock; errors retain the editor.
+3. Allow time for network synchronization and the first weather update.
+4. Change display or device preferences under **Device Setup**. Nested **Done** returns to the draft; **Save & Restart** applies it.
 
 For firmware updates, build and flash again over USB. The browser installer files in [docs/index.html](docs/index.html) currently package the original weather-display baseline, without the planned alarm-clock enhancements.
 
@@ -137,7 +137,8 @@ Your selected analog or digital face is the home screen.
 | Clock | Swipe right | Open Messages. |
 | Messages | Swipe left | Return to the clock. |
 | Clock | Swipe down | Open settings. |
-| Settings | Tap **Cancel**, or swipe up on the background | Leave without saving changes. |
+| Settings editor | Tap **Cancel** | Discard that editor's changes and return to Settings. |
+| Settings entry | Tap **Back** | Return to the clock after first-use location setup is complete. |
 | Unread message | Tap the displayed message | Mark it read for this clock and return home after acknowledgment succeeds. |
 
 ### Weather and storm conditions
@@ -150,7 +151,7 @@ Weather normally refreshes every ten minutes. If an update fails, the clock keep
 
 ### Night Shift
 
-The current **Night Shift On/Off** setting enables a red appearance between **10 PM and 6 AM**. Its schedule is fixed in the current firmware. Adjustable schedules, sunset/sunrise operation, brightness controls, and backlight fades are planned.
+The current renderer supports Off, Always On and the saved Fixed Schedule. The editors also retain solar offsets and brightness preferences for the upcoming Night Shift owner. Solar operation, remembered startup appearance and physical backlight fades remain pending; saving these preferences is not evidence that those features run.
 
 ## Household Messages
 
@@ -196,7 +197,7 @@ Swipe down from the clock to open settings. Saved preferences stay on the device
 | Setting | What it controls |
 | --- | --- |
 | Wi-Fi | Network and password; tap **Wi-Fi** to scan or enter a network manually. |
-| Weather location | The place used for weather and the clock's timezone. Enter `City, State`, optionally followed by a country code, such as `Cincinnati,OH,US`. For a city and country without a state, use `Paris,,FR`. |
+| Weather location | The place used for weather and the clock's timezone. Enter `City, State`, optionally followed by a country code, such as `Cincinnati,OH,US`. For a city and country without a state, use `Paris,FR`. |
 | Room name | The friendly name shown when choosing message targets. |
 | Device ID | The identity used by shared messaging; choose a distinct value for every shared clock. |
 | House Messages | **Single** for this clock or **Shared** for several clocks. |
@@ -204,9 +205,12 @@ Swipe down from the clock to open settings. Saved preferences stay on the device
 | Time format | **12-hour** or **24-hour**. |
 | Leading zero | Whether 12-hour time displays `07:00 AM` or `7:00 AM`. |
 | Units | **Imperial** or **Metric** weather measurements. |
-| Night Shift | Enable or disable the current fixed nighttime appearance. |
+| Night Shift | Saved appearance, schedule, solar offsets and brightness preferences; full runtime integration is pending. |
+| Alarm | Saved time, repeat days, sound, volume, snooze and enable preference; ringing and preview are pending. |
 
-**Save & Restart** applies changes and restarts the clock. **Cancel** discards edits. Alarm settings and the expanded night controls will be added with the planned enhancements.
+Device Setup and Wi-Fi share a draft for **Save & Restart**. Weather Location saves independently and restarts after success. Alarm **Save** and the Settings-entry alarm toggle apply settings without restarting. Nested **Done** keeps edits in the parent draft; **Cancel** discards that editor's edits. See the [architecture](docs/wac/architecture.md#editing-and-saving-user-settings) for save rules and accepted partial-save behavior.
+
+Settings screens currently use native rollers and the standard keyboard. Exact approved control styling and the broader replacement interface remain pending; the mockup remains the visual authority.
 
 ## Development Notes
 

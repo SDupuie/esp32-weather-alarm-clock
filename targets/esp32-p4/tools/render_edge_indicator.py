@@ -26,7 +26,7 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 STAGE_SIZE = 800
-# Matches the live face/hand coordinate system in app_ui.c (ANALOG_CENTER_X/Y,
+# Matches the live face/hand coordinate system in wac/ui/ui.c (ANALOG_CENTER_X/Y,
 # ANALOG_FACE_SIZE=760/2=380) -- NOT the baked stage image's Y-trim, since this
 # is a separate runtime lv_image object aligned directly on the 800x800 canvas.
 FACE_CENTER = STAGE_SIZE / 2  # 400
@@ -178,7 +178,7 @@ def render(output_path: Path, size: int = STAGE_SIZE, variant: str = "message") 
     # should have been -- reproduced identically across a full chip erase +
     # reflash, ruling out a bad/worn flash sector). Cropping to the actual
     # content bounding box (plus a small margin) avoids storing dead
-    # transparent space. app_ui.c's ANALOG_EDGE_INDICATOR_X/Y must match
+    # transparent space. wac/ui/ui.c's ANALOG_EDGE_INDICATOR_X/Y must match
     # this crop's offset -- this prints it so that's easy to keep in sync.
     alpha_channel = np.asarray(image)[..., 3]
     nonzero_rows, nonzero_cols = np.nonzero(alpha_channel > 0)

@@ -1,19 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# -----------------------------------------------------------------------------
-# Runs the ESP32-P4 target's C ports of the forecast heuristic and location
-# scorer against the exact same JSON fixtures the Pi/JS implementations are
-# tested against (shared/test-data/). Compiles natively with plain `cc` --
-# no ESP-IDF toolchain needed, since main/forecast_representative.c and
-# main/location_scoring.c are deliberately free of ESP-IDF dependencies.
-#
-# This is the parity check: if you change shared/logic/forecast-representative.js
-# shared/logic/open-meteo-location.js or shared/logic/storm-conditions.js
-# (or the corresponding C ports), run this alongside `npm run test:forecast`
-# / `npm run test:location` / `npm run test:conditions` and
-# make sure both sides still agree.
-# -----------------------------------------------------------------------------
+# Native ESP32-P4 forecast, location and conditions checks using the retained
+# fixtures in shared/test-data/. These checks do not require another platform.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -103,10 +92,8 @@ conditions_status=0
 
 echo ""
 if [[ "$forecast_status" -ne 0 || "$location_status" -ne 0 || "$conditions_status" -ne 0 ]]; then
-  echo "PARITY CHECK FAILED: the ESP32-P4 C port disagrees with the JS implementation"
-  echo "on at least one fixture case. Fix the C port (or the JS, or the fixture,"
-  echo "whichever is wrong) before shipping -- this is exactly the drift this"
-  echo "test exists to catch before users see it."
+  echo "NATIVE CHECK FAILED: ESP32-P4 results differ from expected fixture values"
+  echo "Review the failing C calculation and fixture before shipping."
   exit 1
 fi
 

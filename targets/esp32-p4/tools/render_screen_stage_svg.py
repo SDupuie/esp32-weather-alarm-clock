@@ -8,7 +8,7 @@ from pathlib import Path
 STAGE_SIZE = 800
 CENTER = STAGE_SIZE // 2
 # See render_analog_stage_svg.py for why this is baked into the asset rather
-# than applied as a runtime lv_obj_align offset in app_ui.c.
+# than applied as a runtime lv_obj_align offset in wac/ui/ui.c.
 STAGE_Y_TRIM = -18
 FACE_CY = CENTER + STAGE_Y_TRIM
 FACE_RADIUS = 390

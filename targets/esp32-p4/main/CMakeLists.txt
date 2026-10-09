@@ -9,9 +9,9 @@ idf_component_register(
   SRCS
     ${APP_ASSET_SOURCES}
     "main.c"
-    "app_benchmark.c"
-    "app_parity_lab.c"
-    "app_ui.c"
+    "wac/ui/ui.c"
+    "wac/ui/settings.c"
+    "wac/time.c"
     "connectivity.c"
     "device_config.c"
     "forecast_representative.c"

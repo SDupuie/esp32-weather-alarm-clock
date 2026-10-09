@@ -1,64 +1,105 @@
 #include "device_config.h"
 
+#include <ctype.h>
+#include <errno.h>
+#include <math.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "nvs.h"
+#include "timezone_table.h"
 
-#define DEVICE_CONFIG_NAMESPACE "rwd_cfg"
-#define DEVICE_CONFIG_SETUP_FLOW_VERSION 1
+/* Independent of the original application's rwd_cfg namespace. */
+#define DEVICE_CONFIG_NAMESPACE "wac_cfg"
 
-static void copy_string(char *dest, size_t dest_size, const char *src)
+static SemaphoreHandle_t s_save_lock;
+static SemaphoreHandle_t s_copy_lock;
+static device_config_t s_applied;
+static bool s_initialized;
+
+static bool has_text(const char *text)
 {
-  if (dest == NULL || dest_size == 0) {
-    return;
+  for (; *text != '\0'; ++text) {
+    if (!isspace((unsigned char) *text)) {
+      return true;
+    }
   }
-
-  if (src == NULL) {
-    dest[0] = '\0';
-    return;
-  }
-
-  size_t copy_len = strlen(src);
-  if (copy_len >= dest_size) {
-    copy_len = dest_size - 1;
-  }
-
-  memcpy(dest, src, copy_len);
-  dest[copy_len] = '\0';
+  return false;
 }
 
-static esp_err_t load_or_seed_string(
-  nvs_handle_t handle,
-  const char *key,
-  char *dest,
-  size_t dest_size,
-  const char *fallback,
-  bool *dirty
-)
+static bool strings_terminated(const device_config_t *config)
 {
-  size_t required_size = dest_size;
-  esp_err_t err = nvs_get_str(handle, key, dest, &required_size);
-  if (err == ESP_OK) {
-    return ESP_OK;
+  if (config == NULL) {
+    return false;
   }
-
-  if (err != ESP_ERR_NVS_NOT_FOUND) {
-    return err;
-  }
-
-  copy_string(dest, dest_size, fallback);
-  err = nvs_set_str(handle, key, dest);
-  if (err == ESP_OK && dirty != NULL) {
-    *dirty = true;
-  }
-
-  return err;
+#define CHECK_STRING(field) \
+  if (memchr(config->field, '\0', sizeof(config->field)) == NULL) { return false; }
+  CHECK_STRING(device_id)
+  CHECK_STRING(room_name)
+  CHECK_STRING(location)
+  CHECK_STRING(timezone)
+  CHECK_STRING(wifi_ssid)
+  CHECK_STRING(wifi_password)
+  CHECK_STRING(message_sharing)
+  CHECK_STRING(default_clock_face)
+  CHECK_STRING(time_format)
+  CHECK_STRING(units)
+  CHECK_STRING(latitude)
+  CHECK_STRING(longitude)
+  CHECK_STRING(night_shift_start)
+  CHECK_STRING(night_shift_end)
+#undef CHECK_STRING
+  return true;
 }
 
-static esp_err_t save_string(nvs_handle_t handle, const char *key, const char *value)
+static bool coordinate_valid(const char *text, double limit)
 {
-  return nvs_set_str(handle, key, value != NULL ? value : "");
+  if (*text == '\0' || isspace((unsigned char) *text)) {
+    return false;
+  }
+  errno = 0;
+  char *end = NULL;
+  double value = strtod(text, &end);
+  return end != text && *end == '\0' && errno != ERANGE
+    && isfinite(value) && value >= -limit && value <= limit;
+}
+
+static bool timezone_supported(const char *timezone)
+{
+  for (size_t i = 0; i < TIMEZONE_MAPPINGS_COUNT; ++i) {
+    if (strcmp(timezone, TIMEZONE_MAPPINGS[i].iana_name) == 0
+        && TIMEZONE_MAPPINGS[i].posix_name[0] != '\0') {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool hhmm_valid(const char *text)
+{
+  return strlen(text) == 5 && text[2] == ':'
+    && text[0] >= '0' && text[0] <= '2'
+    && text[1] >= '0' && text[1] <= '9'
+    && (text[0] != '2' || text[1] <= '3')
+    && text[3] >= '0' && text[3] <= '5'
+    && text[4] >= '0' && text[4] <= '9';
+}
+
+static bool offset_valid(int16_t minutes)
+{
+  return minutes >= -120 && minutes <= 120 && minutes % 5 == 0;
+}
+
+static void derive_readiness(device_config_t *config)
+{
+  config->wifi_ready = config->wifi_ssid[0] != '\0';
+  config->location_ready = has_text(config->location)
+    && coordinate_valid(config->latitude, 90.0)
+    && coordinate_valid(config->longitude, 180.0)
+    && timezone_supported(config->timezone);
 }
 
 void device_config_set_defaults(device_config_t *config)
@@ -66,412 +107,417 @@ void device_config_set_defaults(device_config_t *config)
   if (config == NULL) {
     return;
   }
-
   memset(config, 0, sizeof(*config));
-  copy_string(config->device_id, sizeof(config->device_id), "clock-esp32-p4");
-  copy_string(config->room_name, sizeof(config->room_name), "Clock");
-  copy_string(config->location, sizeof(config->location), "Cincinnati,OH,US");
-  copy_string(config->timezone, sizeof(config->timezone), "America/New_York");
-  copy_string(config->units, sizeof(config->units), "imperial");
-  copy_string(config->latitude, sizeof(config->latitude), "39.1031");
-  copy_string(config->longitude, sizeof(config->longitude), "-84.5120");
-  copy_string(config->message_sharing, sizeof(config->message_sharing), "single");
-  copy_string(config->default_clock_face, sizeof(config->default_clock_face), "digital");
-  copy_string(config->time_format, sizeof(config->time_format), "12");
-  copy_string(config->night_shift_start, sizeof(config->night_shift_start), "22:00");
-  copy_string(config->night_shift_end, sizeof(config->night_shift_end), "06:00");
-  config->leading_zero_12h = true;
-  config->night_shift_enabled = false;
-  config->wifi_ready = false;
-  config->location_ready = false;
-  config->boot_count = 0;
+  strcpy(config->device_id, "clock-esp32-p4");
+  strcpy(config->room_name, "Clock");
+  strcpy(config->units, "imperial");
+  strcpy(config->message_sharing, "single");
+  strcpy(config->default_clock_face, "digital");
+  strcpy(config->time_format, "12");
+  strcpy(config->night_shift_start, "22:00");
+  strcpy(config->night_shift_end, "06:00");
+  config->night_shift_mode = DEVICE_CONFIG_NIGHT_OFF;
+  config->day_brightness = 80;
+  config->night_brightness = 15;
+  config->alarm_hour = 7;
+  config->alarm_repeat_days = 0x3e;
+  config->alarm_sound = DEVICE_CONFIG_ALARM_CLASSIC_BEEP;
+  config->alarm_volume = 50;
+  config->alarm_snooze_minutes = 10;
 }
 
-esp_err_t device_config_load_or_init(device_config_t *config)
+static esp_err_t validate_settings(const device_config_t *config, bool allow_partial_location)
 {
-  if (config == NULL) {
+  if (!strings_terminated(config)
+      || !has_text(config->device_id) || !has_text(config->room_name)
+      || (strcmp(config->message_sharing, "single") != 0
+          && strcmp(config->message_sharing, "shared") != 0)
+      || (strcmp(config->message_sharing, "shared") == 0
+          && strcmp(config->device_id, "clock-esp32-p4") == 0)
+      || (strcmp(config->default_clock_face, "digital") != 0
+          && strcmp(config->default_clock_face, "analog") != 0)
+      || (strcmp(config->time_format, "12") != 0 && strcmp(config->time_format, "24") != 0)
+      || (strcmp(config->units, "imperial") != 0 && strcmp(config->units, "metric") != 0)
+      || !hhmm_valid(config->night_shift_start) || !hhmm_valid(config->night_shift_end)
+      || (unsigned) config->night_shift_mode > DEVICE_CONFIG_NIGHT_SOLAR
+      || !offset_valid(config->night_sunset_offset_minutes)
+      || !offset_valid(config->night_sunrise_offset_minutes)
+      || config->day_brightness < 5 || config->day_brightness > 100
+      || config->night_brightness < 5 || config->night_brightness > 100
+      || config->alarm_hour > 23 || config->alarm_minute > 59
+      || config->alarm_repeat_days == 0 || (config->alarm_repeat_days & ~0x7f) != 0
+      || (unsigned) config->alarm_sound > DEVICE_CONFIG_ALARM_RISING_TONES
+      || config->alarm_volume > 100
+      || (config->alarm_snooze_minutes != 5 && config->alarm_snooze_minutes != 10
+          && config->alarm_snooze_minutes != 15)) {
     return ESP_ERR_INVALID_ARG;
   }
 
-  device_config_set_defaults(config);
+  /* Interrupted first-location saves can leave valid individual fields but
+   * an incomplete tuple. Startup and unrelated saves retain those values;
+   * only an explicit Weather Location save requires a complete tuple. */
+  if ((config->location[0] != '\0' && !has_text(config->location))
+      || (config->latitude[0] != '\0' && !coordinate_valid(config->latitude, 90.0))
+      || (config->longitude[0] != '\0' && !coordinate_valid(config->longitude, 180.0))
+      || (config->timezone[0] != '\0' && !timezone_supported(config->timezone))) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  bool location_empty = config->location[0] == '\0' && config->latitude[0] == '\0'
+    && config->longitude[0] == '\0' && config->timezone[0] == '\0';
+  if (!allow_partial_location && !location_empty && (!has_text(config->location)
+      || !coordinate_valid(config->latitude, 90.0)
+      || !coordinate_valid(config->longitude, 180.0)
+      || !timezone_supported(config->timezone))) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  return ESP_OK;
+}
 
+esp_err_t device_config_validate(const device_config_t *config)
+{
+  return validate_settings(config, false);
+}
+
+static esp_err_t load_string(nvs_handle_t handle, const char *key,
+                             char *value, size_t capacity, bool *seeded)
+{
+  size_t size = capacity;
+  esp_err_t err = nvs_get_str(handle, key, value, &size);
+  if (err == ESP_ERR_NVS_NOT_FOUND) {
+    err = nvs_set_str(handle, key, value);
+    if (err == ESP_OK) {
+      *seeded = true;
+    }
+  }
+  return err;
+}
+
+static esp_err_t load_u8(nvs_handle_t handle, const char *key, uint8_t *value, bool *seeded)
+{
+  esp_err_t err = nvs_get_u8(handle, key, value);
+  if (err == ESP_ERR_NVS_NOT_FOUND) {
+    err = nvs_set_u8(handle, key, *value);
+    if (err == ESP_OK) {
+      *seeded = true;
+    }
+  }
+  return err;
+}
+
+static esp_err_t load_i16(nvs_handle_t handle, const char *key, int16_t *value, bool *seeded)
+{
+  esp_err_t err = nvs_get_i16(handle, key, value);
+  if (err == ESP_ERR_NVS_NOT_FOUND) {
+    err = nvs_set_i16(handle, key, *value);
+    if (err == ESP_OK) {
+      *seeded = true;
+    }
+  }
+  return err;
+}
+
+static void publish(const device_config_t *config)
+{
+  xSemaphoreTake(s_copy_lock, portMAX_DELAY);
+  s_applied = *config;
+  s_initialized = true;
+  xSemaphoreGive(s_copy_lock);
+}
+
+esp_err_t device_config_init(void)
+{
+  /* Startup creates these before any other task can call this owner. */
+  if (s_save_lock == NULL) {
+    s_save_lock = xSemaphoreCreateMutex();
+  }
+  if (s_copy_lock == NULL) {
+    s_copy_lock = xSemaphoreCreateMutex();
+  }
+  if (s_save_lock == NULL || s_copy_lock == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+  xSemaphoreTake(s_save_lock, portMAX_DELAY);
+  device_config_t config;
+  device_config_set_defaults(&config);
   nvs_handle_t handle = 0;
   esp_err_t err = nvs_open(DEVICE_CONFIG_NAMESPACE, NVS_READWRITE, &handle);
   if (err != ESP_OK) {
+    xSemaphoreGive(s_save_lock);
     return err;
   }
+  bool seeded = false;
+  uint8_t value;
+#define LOAD_STRING(key, field) \
+  err = load_string(handle, key, config.field, sizeof(config.field), &seeded); \
+  if (err != ESP_OK) { goto done; }
+#define LOAD_U8(key, field) \
+  err = load_u8(handle, key, &config.field, &seeded); \
+  if (err != ESP_OK) { goto done; }
+#define LOAD_I16(key, field) \
+  err = load_i16(handle, key, &config.field, &seeded); \
+  if (err != ESP_OK) { goto done; }
+  LOAD_STRING("device_id", device_id)
+  LOAD_STRING("room_name", room_name)
+  LOAD_STRING("location", location)
+  LOAD_STRING("timezone", timezone)
+  LOAD_STRING("wifi_ssid", wifi_ssid)
+  LOAD_STRING("wifi_pass", wifi_password)
+  LOAD_STRING("msg_share", message_sharing)
+  LOAD_STRING("clock_face", default_clock_face)
+  LOAD_STRING("time_fmt", time_format)
+  LOAD_STRING("units", units)
+  LOAD_STRING("lat", latitude)
+  LOAD_STRING("lon", longitude)
+  LOAD_STRING("night_st", night_shift_start)
+  LOAD_STRING("night_end", night_shift_end)
+  LOAD_I16("sunset_offset", night_sunset_offset_minutes)
+  LOAD_I16("sunrise_offset", night_sunrise_offset_minutes)
+  LOAD_U8("day_brightness", day_brightness)
+  LOAD_U8("night_bright", night_brightness)
+  LOAD_U8("alarm_hour", alarm_hour)
+  LOAD_U8("alarm_minute", alarm_minute)
+  LOAD_U8("alarm_days", alarm_repeat_days)
+  LOAD_U8("alarm_volume", alarm_volume)
+  LOAD_U8("alarm_snooze", alarm_snooze_minutes)
+#undef LOAD_STRING
+#undef LOAD_U8
+#undef LOAD_I16
+  value = config.leading_zero_12h;
+  err = load_u8(handle, "lead_zero", &value, &seeded);
+  if (err != ESP_OK) { goto done; }
+  if (value > 1) { err = ESP_ERR_INVALID_ARG; goto done; }
+  config.leading_zero_12h = value != 0;
+  value = config.alarm_enabled;
+  err = load_u8(handle, "alarm_enabled", &value, &seeded);
+  if (err != ESP_OK) { goto done; }
+  if (value > 1) { err = ESP_ERR_INVALID_ARG; goto done; }
+  config.alarm_enabled = value != 0;
+  value = config.night_shift_mode;
+  err = load_u8(handle, "night_mode", &value, &seeded);
+  if (err != ESP_OK) { goto done; }
+  config.night_shift_mode = (device_config_night_mode_t) value;
+  value = config.alarm_sound;
+  err = load_u8(handle, "alarm_sound", &value, &seeded);
+  if (err != ESP_OK) { goto done; }
+  config.alarm_sound = (device_config_alarm_sound_t) value;
 
-  bool dirty = false;
-
-  err = load_or_seed_string(
-    handle,
-    "device_id",
-    config->device_id,
-    sizeof(config->device_id),
-    config->device_id,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "room_name",
-    config->room_name,
-    sizeof(config->room_name),
-    config->room_name,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "location",
-    config->location,
-    sizeof(config->location),
-    config->location,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "timezone",
-    config->timezone,
-    sizeof(config->timezone),
-    config->timezone,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "wifi_ssid",
-    config->wifi_ssid,
-    sizeof(config->wifi_ssid),
-    "",
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "wifi_pass",
-    config->wifi_password,
-    sizeof(config->wifi_password),
-    "",
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "msg_share",
-    config->message_sharing,
-    sizeof(config->message_sharing),
-    config->message_sharing,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "clock_face",
-    config->default_clock_face,
-    sizeof(config->default_clock_face),
-    config->default_clock_face,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "time_fmt",
-    config->time_format,
-    sizeof(config->time_format),
-    config->time_format,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "units",
-    config->units,
-    sizeof(config->units),
-    config->units,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "lat",
-    config->latitude,
-    sizeof(config->latitude),
-    config->latitude,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "lon",
-    config->longitude,
-    sizeof(config->longitude),
-    config->longitude,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "night_st",
-    config->night_shift_start,
-    sizeof(config->night_shift_start),
-    config->night_shift_start,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = load_or_seed_string(
-    handle,
-    "night_end",
-    config->night_shift_end,
-    sizeof(config->night_shift_end),
-    config->night_shift_end,
-    &dirty
-  );
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  uint8_t night_shift = 0;
-  err = nvs_get_u8(handle, "night", &night_shift);
-  if (err == ESP_ERR_NVS_NOT_FOUND) {
-    err = nvs_set_u8(handle, "night", 0);
-    if (err == ESP_OK) {
-      dirty = true;
-    }
-  } else if (err != ESP_OK) {
-    goto exit;
-  }
-  config->night_shift_enabled = (night_shift != 0);
-
-  uint8_t leading_zero = 1;
-  err = nvs_get_u8(handle, "lead_zero", &leading_zero);
-  if (err == ESP_ERR_NVS_NOT_FOUND) {
-    err = nvs_set_u8(handle, "lead_zero", 1);
-    if (err == ESP_OK) {
-      dirty = true;
-    }
-  } else if (err != ESP_OK) {
-    goto exit;
-  }
-  config->leading_zero_12h = (leading_zero != 0);
-
-  uint8_t location_ready = 0;
-  err = nvs_get_u8(handle, "loc_ready", &location_ready);
-  if (err == ESP_ERR_NVS_NOT_FOUND) {
-    err = nvs_set_u8(handle, "loc_ready", 0);
-    if (err == ESP_OK) {
-      dirty = true;
-    }
-  } else if (err != ESP_OK) {
-    goto exit;
-  }
-  config->location_ready = (location_ready != 0);
-
-  uint8_t setup_flow_version = 0;
-  err = nvs_get_u8(handle, "setup_ver", &setup_flow_version);
-  if (err == ESP_ERR_NVS_NOT_FOUND) {
-    setup_flow_version = 0;
-  } else if (err != ESP_OK) {
-    goto exit;
-  }
-
-  if (setup_flow_version < DEVICE_CONFIG_SETUP_FLOW_VERSION) {
-    config->location_ready = false;
-    err = nvs_set_u8(handle, "loc_ready", 0);
-    if (err != ESP_OK) {
-      goto exit;
-    }
-    err = nvs_set_u8(handle, "setup_ver", DEVICE_CONFIG_SETUP_FLOW_VERSION);
-    if (err != ESP_OK) {
-      goto exit;
-    }
-    dirty = true;
-  }
-
-  uint32_t boot_count = 0;
-  err = nvs_get_u32(handle, "boot_count", &boot_count);
-  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
-  }
-
-  config->boot_count = boot_count + 1;
-  err = nvs_set_u32(handle, "boot_count", config->boot_count);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-  dirty = true;
-
-  config->wifi_ready = (config->wifi_ssid[0] != '\0');
-  config->location_ready = (config->location_ready
-    && config->latitude[0] != '\0'
-    && config->longitude[0] != '\0'
-    && config->timezone[0] != '\0');
-
-  if (dirty) {
+  err = validate_settings(&config, true);
+  if (err == ESP_OK && seeded) {
     err = nvs_commit(handle);
   }
-
-exit:
+  if (err == ESP_OK) {
+    derive_readiness(&config);
+    publish(&config);
+  }
+done:
   nvs_close(handle);
+  xSemaphoreGive(s_save_lock);
   return err;
 }
 
-esp_err_t device_config_save(device_config_t *config)
+esp_err_t device_config_copy(device_config_t *config)
 {
   if (config == NULL) {
     return ESP_ERR_INVALID_ARG;
   }
+  if (s_copy_lock == NULL) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  xSemaphoreTake(s_copy_lock, portMAX_DELAY);
+  esp_err_t err = ESP_ERR_INVALID_STATE;
+  if (s_initialized) {
+    *config = s_applied;
+    err = ESP_OK;
+  }
+  xSemaphoreGive(s_copy_lock);
+  return err;
+}
 
-  config->wifi_ready = (config->wifi_ssid[0] != '\0');
-  config->location_ready = (config->location_ready
-    && config->latitude[0] != '\0'
-    && config->longitude[0] != '\0'
-    && config->timezone[0] != '\0');
+typedef enum {
+  SAVE_DEVICE,
+  SAVE_WEATHER,
+  SAVE_ALARM,
+  SAVE_ALARM_ENABLED,
+} settings_save_t;
 
+static esp_err_t write_settings(settings_save_t group, const device_config_t *config)
+{
   nvs_handle_t handle = 0;
   esp_err_t err = nvs_open(DEVICE_CONFIG_NAMESPACE, NVS_READWRITE, &handle);
   if (err != ESP_OK) {
     return err;
   }
-
-  err = save_string(handle, "device_id", config->device_id);
-  if (err != ESP_OK) {
-    goto exit;
+#define SAVE_STRING(key, field) \
+  err = nvs_set_str(handle, key, config->field); \
+  if (err != ESP_OK) { goto done; }
+#define SAVE_NUMBER(type, key, field) \
+  err = nvs_set_##type(handle, key, config->field); \
+  if (err != ESP_OK) { goto done; }
+  /* Each explicit Save writes its own entries, including unchanged values.
+   * The merged config already preserves choices this editor did not change. */
+  switch (group) {
+    case SAVE_DEVICE:
+      /* Disable Shared before restoring a default ID; install an individual
+       * ID before enabling Shared. This also holds across a failed-save retry. */
+      if (strcmp(config->message_sharing, "single") == 0) {
+        SAVE_STRING("msg_share", message_sharing)
+      }
+      SAVE_STRING("device_id", device_id)
+      SAVE_STRING("room_name", room_name)
+      SAVE_STRING("wifi_ssid", wifi_ssid)
+      SAVE_STRING("wifi_pass", wifi_password)
+      if (strcmp(config->message_sharing, "shared") == 0) {
+        SAVE_STRING("msg_share", message_sharing)
+      }
+      SAVE_STRING("clock_face", default_clock_face)
+      SAVE_STRING("time_fmt", time_format)
+      SAVE_STRING("night_st", night_shift_start)
+      SAVE_STRING("night_end", night_shift_end)
+      SAVE_NUMBER(u8, "lead_zero", leading_zero_12h)
+      SAVE_NUMBER(u8, "night_mode", night_shift_mode)
+      SAVE_NUMBER(i16, "sunset_offset", night_sunset_offset_minutes)
+      SAVE_NUMBER(i16, "sunrise_offset", night_sunrise_offset_minutes)
+      SAVE_NUMBER(u8, "day_brightness", day_brightness)
+      SAVE_NUMBER(u8, "night_bright", night_brightness)
+      break;
+    case SAVE_WEATHER:
+      SAVE_STRING("location", location)
+      SAVE_STRING("timezone", timezone)
+      SAVE_STRING("units", units)
+      SAVE_STRING("lat", latitude)
+      SAVE_STRING("lon", longitude)
+      break;
+    case SAVE_ALARM:
+      SAVE_NUMBER(u8, "alarm_enabled", alarm_enabled)
+      SAVE_NUMBER(u8, "alarm_hour", alarm_hour)
+      SAVE_NUMBER(u8, "alarm_minute", alarm_minute)
+      SAVE_NUMBER(u8, "alarm_days", alarm_repeat_days)
+      SAVE_NUMBER(u8, "alarm_sound", alarm_sound)
+      SAVE_NUMBER(u8, "alarm_volume", alarm_volume)
+      SAVE_NUMBER(u8, "alarm_snooze", alarm_snooze_minutes)
+      break;
+    case SAVE_ALARM_ENABLED:
+      SAVE_NUMBER(u8, "alarm_enabled", alarm_enabled)
+      break;
   }
-
-  err = save_string(handle, "room_name", config->room_name);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "location", config->location);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "timezone", config->timezone);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "wifi_ssid", config->wifi_ssid);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "wifi_pass", config->wifi_password);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "msg_share", config->message_sharing);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "clock_face", config->default_clock_face);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "time_fmt", config->time_format);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "units", config->units);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "lat", config->latitude);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "lon", config->longitude);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = nvs_set_u8(handle, "loc_ready", config->location_ready ? 1 : 0);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = nvs_set_u8(handle, "setup_ver", DEVICE_CONFIG_SETUP_FLOW_VERSION);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "night_st", config->night_shift_start);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = save_string(handle, "night_end", config->night_shift_end);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = nvs_set_u8(handle, "night", config->night_shift_enabled ? 1 : 0);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = nvs_set_u8(handle, "lead_zero", config->leading_zero_12h ? 1 : 0);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
-  err = nvs_set_u32(handle, "boot_count", config->boot_count);
-  if (err != ESP_OK) {
-    goto exit;
-  }
-
+#undef SAVE_STRING
+#undef SAVE_NUMBER
   err = nvs_commit(handle);
-
-exit:
+done:
   nvs_close(handle);
   return err;
+}
+
+static esp_err_t begin_save(device_config_t *before)
+{
+  if (s_save_lock == NULL) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  xSemaphoreTake(s_save_lock, portMAX_DELAY);
+  esp_err_t err = device_config_copy(before);
+  if (err != ESP_OK) {
+    xSemaphoreGive(s_save_lock);
+  }
+  return err;
+}
+
+static esp_err_t finish_save(device_config_t *after, settings_save_t group)
+{
+  esp_err_t err = validate_settings(after, group != SAVE_WEATHER);
+  if (err == ESP_OK) {
+    derive_readiness(after);
+    err = write_settings(group, after);
+  }
+  if (err == ESP_OK) {
+    publish(after);
+  }
+  xSemaphoreGive(s_save_lock);
+  return err;
+}
+
+#define MERGE_STRING(field) \
+  if (strcmp(baseline->field, draft->field) != 0) { \
+    memcpy(after.field, draft->field, sizeof(after.field)); \
+  }
+#define MERGE_NUMBER(field) \
+  if (baseline->field != draft->field) { after.field = draft->field; }
+
+esp_err_t device_config_save_device(const device_config_t *baseline, const device_config_t *draft)
+{
+  if (!strings_terminated(baseline) || !strings_terminated(draft)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  device_config_t before;
+  esp_err_t err = begin_save(&before);
+  if (err != ESP_OK) { return err; }
+  device_config_t after = before;
+  MERGE_STRING(device_id)
+  MERGE_STRING(room_name)
+  MERGE_STRING(wifi_ssid)
+  MERGE_STRING(wifi_password)
+  MERGE_STRING(message_sharing)
+  MERGE_STRING(default_clock_face)
+  MERGE_STRING(time_format)
+  MERGE_STRING(night_shift_start)
+  MERGE_STRING(night_shift_end)
+  MERGE_NUMBER(leading_zero_12h)
+  MERGE_NUMBER(night_shift_mode)
+  MERGE_NUMBER(night_sunset_offset_minutes)
+  MERGE_NUMBER(night_sunrise_offset_minutes)
+  MERGE_NUMBER(day_brightness)
+  MERGE_NUMBER(night_brightness)
+  return finish_save(&after, SAVE_DEVICE);
+}
+
+esp_err_t device_config_save_weather(const device_config_t *baseline, const device_config_t *draft)
+{
+  if (!strings_terminated(baseline) || !strings_terminated(draft)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  device_config_t before;
+  esp_err_t err = begin_save(&before);
+  if (err != ESP_OK) { return err; }
+  device_config_t after = before;
+  MERGE_STRING(location)
+  MERGE_STRING(latitude)
+  MERGE_STRING(longitude)
+  MERGE_STRING(timezone)
+  MERGE_STRING(units)
+  /* Unlike initial defaults, an explicitly saved location must be resolved. */
+  if (!has_text(after.location)) {
+    xSemaphoreGive(s_save_lock);
+    return ESP_ERR_INVALID_ARG;
+  }
+  return finish_save(&after, SAVE_WEATHER);
+}
+
+esp_err_t device_config_save_alarm(const device_config_t *baseline, const device_config_t *draft)
+{
+  if (baseline == NULL || draft == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  device_config_t before;
+  esp_err_t err = begin_save(&before);
+  if (err != ESP_OK) { return err; }
+  device_config_t after = before;
+  MERGE_NUMBER(alarm_enabled)
+  MERGE_NUMBER(alarm_hour)
+  MERGE_NUMBER(alarm_minute)
+  MERGE_NUMBER(alarm_repeat_days)
+  MERGE_NUMBER(alarm_sound)
+  MERGE_NUMBER(alarm_volume)
+  MERGE_NUMBER(alarm_snooze_minutes)
+  return finish_save(&after, SAVE_ALARM);
+}
+#undef MERGE_STRING
+#undef MERGE_NUMBER
+
+esp_err_t device_config_set_alarm_enabled(bool enabled)
+{
+  device_config_t before;
+  esp_err_t err = begin_save(&before);
+  if (err != ESP_OK) { return err; }
+  device_config_t after = before;
+  after.alarm_enabled = enabled;
+  return finish_save(&after, SAVE_ALARM_ENABLED);
 }

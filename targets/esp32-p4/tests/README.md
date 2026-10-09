@@ -1,59 +1,68 @@
-# Weather-logic parity tests
+# ESP32-P4 native checks
 
-The ESP32-P4 firmware can't run JavaScript, so the shared business logic in
-`shared/logic/` (the forecast-representative heuristic, the geocoding
-result scorer) is hand-ported to C:
+These checks compile the actual firmware logic on the development computer.
+They do not establish touchscreen behavior, real network traffic, physical
+power-cut outcomes, RTC hardware, speaker sound or backlight behavior.
 
-- `shared/logic/forecast-representative.js` &harr; `main/forecast_representative.c`
-- `shared/logic/open-meteo-location.js` &harr; `main/location_scoring.c`
+## Weather and location
 
-Both C ports are deliberately free of ESP-IDF dependencies (only `cJSON` +
-the C standard library), so they compile natively on a dev machine. This
-directory tests them against the *exact same* JSON fixtures the JS side is
-tested against:
-
-- `shared/test-data/forecast-representative-cases.json`
-- `shared/test-data/location-resolution-cases.json`
-
-If the JS and C implementations ever disagree on a fixture case, one of the
-two test runs fails loudly. That's the whole point: this is a
-development-time / CI-time check, not something an end user ever sees. If
-you change the heuristic or the scorer on one side, run both suites before
-shipping:
+Activate ESP-IDF 5.5.5 as described in the [target guide](../README.md#prepare-the-environment-no-board-needed), then run from the repository root:
 
 ```bash
-npm run test:forecast          # JS, targets/pi/scripts/validate-forecast-representative.js
-npm run test:location          # JS, shared/scripts/validate-location-resolution.js
-npm run test:esp32-parity      # C, this directory
-npm run test:all               # all three
+targets/esp32-p4/scripts/test-weather-parity.sh
 ```
 
-`test:esp32-parity` compiles with host `cc`; no board or cross-compilation is required. It uses cJSON from `$IDF_PATH/components/json/cJSON`. Follow the [environment preparation instructions](../README.md#prepare-the-environment-no-board-needed) before running the commands above. If only running native checks, setting `IDF_PATH` to that installation is sufficient.
+The retained script name runs C forecast, location and conditions checks against
+fixtures in `shared/test-data/`. It also checks that provider search names retain
+state/country qualifiers before the provider's result limit. No Raspberry Pi or
+JavaScript suite is required. cJSON is read from `$IDF_PATH/components/json/cJSON`.
 
-## macOS: "xcode-select" / broken `cc`
-
-If `cc` fails with something like `xcodebuild ... failed` or `Failed to
-locate 'clang'`, that's a broken Xcode Command Line Tools selection on your
-Mac -- unrelated to this project. Either fix it (`sudo xcode-select
---reset`, or reinstall the Command Line Tools), or point the script at the
-CommandLineTools clang directly for one run:
+If the selected macOS compiler is broken, use the installed Command Line Tools
+compiler for this run:
 
 ```bash
-CC=/Library/Developer/CommandLineTools/usr/bin/clang npm run test:esp32-parity
+CC=/Library/Developer/CommandLineTools/usr/bin/clang targets/esp32-p4/scripts/test-weather-parity.sh
 ```
 
-## Adding a new fixture case
+## Settings, timezone and Save controls
 
-Add it to the relevant JSON file in `shared/test-data/` -- both the JS test
-and this C test read the same file, so one new fixture exercises both
-implementations. No need to duplicate a case by hand in two languages.
+```bash
+cmake -S targets/esp32-p4/tests/wac -B /tmp/wac-native-tests
+cmake --build /tmp/wac-native-tests
+ctest --test-dir /tmp/wac-native-tests --output-on-failure
+```
 
-## Message acknowledgement regression
+Managed dependencies must already be available from a normal firmware build.
+The UI target uses the existing managed LVGL library with a native configuration.
 
-With `IDF_PATH` set as above, run from the repository root:
+The settings tests compile `main/device_config.c` with typed NVS substitutes and
+ordinary thread locks. They cover defaults, validation, editor changes merged
+into current settings, full selected-group saves, failure/corrected-retry reads,
+missing keys, returned storage errors, accepted partial saves and readers during
+a blocked save. The substitute deliberately permits stored keys
+to change before commit; this is a test example of allowed partial outcomes,
+not evidence of a physical power-cut result. Time checks exercise the existing
+timezone mapping, including winter/summer local offsets; RTC behavior is not yet
+implemented or tested.
+
+The settings-control target compiles production `wac/ui/settings.c` with real LVGL
+objects and events. It checks nested Done/Cancel, shared Wi-Fi drafts, deferred
+Save, duplicate blocking, validation, save failure/retry, resolved-location retry
+without Wi-Fi, immediate enable, stale completion handling, and character entry
+and editing through actual keyboard events. Network work and
+tasks are substitutes, and navigation callbacks from `ui.c` are substituted;
+full-shell first-use routing is reviewed from source rather than executed here.
+The UI target also checks the actual generated clock font for live-time and
+unavailable-time characters through LVGL glyph lookup.
+
+## Message acknowledgement
+
+With `IDF_PATH` set as above:
 
 ```bash
 python3 targets/esp32-p4/tests/test_message_ack.py
 ```
 
-This compiles the actual acknowledgement and record-lookup functions with native network and task-lock substitutes. It checks that a newer arrival cannot replace the displayed ID, including shared-message requests, and covers missing, inactive, expired and differently targeted messages. It does not simulate touchscreen timing or real network traffic.
+This compiles the actual acknowledgement and record-lookup functions with native
+network and task-lock substitutes. It covers displayed-message identity, shared
+requests, and missing, inactive, expired and differently targeted messages.

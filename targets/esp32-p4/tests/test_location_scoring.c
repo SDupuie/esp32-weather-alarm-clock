@@ -64,6 +64,26 @@ int main(int argc, char **argv)
   }
 
   int failures = 0;
+  const struct { const char *query; const char *search; const char *country; } searches[] = {
+    {"Cincinnati,OH,US", "Cincinnati,Ohio", "US"},
+    {"Paris,FR", "Paris,FR", ""},
+    {"Portland,OR,US", "Portland,Oregon", "US"},
+    {"London,United Kingdom", "London,United Kingdom", ""},
+    {"Perth,WA,AU", "Perth,WA", "AU"},
+    {"Tokyo", "Tokyo", ""},
+  };
+  for (size_t i = 0; i < sizeof(searches) / sizeof(searches[0]); ++i) {
+    location_query_parts_t parts;
+    char search[LOCATION_SCORING_STR_LEN * 2 + 1];
+    location_scoring_parse_query(searches[i].query, &parts);
+    location_scoring_format_search_name(&parts, search, sizeof(search));
+    if (strcmp(search, searches[i].search) != 0 || strcmp(parts.country, searches[i].country) != 0
+        || parts.country_is_alpha2 != (searches[i].country[0] != '\0')) {
+      fprintf(stderr, "FAIL provider query: %s -> %s\n", searches[i].query, search);
+      ++failures;
+    }
+  }
+
   int total = 0;
   cJSON *test_case = NULL;
 

@@ -16,7 +16,7 @@ set -euo pipefail
 # natively at that size) and dropping the transform_scale fixes it.
 #
 # Each font's glyph range is restricted to just the characters that label
-# ever displays (digits, plus ':' for time or '-'/'°' for temperature),
+# ever displays (digits, plus ':'/'-' for time or '-'/'°' for temperature),
 # not the full ASCII range LVGL's own built-ins cover -- keeping each font
 # small despite the much larger pixel size.
 #
@@ -80,8 +80,8 @@ extern const lv_font_t ${symbol};
 EOF
 }
 
-# Digits + colon -- the digital clock face's time label ("10:42").
-generate_font "lv_font_clock_time_144" 144 "0x30-0x39,0x3A"
+# Digits + colon + hyphen -- live time ("10:42") and unavailable time ("--:--").
+generate_font "lv_font_clock_time_144" 144 "0x2D,0x30-0x39,0x3A"
 
 # Digits + minus + degree sign -- temperature can go below zero.
 generate_font "lv_font_temp_105" 105 "0x2D,0x30-0x39,0xB0"

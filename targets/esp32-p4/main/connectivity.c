@@ -16,11 +16,11 @@
 #include "esp_sntp.h"
 #include "esp_wifi.h"
 
-#include "timezone_table.h"
 
 static const char *TAG = "rwd_connectivity";
 
 #define WIFI_CONNECTED_BIT BIT0
+#define NETWORK_TIME_SYNCED_BIT BIT1
 #define VALID_CLOCK_EPOCH 1704067200
 
 static EventGroupHandle_t s_wifi_event_group;
@@ -32,38 +32,6 @@ static bool s_wifi_event_handlers_registered;
 static bool s_wifi_auto_connect_enabled;
 static bool s_sntp_initialized;
 static bool s_runtime_prepared;
-
-/* Looks up the real POSIX TZ string (DST rule and all) for an IANA zone
- * name via TIMEZONE_MAPPINGS (targets/esp32-p4/tools/generate_timezone_table.py,
- * derived from the host's own tzdata at generation time -- ESP-IDF/newlib
- * has no zoneinfo database on-device, so a raw IANA name like "Asia/Tokyo"
- * passed straight to setenv("TZ", ...) does not resolve to correct
- * offset/DST behavior). Falls back to the raw string only for the
- * essentially-never-hit case of a zone added to IANA's database after this
- * table was last generated. */
-static const char *resolve_timezone(const char *timezone)
-{
-  if (timezone == NULL || timezone[0] == '\0') {
-    return "UTC0";
-  }
-
-  for (size_t i = 0; i < TIMEZONE_MAPPINGS_COUNT; ++i) {
-    if (strcmp(timezone, TIMEZONE_MAPPINGS[i].iana_name) == 0) {
-      return TIMEZONE_MAPPINGS[i].posix_name;
-    }
-  }
-
-  ESP_LOGW(TAG, "No POSIX TZ mapping for '%s' (table may be stale); DST/offset may be wrong", timezone);
-  return timezone;
-}
-
-void connectivity_apply_timezone(const char *timezone)
-{
-  const char *resolved_timezone = resolve_timezone(timezone);
-  setenv("TZ", resolved_timezone, 1);
-  tzset();
-  ESP_LOGI(TAG, "Applied timezone '%s' as '%s'", timezone != NULL ? timezone : "", resolved_timezone);
-}
 
 static void connectivity_event_handler(
   void *arg,
@@ -157,6 +125,8 @@ static esp_err_t connectivity_prepare_stack(void)
     ESP_RETURN_ON_ERROR(esp_wifi_init(&wifi_init_config), TAG, "esp_wifi_init failed");
     s_wifi_driver_initialized = true;
   }
+
+  ESP_RETURN_ON_ERROR(esp_wifi_set_storage(WIFI_STORAGE_RAM), TAG, "Wi-Fi RAM storage failed");
 
   return ESP_OK;
 }
@@ -385,31 +355,38 @@ bool connectivity_get_local_ipv4(char *buffer, size_t buffer_size)
   return true;
 }
 
-bool connectivity_is_time_valid(void)
+bool connectivity_is_time_synced(void)
 {
-  time_t now = time(NULL);
-  return now >= VALID_CLOCK_EPOCH;
+  return s_wifi_event_group != NULL
+    && (xEventGroupGetBits(s_wifi_event_group) & NETWORK_TIME_SYNCED_BIT) != 0;
 }
 
-esp_err_t connectivity_sync_time(const char *timezone, TickType_t timeout_ticks)
+static void network_time_sync_cb(struct timeval *tv)
 {
-  connectivity_apply_timezone(timezone);
+  if (tv != NULL && tv->tv_sec >= VALID_CLOCK_EPOCH) {
+    xEventGroupSetBits(s_wifi_event_group, NETWORK_TIME_SYNCED_BIT);
+  }
+}
 
-  if (connectivity_is_time_valid()) {
+esp_err_t connectivity_sync_time(TickType_t timeout_ticks)
+{
+  if (s_wifi_event_group == NULL) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  if (connectivity_is_time_synced()) {
     return ESP_OK;
   }
 
   if (!s_sntp_initialized) {
     esp_sntp_config_t sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     sntp_config.start = true;
+    sntp_config.wait_for_sync = false;
+    sntp_config.sync_cb = network_time_sync_cb;
     ESP_RETURN_ON_ERROR(esp_netif_sntp_init(&sntp_config), TAG, "esp_netif_sntp_init failed");
     s_sntp_initialized = true;
   }
 
-  esp_err_t err = esp_netif_sntp_sync_wait(timeout_ticks);
-  if (err != ESP_OK) {
-    return err;
-  }
-
-  return connectivity_is_time_valid() ? ESP_OK : ESP_FAIL;
+  EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, NETWORK_TIME_SYNCED_BIT,
+    pdFALSE, pdFALSE, timeout_ticks);
+  return (bits & NETWORK_TIME_SYNCED_BIT) != 0 ? ESP_OK : ESP_ERR_TIMEOUT;
 }

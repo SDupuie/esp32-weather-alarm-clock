@@ -25,6 +25,5 @@ esp_err_t connectivity_scan_networks(
 esp_err_t connectivity_wait_for_wifi(TickType_t timeout_ticks);
 bool connectivity_is_wifi_connected(void);
 bool connectivity_get_local_ipv4(char *buffer, size_t buffer_size);
-bool connectivity_is_time_valid(void);
-void connectivity_apply_timezone(const char *timezone);
-esp_err_t connectivity_sync_time(const char *timezone, TickType_t timeout_ticks);
+bool connectivity_is_time_synced(void);
+esp_err_t connectivity_sync_time(TickType_t timeout_ticks);

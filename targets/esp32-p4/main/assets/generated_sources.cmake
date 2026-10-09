@@ -1,12 +1,8 @@
 set(APP_ASSET_SOURCES
   "${CMAKE_CURRENT_LIST_DIR}/analog_center_cap.c"
-  "${CMAKE_CURRENT_LIST_DIR}/analog_dial_overlay_day.c"
-  "${CMAKE_CURRENT_LIST_DIR}/analog_dial_overlay_night.c"
   "${CMAKE_CURRENT_LIST_DIR}/analog_edge_indicator.c"
   "${CMAKE_CURRENT_LIST_DIR}/analog_hour_hand.c"
-  "${CMAKE_CURRENT_LIST_DIR}/analog_hour_hand_flat.c"
   "${CMAKE_CURRENT_LIST_DIR}/analog_minute_hand.c"
-  "${CMAKE_CURRENT_LIST_DIR}/analog_minute_hand_flat.c"
   "${CMAKE_CURRENT_LIST_DIR}/analog_second_hand.c"
   "${CMAKE_CURRENT_LIST_DIR}/analog_stage_day.c"
   "${CMAKE_CURRENT_LIST_DIR}/analog_stage_night.c"

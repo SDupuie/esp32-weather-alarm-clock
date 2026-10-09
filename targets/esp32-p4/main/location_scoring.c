@@ -226,7 +226,22 @@ void location_scoring_parse_query(const char *raw_query, location_query_parts_t 
   }
 
   out_parts->country_is_alpha2 = is_alpha2_code(out_parts->country);
-  resolve_state_name(out_parts->state, out_parts->state_name, sizeof(out_parts->state_name));
+  if (out_parts->country[0] == '\0' || strings_equal_ignore_case(out_parts->country, "US")) {
+    resolve_state_name(out_parts->state, out_parts->state_name, sizeof(out_parts->state_name));
+  } else {
+    copy_string(out_parts->state_name, sizeof(out_parts->state_name), out_parts->state);
+  }
+}
+
+void location_scoring_format_search_name(
+  const location_query_parts_t *parts, char *output, size_t output_size
+)
+{
+  if (parts == NULL || output == NULL || output_size == 0) {
+    return;
+  }
+  snprintf(output, output_size, "%s%s%s", parts->name,
+    parts->state_name[0] != '\0' ? "," : "", parts->state_name);
 }
 
 void location_scoring_format_label(

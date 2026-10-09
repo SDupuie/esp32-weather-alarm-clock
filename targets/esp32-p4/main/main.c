@@ -17,14 +17,13 @@
 #include "bsp/esp32_p4_wifi6_touch_lcd_xc.h"
 
 #include "app_runtime.h"
-#include "app_benchmark.h"
-#include "app_parity_lab.h"
 #include "app_ui.h"
 #include "bsp_shims.h"
 #include "connectivity.h"
 #include "device_config.h"
 #include "message_service.h"
 #include "weather_client.h"
+#include "wac/time.h"
 
 static const char *TAG = "rwd_esp32_p4";
 
@@ -36,7 +35,6 @@ static const uint32_t TIME_SYNC_TIMEOUT_MS = 20000;
 static const uint32_t WEATHER_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 static const uint32_t WEATHER_RETRY_INTERVAL_MS = 20000;
 
-static device_config_t s_device_config;
 static app_runtime_state_t s_runtime_state;
 static SemaphoreHandle_t s_runtime_mutex;
 
@@ -75,27 +73,16 @@ static void copy_text(char *dest, size_t dest_size, const char *src)
   snprintf(dest, dest_size, "%s", src);
 }
 
-static esp_err_t init_nvs(void)
-{
-  esp_err_t err = nvs_flash_init();
-  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    err = nvs_flash_init();
-  }
-
-  return err;
-}
-
-static void runtime_state_seed(void)
+static void runtime_state_seed(const device_config_t *config)
 {
   memset(&s_runtime_state, 0, sizeof(s_runtime_state));
-  s_runtime_state.wifi_configured = s_device_config.wifi_ready;
+  s_runtime_state.wifi_configured = config->wifi_ready;
   copy_text(
     s_runtime_state.weather_status,
     sizeof(s_runtime_state.weather_status),
-    !s_device_config.wifi_ready
+    !config->wifi_ready
       ? "No Wi-Fi profile found. Tap 'Set Up Wi-Fi' to connect."
-      : (s_device_config.location_ready
+      : (config->location_ready
           ? "Stored Wi-Fi profile found. Connecting for time sync and live weather..."
           : "Stored Wi-Fi profile found. Finish location setup for local weather.")
   );
@@ -110,6 +97,11 @@ static void runtime_state_update(
   const char *status_text
 )
 {
+  device_config_t config;
+  if (device_config_copy(&config) != ESP_OK) {
+    return;
+  }
+
   if (s_runtime_mutex == NULL) {
     return;
   }
@@ -119,7 +111,7 @@ static void runtime_state_update(
     return;
   }
 
-  s_runtime_state.wifi_configured = s_device_config.wifi_ready;
+  s_runtime_state.wifi_configured = config.wifi_ready;
   s_runtime_state.wifi_connected = wifi_connected;
   s_runtime_state.time_synced = time_synced;
   s_runtime_state.weather_fetch_in_progress = weather_fetch_in_progress;
@@ -136,14 +128,14 @@ static void runtime_state_update(
   xSemaphoreGive(s_runtime_mutex);
 }
 
-static void runtime_state_snapshot(app_runtime_state_t *out_runtime)
+static void runtime_state_snapshot(app_runtime_state_t *out_runtime, const device_config_t *config)
 {
   if (out_runtime == NULL) {
     return;
   }
 
   memset(out_runtime, 0, sizeof(*out_runtime));
-  out_runtime->wifi_configured = s_device_config.wifi_ready;
+  out_runtime->wifi_configured = config->wifi_ready;
 
   if (s_runtime_mutex == NULL) {
     return;
@@ -160,7 +152,7 @@ static void runtime_state_snapshot(app_runtime_state_t *out_runtime)
   uint32_t unread_count = 0;
   bool has_important_message = false;
   if (message_service_get_snapshot(
-        s_device_config.device_id,
+        config->device_id,
         &message_snapshot,
         &unread_count,
         &has_important_message
@@ -203,10 +195,14 @@ static void ui_heartbeat_task(void *arg)
      * full weather snapshot including the conditions summary. Only this
      * task touches it. */
     static app_runtime_state_t runtime_snapshot;
-    runtime_state_snapshot(&runtime_snapshot);
+    device_config_t config;
+    if (device_config_copy(&config) != ESP_OK) {
+      continue;
+    }
+    runtime_state_snapshot(&runtime_snapshot, &config);
 
     if (bsp_display_lock(UI_HEARTBEAT_LOCK_TIMEOUT_MS) == ESP_OK) {
-      app_ui_update_runtime(&s_device_config, &runtime_snapshot, uptime_seconds);
+      app_ui_update_runtime(&config, &runtime_snapshot, uptime_seconds);
       bsp_display_unlock();
     }
   }
@@ -224,9 +220,14 @@ static void weather_service_task(void *arg)
   bool reported_missing_wifi_profile = false;
 
   while (true) {
-    bool time_synced = connectivity_is_time_valid();
+    device_config_t config;
+    if (device_config_copy(&config) != ESP_OK) {
+      vTaskDelay(retry_delay_ticks);
+      continue;
+    }
+    bool time_synced = connectivity_is_time_synced();
 
-    if (!s_device_config.wifi_ready) {
+    if (!config.wifi_ready) {
       if (!reported_missing_wifi_profile) {
         ESP_LOGI(TAG, "No stored Wi-Fi profile is available yet; waiting for setup");
         reported_missing_wifi_profile = true;
@@ -247,7 +248,7 @@ static void weather_service_task(void *arg)
     reported_missing_wifi_profile = false;
 
     if (!connectivity_started) {
-      ESP_LOGI(TAG, "Initializing Wi-Fi station for SSID '%s'", s_device_config.wifi_ssid);
+      ESP_LOGI(TAG, "Initializing Wi-Fi station for SSID '%s'", config.wifi_ssid);
       runtime_state_update(
         false,
         time_synced,
@@ -257,7 +258,7 @@ static void weather_service_task(void *arg)
         "Connecting to Wi-Fi..."
       );
 
-      esp_err_t err = connectivity_init(&s_device_config);
+      esp_err_t err = connectivity_init(&config);
       if (err != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi init failed: %s", esp_err_to_name(err));
         runtime_state_update(
@@ -302,7 +303,7 @@ static void weather_service_task(void *arg)
       }
 
       ESP_LOGI(TAG, "Wi-Fi association completed");
-      time_synced = connectivity_is_time_valid();
+      time_synced = connectivity_is_time_synced();
     }
 
     if (!time_synced) {
@@ -312,13 +313,13 @@ static void weather_service_task(void *arg)
         false,
         NULL,
         false,
-        s_device_config.location_ready
+        config.location_ready
           ? "Wi-Fi connected. Syncing time..."
           : "Wi-Fi connected. Syncing time while location is pending..."
       );
 
-      ESP_LOGI(TAG, "Synchronizing clock for timezone '%s'", s_device_config.timezone);
-      esp_err_t err = connectivity_sync_time(s_device_config.timezone, time_sync_timeout_ticks);
+      ESP_LOGI(TAG, "Synchronizing clock for timezone '%s'", config.timezone);
+      esp_err_t err = connectivity_sync_time(time_sync_timeout_ticks);
       if (err != ESP_OK) {
         ESP_LOGW(TAG, "Time sync failed: %s", esp_err_to_name(err));
         runtime_state_update(
@@ -338,7 +339,7 @@ static void weather_service_task(void *arg)
       log_device_clock("Clock after SNTP sync");
     }
 
-    if (!s_device_config.location_ready) {
+    if (!config.location_ready) {
       runtime_state_update(
         true,
         true,
@@ -355,13 +356,13 @@ static void weather_service_task(void *arg)
     ESP_LOGI(
       TAG,
       "Requesting live weather for %s,%s (%s units)",
-      s_device_config.latitude,
-      s_device_config.longitude,
-      s_device_config.units
+      config.latitude,
+      config.longitude,
+      config.units
     );
 
     app_weather_snapshot_t weather_snapshot = {0};
-    esp_err_t weather_err = weather_client_fetch(&s_device_config, &weather_snapshot);
+    esp_err_t weather_err = weather_client_fetch(&config, &weather_snapshot);
     if (weather_err != ESP_OK) {
       bool had_previous_weather = runtime_state_has_valid_weather();
       ESP_LOGW(TAG, "Weather refresh failed: %s", esp_err_to_name(weather_err));
@@ -393,9 +394,25 @@ static void weather_service_task(void *arg)
 
 void app_main(void)
 {
-  ESP_ERROR_CHECK(init_nvs());
-  ESP_ERROR_CHECK(device_config_load_or_init(&s_device_config));
-  connectivity_apply_timezone(s_device_config.timezone);
+  /* Storage failure stops dependent startup; never erase user data to repair it. */
+  esp_err_t storage_err = nvs_flash_init();
+  if (storage_err == ESP_OK) {
+    storage_err = device_config_init();
+  }
+  if (storage_err != ESP_OK) {
+    ESP_LOGE(TAG, "Settings startup failed: %s", esp_err_to_name(storage_err));
+    if (bsp_display_start() != NULL) {
+      if (bsp_display_lock(INITIAL_UI_LOCK_TIMEOUT_MS) == ESP_OK) {
+        app_ui_show_storage_error(storage_err);
+        bsp_display_unlock();
+      }
+      (void) bsp_display_backlight_on();
+    }
+    return;
+  }
+  device_config_t config;
+  ESP_ERROR_CHECK(device_config_copy(&config));
+  ESP_ERROR_CHECK(wac_time_apply_timezone(config.timezone));
   log_device_clock("Clock after boot timezone apply");
 
   s_runtime_mutex = xSemaphoreCreateMutex();
@@ -403,18 +420,17 @@ void app_main(void)
     ESP_LOGE(TAG, "Failed to allocate runtime mutex");
     return;
   }
-  runtime_state_seed();
+  runtime_state_seed(&config);
   ESP_ERROR_CHECK(connectivity_prepare_runtime());
-  ESP_ERROR_CHECK(message_service_init(&s_device_config));
+  ESP_ERROR_CHECK(message_service_init(&config));
 
   ESP_LOGI(
     TAG,
-    "Bootstrapping Round Weather Display on ESP32-P4 (%dx%d, room=%s, device=%s, boot=%lu)",
+    "Bootstrapping Round Weather Display on ESP32-P4 (%dx%d, room=%s, device=%s)",
     BSP_LCD_H_RES,
     BSP_LCD_V_RES,
-    s_device_config.room_name,
-    s_device_config.device_id,
-    (unsigned long) s_device_config.boot_count
+    config.room_name,
+    config.device_id
   );
 
   lv_display_t *display = bsp_display_start();
@@ -426,59 +442,13 @@ void app_main(void)
 
   bool touch_ready = (bsp_display_get_input_dev() != NULL);
 
-#if CONFIG_RWD_ENABLE_CLOCK_BENCHMARK
-  esp_err_t benchmark_lock_err = bsp_display_lock(INITIAL_UI_LOCK_TIMEOUT_MS);
-  if (benchmark_lock_err != ESP_OK) {
-    ESP_LOGE(TAG, "Could not lock LVGL during benchmark setup: %s", esp_err_to_name(benchmark_lock_err));
-    return;
-  }
-
-  ESP_LOGI(TAG, "Clock benchmark mode enabled; normal product UI remains disabled in this build");
-  esp_err_t benchmark_err = app_benchmark_start(display);
-  bsp_display_unlock();
-  if (benchmark_err != ESP_OK) {
-    ESP_LOGE(TAG, "Clock benchmark start failed: %s", esp_err_to_name(benchmark_err));
-    return;
-  }
-
-  esp_err_t benchmark_backlight_err = bsp_display_backlight_on();
-  if (benchmark_backlight_err != ESP_OK) {
-    ESP_LOGW(TAG, "Backlight enable returned %s", esp_err_to_name(benchmark_backlight_err));
-  }
-
-  return;
-#endif
-
-#if CONFIG_RWD_ENABLE_ANALOG_PARITY_LAB
-  esp_err_t parity_lab_lock_err = bsp_display_lock(INITIAL_UI_LOCK_TIMEOUT_MS);
-  if (parity_lab_lock_err != ESP_OK) {
-    ESP_LOGE(TAG, "Could not lock LVGL during parity lab setup: %s", esp_err_to_name(parity_lab_lock_err));
-    return;
-  }
-
-  ESP_LOGI(TAG, "Analog parity lab mode enabled; normal product UI remains disabled in this build");
-  esp_err_t parity_lab_err = app_parity_lab_start(display);
-  bsp_display_unlock();
-  if (parity_lab_err != ESP_OK) {
-    ESP_LOGE(TAG, "Analog parity lab start failed: %s", esp_err_to_name(parity_lab_err));
-    return;
-  }
-
-  esp_err_t parity_lab_backlight_err = bsp_display_backlight_on();
-  if (parity_lab_backlight_err != ESP_OK) {
-    ESP_LOGW(TAG, "Backlight enable returned %s", esp_err_to_name(parity_lab_backlight_err));
-  }
-
-  return;
-#endif
-
   esp_err_t lock_err = bsp_display_lock(INITIAL_UI_LOCK_TIMEOUT_MS);
   if (lock_err != ESP_OK) {
     ESP_LOGE(TAG, "Could not lock LVGL during initial draw: %s", esp_err_to_name(lock_err));
     return;
   }
 
-  ESP_ERROR_CHECK(app_ui_show_boot_screen(&s_device_config, touch_ready));
+  ESP_ERROR_CHECK(app_ui_show_boot_screen(&config, touch_ready));
   bsp_display_unlock();
 
   esp_err_t backlight_err = bsp_display_backlight_on();
