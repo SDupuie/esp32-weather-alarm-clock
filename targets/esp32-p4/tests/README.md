@@ -28,11 +28,7 @@ npm run test:esp32-parity      # C, this directory
 npm run test:all               # all three
 ```
 
-`test:esp32-parity` compiles with plain `cc` -- no ESP-IDF toolchain
-needed, no board required. It reuses the cJSON copy already vendored in
-`.esp-idf/esp-idf-v5.5.5/components/json/cJSON/` rather than vendoring a
-second copy, so ESP-IDF does need to be installed first
-(`targets/esp32-p4/scripts/setup.sh`).
+`test:esp32-parity` compiles with host `cc`; no board or cross-compilation is required. It uses cJSON from `$IDF_PATH/components/json/cJSON`. Follow the [environment preparation instructions](../README.md#prepare-the-environment-no-board-needed) before running the commands above. If only running native checks, setting `IDF_PATH` to that installation is sufficient.
 
 ## macOS: "xcode-select" / broken `cc`
 
@@ -51,3 +47,13 @@ CC=/Library/Developer/CommandLineTools/usr/bin/clang npm run test:esp32-parity
 Add it to the relevant JSON file in `shared/test-data/` -- both the JS test
 and this C test read the same file, so one new fixture exercises both
 implementations. No need to duplicate a case by hand in two languages.
+
+## Message acknowledgement regression
+
+With `IDF_PATH` set as above, run from the repository root:
+
+```bash
+python3 targets/esp32-p4/tests/test_message_ack.py
+```
+
+This compiles the actual acknowledgement and record-lookup functions with native network and task-lock substitutes. It checks that a newer arrival cannot replace the displayed ID, including shared-message requests, and covers missing, inactive, expired and differently targeted messages. It does not simulate touchscreen timing or real network traffic.

@@ -358,6 +358,7 @@ typedef struct {
   bool setup_location_lookup_in_progress;
   bool setup_restart_pending;
   bool has_unread_messages;
+  char displayed_message_id[APP_MESSAGE_ID_LEN];
   bool has_important_messages;
   bool pending_weather_diag_logged;
   lv_point_precise_t analog_tick_points[ANALOG_TICK_COUNT][2];
@@ -2572,7 +2573,7 @@ static int weather_row_index(app_view_mode_t view)
   return -1;
 }
 
-/* Same map as the Pi (shared/spec/product-spec.md, Navigation Contract):
+/* Navigation map:
  * only the configured face is home, and every screen is a fixed neighbour
  * of home that returns with the opposite swipe:
  *   right -> messages
@@ -2649,7 +2650,7 @@ static void gesture_layer_event_cb(lv_event_t *event)
         && LV_ABS(delta_x) < 12
         && LV_ABS(delta_y) < 12
         && s_ui.has_unread_messages) {
-      if (message_service_acknowledge_active(s_ui.config_snapshot.device_id) == ESP_OK) {
+      if (message_service_acknowledge(s_ui.config_snapshot.device_id, s_ui.displayed_message_id) == ESP_OK) {
         app_message_snapshot_t message_snapshot = {0};
         uint32_t unread_count = 0;
         bool has_important_message = false;
@@ -4355,6 +4356,7 @@ static void refresh_message_ui_state(
   }
 
   if (snapshot == NULL || !snapshot->available) {
+    s_ui.displayed_message_id[0] = '\0';
     if (s_ui.message_card != NULL) {
       lv_obj_add_flag(s_ui.message_card, LV_OBJ_FLAG_HIDDEN);
     }
@@ -4378,6 +4380,7 @@ static void refresh_message_ui_state(
     lv_obj_add_flag(s_ui.message_empty_label, LV_OBJ_FLAG_HIDDEN);
   }
 
+  snprintf(s_ui.displayed_message_id, sizeof(s_ui.displayed_message_id), "%s", snapshot->id);
   set_label_text(s_ui.message_text_label, snapshot->text);
   set_label_text(s_ui.message_meta_label, snapshot->meta);
   if (s_ui.message_meta_label != NULL) {

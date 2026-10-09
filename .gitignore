@@ -67,3 +67,6 @@ __pycache__/
 
 # UI debugging photo archive -- local reference only, not a product asset.
 ui_bugs/
+
+# Retired material and recovery archives; excluded from development and audits
+/archive/

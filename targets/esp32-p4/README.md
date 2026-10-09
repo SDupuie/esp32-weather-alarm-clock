@@ -2,49 +2,49 @@
 
 This target is the native firmware path for the Waveshare `ESP32-P4-WIFI6-Touch-LCD-3.4C` board family.
 
-It is intentionally separate from the Raspberry Pi runtime, but it follows the same shared product contract in:
+The [architecture and product specification](../../docs/wac/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. This checkout contains baseline firmware; the planned enhancements are not implemented yet.
 
-- `../../shared/spec/product-spec.md`
+## Prepare the environment (no board needed)
 
-## Current Scope
-
-This target includes:
-
-- A real ESP-IDF project layout, with WiFi via ESP-Hosted over SDIO to a companion ESP32-C6
-- Analog, digital, forecast, and message screens with Pi-matched layout/behavior
-- Live weather fetch (Open-Meteo) with icon/condition mapping
-- On-device WiFi provisioning (network scan + on-screen keyboard) and location setup/geocoding, driven by a touch UI
-- House messaging: the full JSON API (`/api/messages`, `/api/message-targets`, `/api/message-runtime`, ack/deactivate/sync) plus UDP hub discovery/election for shared mode across multiple clocks, and a served composer webpage at `http://<device-ip>/` (or `/messages`) so you can send a message from any browser on the LAN, the same way you would from the Pi's `/messages` page
-- NVS-backed device config with boot-count persistence
-- A `scripts/setup.sh` one-command install/update flow (see below)
-
-Known gap:
-
-- No wireless OTA firmware updates yet -- updating means re-running `scripts/setup.sh` with the board plugged in over USB
-
-## Setup / Update
-
-From the repo root, with the board connected over USB:
-
-```bash
-targets/esp32-p4/scripts/setup.sh
-```
-
-This is both the first-time setup path and the update path. It's safe to re-run any time: it pulls the latest source (skipping the pull if you have uncommitted local changes, so nothing gets clobbered), installs ESP-IDF `v5.5.5` if it isn't present yet (one-time, several GB), builds, detects the board's serial port (prompting you to pick if more than one is attached), and flashes. It'll also ask if you want to open the serial monitor afterward.
-
-Choosing hardware target `2` in the root `setup.sh` delegates straight to this script.
-
-## Manual build/flash (for iterative dev work)
-
-If you're actively working on the firmware and don't want the full setup script's git-pull/IDF-install checks every time:
+Use the existing ESP-IDF **5.5.5** installation outside the repository. On this workstation it is at `$HOME/.espressif/v5.5.5/esp-idf`. The installed environment script sets `IDF_PATH`, the Python environment and tool paths together:
 
 ```bash
 source targets/esp32-p4/scripts/activate-idf.sh
-targets/esp32-p4/scripts/set-target.sh
+idf.py --version
+```
+
+The helper sources `$HOME/.espressif/tools/activate_idf_v5.5.5.sh`, supplied by Espressif's installation manager. On another workstation, install version 5.5.5 with Espressif's installer and source its supplied activation script. Build scripts use the activated environment; native tests read cJSON from `$IDF_PATH/components/json/cJSON`. Do not copy the toolchain into the repository.
+
+## Build without a board
+
+Run from the repository root after activation:
+
+```bash
 targets/esp32-p4/scripts/build.sh
+```
+
+The checked-in configuration selects ESP32-P4. Use `scripts/set-target.sh` only when intentionally resetting the target configuration. See [test instructions](tests/README.md) for native checks.
+
+## Flash with a board
+
+After activation and building:
+
+```bash
 targets/esp32-p4/scripts/flash.sh /dev/tty.usbmodemXXXX
 targets/esp32-p4/scripts/monitor.sh /dev/tty.usbmodemXXXX
 ```
+
+Alternatively, after activating the environment above, run `targets/esp32-p4/scripts/setup.sh` to reset the target configuration, build, detect the connected board, and flash it. It optionally opens the monitor. It does not install a toolchain or update repository source. Root `setup.sh` hardware choice `2` delegates to this script and requires the same prior activation.
+
+## Prepare browser-installation files
+
+After activating the environment above, run:
+
+```bash
+targets/esp32-p4/scripts/build-release.sh
+```
+
+This builds through the normal build helper and copies the three firmware images into `docs/firmware/`. It does not publish the website or flash a board.
 
 ## Verified Baseline
 
@@ -85,9 +85,8 @@ Sources:
 - `main/bsp_shims.h`
   Small forward declarations for BSP backlight helpers documented upstream
 - `scripts/`
-  Shell helpers: `setup.sh` (install/update/build/flash), plus `activate-idf.sh`, `set-target.sh`, `build.sh`, `flash.sh`, `monitor.sh` for manual use
+  Shell helpers: `setup.sh` (build/flash), plus `activate-idf.sh`, `set-target.sh`, `build.sh`, `flash.sh`, `monitor.sh` for manual use
 
 ## Notes
 
 - The project is set up to use the Waveshare `XC` BSP with the `3.4C` round display as the intended default.
-- Screen layout constants are derived from the Pi reference (`targets/pi/public/style.css` and `targets/pi/public/renderer/clock.js`) to keep both targets visually matched.

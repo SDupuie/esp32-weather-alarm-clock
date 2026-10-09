@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
+# Activate ESP-IDF first, as documented in the target README.
 # Builds the ESP32-P4 firmware and copies the release artifacts into docs/,
 # which GitHub Pages serves as the browser-flashing page
 # (https://<org>.github.io/round-weather-display/). Run this after any
@@ -20,17 +21,8 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$PROJECT_DIR/../.." && pwd)"
 DOCS_FIRMWARE_DIR="$REPO_ROOT/docs/firmware"
 
-source "$SCRIPT_DIR/activate-idf.sh"
-require_idf() {
-  if ! command -v idf.py >/dev/null 2>&1; then
-    echo "ERROR: idf.py was not found in PATH."
-    exit 1
-  fi
-}
-require_idf
-
 echo "Building firmware..."
-idf.py -C "$PROJECT_DIR" build
+"$SCRIPT_DIR/build.sh"
 
 mkdir -p "$DOCS_FIRMWARE_DIR"
 cp "$PROJECT_DIR/build/bootloader/bootloader.bin" "$DOCS_FIRMWARE_DIR/bootloader.bin"

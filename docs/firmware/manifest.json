@@ -1,5 +1,5 @@
 {
-  "name": "Round Weather Display (ESP32-P4)",
+  "name": "ESP32 Weather Alarm Clock \u2014 Original Baseline",
   "version": "1.2.0",
   "new_install_prompt_erase": false,
   "new_install_improv_wait_time": 0,
@@ -7,9 +7,18 @@
     {
       "chipFamily": "ESP32-P4",
       "parts": [
-        { "path": "bootloader.bin", "offset": 8192 },
-        { "path": "partition-table.bin", "offset": 32768 },
-        { "path": "app.bin", "offset": 65536 }
+        {
+          "path": "bootloader.bin",
+          "offset": 8192
+        },
+        {
+          "path": "partition-table.bin",
+          "offset": 32768
+        },
+        {
+          "path": "app.bin",
+          "offset": 65536
+        }
       ]
     }
   ]

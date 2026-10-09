@@ -2173,25 +2173,19 @@ esp_err_t message_service_get_snapshot(
   return ESP_OK;
 }
 
-esp_err_t message_service_acknowledge_active(const char *device_id)
+esp_err_t message_service_acknowledge(const char *device_id, const char *message_id)
 {
-  if (device_id == NULL || device_id[0] == '\0' || s_message_mutex == NULL) {
+  if (device_id == NULL || device_id[0] == '\0' || message_id == NULL || message_id[0] == '\0' || s_message_mutex == NULL) {
     return ESP_ERR_INVALID_ARG;
   }
 
   char hub_url[MESSAGE_HUB_URL_LEN] = "";
-  char active_message_id[APP_MESSAGE_ID_LEN] = "";
   char runtime_device_id[DEVICE_CONFIG_STR_LEN] = "";
   char runtime_room_name[DEVICE_CONFIG_STR_LEN] = "";
 
   xSemaphoreTake(s_message_mutex, portMAX_DELAY);
   if (runtime_should_proxy_locked()) {
-    if (!s_client_cache.snapshot.available) {
-      xSemaphoreGive(s_message_mutex);
-      return ESP_ERR_NOT_FOUND;
-    }
     copy_text(hub_url, sizeof(hub_url), s_runtime.hub_url);
-    copy_text(active_message_id, sizeof(active_message_id), s_client_cache.snapshot.id);
     copy_text(runtime_device_id, sizeof(runtime_device_id), s_runtime.device_id);
     copy_text(runtime_room_name, sizeof(runtime_room_name), s_runtime.room_name);
     xSemaphoreGive(s_message_mutex);
@@ -2208,7 +2202,7 @@ esp_err_t message_service_acknowledge_active(const char *device_id)
     }
 
     char url[MESSAGE_URL_LEN];
-    snprintf(url, sizeof(url), "%s/api/messages/%s/ack", hub_url, active_message_id);
+    snprintf(url, sizeof(url), "%s/api/messages/%s/ack", hub_url, message_id);
 
     int status_code = 500;
     http_response_buffer_t response = {0};
@@ -2231,33 +2225,19 @@ esp_err_t message_service_acknowledge_active(const char *device_id)
     return ESP_OK;
   }
 
-  int indexes[MESSAGE_MAX_RECORDS] = {0};
-  uint32_t unread_count = 0;
-  bool has_important = false;
-  int count = collect_visible_message_indexes(
-    device_id,
-    false,
-    indexes,
-    MESSAGE_MAX_RECORDS,
-    &unread_count,
-    &has_important
-  );
-
-  (void) unread_count;
-  (void) has_important;
-
-  if (count <= 0) {
+  int index = find_message_index_by_id(message_id);
+  if (index < 0 || !is_visible_to_device(&s_messages[index], device_id)) {
     xSemaphoreGive(s_message_mutex);
     return ESP_ERR_NOT_FOUND;
   }
 
-  message_record_t *record = &s_messages[indexes[0]];
+  message_record_t *record = &s_messages[index];
   if (!is_acknowledged_for_device(record, device_id) && record->acknowledged_count < MESSAGE_MAX_ACKS) {
     copy_text(record->acknowledged_by[record->acknowledged_count], sizeof(record->acknowledged_by[0]), device_id);
     record->acknowledged_count++;
   }
   update_known_target(device_id, strcmp(device_id, s_runtime.device_id) == 0 ? s_runtime.room_name : device_id);
-  ESP_LOGI(TAG, "Acknowledged active message %s for %s", record->id, device_id);
+  ESP_LOGI(TAG, "Acknowledged displayed message %s for %s", record->id, device_id);
 
   xSemaphoreGive(s_message_mutex);
   return ESP_OK;

@@ -19,11 +19,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$PROJECT_DIR/../.." && pwd)"
 
-CJSON_DIR="$REPO_ROOT/.esp-idf/esp-idf-v5.5.5/components/json/cJSON"
+if [[ -z "${IDF_PATH:-}" ]]; then
+  echo "ERROR: Set IDF_PATH to ESP-IDF 5.5.5 or activate it as described in targets/esp32-p4/README.md." >&2
+  exit 1
+fi
+CJSON_DIR="$IDF_PATH/components/json/cJSON"
 if [[ ! -f "$CJSON_DIR/cJSON.c" ]]; then
   echo "ERROR: cJSON not found at $CJSON_DIR"
   echo "This test harness reuses the cJSON copy vendored in ESP-IDF rather than"
-  echo "vendoring a second copy -- install ESP-IDF first (targets/esp32-p4/scripts/setup.sh)."
+  echo "vendoring a second copy. See targets/esp32-p4/README.md for environment setup."
   exit 1
 fi
 

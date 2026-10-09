@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Round Weather Display — ESP32-P4 Setup</title>
+  <title>ESP32 Weather Alarm Clock — Firmware Installation</title>
   <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
   <style>
     html, body {
@@ -122,8 +122,14 @@
 </head>
 <body>
   <main>
-    <h1>Set Up Your Round Weather Display</h1>
+    <h1>ESP32 Weather Alarm Clock</h1>
     <p class="subtitle">ESP32-P4 (Waveshare 3.4C round display) — flash it straight from this page, no software install needed.</p>
+
+    <div class="compat-warning">
+      <strong>Firmware included here:</strong> This is the original Round Weather Display baseline in the
+      <a href="https://github.com/SDupuie/esp32-weather-alarm-clock">ESP32 Weather Alarm Clock fork</a>. It does not
+      include the planned alarm, RTC, or Night Shift enhancements.
+    </div>
 
     <div class="compat-warning">
       <strong>Before you start:</strong> this only works in <strong>Chrome, Edge, or Firefox on a Windows, Mac, ChromeOS,
@@ -186,17 +192,20 @@
           Install; look for small labeled buttons near the USB port if nothing else works.</li>
         <li><strong>Install button greyed out or missing?</strong> Double check you're using Chrome, Edge, or
           Firefox — not Safari.</li>
-        <li><strong>Still no luck?</strong> The fallback that always works: build and flash from source using
-          <code>targets/esp32-p4/scripts/setup.sh</code> (needs a bit more setup, but it's the same process we use
-          to build this firmware ourselves). See the
-          <a href="https://github.com/Canterrain/round-weather-display">main project page</a>, or open an issue on
-          the <a href="https://github.com/Canterrain/round-weather-display/issues">project's GitHub page</a>.</li>
+        <li><strong>Still no luck?</strong> You can build and flash from source using the manual
+          <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/targets/esp32-p4/README.md#build-without-a-board">build</a>
+          and <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/targets/esp32-p4/README.md#flash-with-a-board">flash</a>
+          commands in the ESP32-P4 target instructions.
+          For help, open an issue on the
+          <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/issues">project's GitHub page</a>.</li>
       </ul>
     </div>
 
     <p class="footer-note">
-      Prefer building from source, or setting up a Raspberry Pi instead? See the
-      <a href="https://github.com/Canterrain/round-weather-display">main project page</a>.
+      Prefer building from source? See the manual
+      <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/targets/esp32-p4/README.md#build-without-a-board">build</a>
+      and <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/targets/esp32-p4/README.md#flash-with-a-board">flash</a>
+      commands.
     </p>
   </main>
 

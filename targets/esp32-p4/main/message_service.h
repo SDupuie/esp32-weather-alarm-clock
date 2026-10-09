@@ -15,4 +15,5 @@ esp_err_t message_service_get_snapshot(
   uint32_t *out_unread_count,
   bool *out_has_important
 );
-esp_err_t message_service_acknowledge_active(const char *device_id);
+// Acknowledge the message identified by the displayed snapshot, not the latest arrival.
+esp_err_t message_service_acknowledge(const char *device_id, const char *message_id);
