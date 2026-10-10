@@ -94,9 +94,8 @@ esp_err_t wac_time_init(const char *timezone)
   esp_err_t init_error = wac_ds3231_init();
   time_t utc = 0;
   bool stopped = false;
-  error = wac_ds3231_read(&utc, &stopped);
+  error = init_error == ESP_OK ? wac_ds3231_read(&utc, &stopped) : init_error;
   publish_rtc_result(error, stopped);
-  if (init_error != ESP_OK) publish_rtc_result(init_error, false);
   if (init_error == ESP_OK && error == ESP_OK && !stopped) {
     struct timeval clock = { .tv_sec = utc, .tv_usec = 0 };
     if (settimeofday(&clock, NULL) == 0) {
@@ -138,12 +137,9 @@ void wac_time_poll(uint32_t actual_network_sync_generation)
   esp_err_t init_error = wac_ds3231_init();
   time_t rtc_utc = 0;
   bool stopped = false;
-  esp_err_t error = wac_ds3231_read(&rtc_utc, &stopped);
+  esp_err_t error = init_error == ESP_OK
+    ? wac_ds3231_read(&rtc_utc, &stopped) : init_error;
   publish_rtc_result(error, stopped);
-  if (init_error != ESP_OK) {
-    error = init_error;
-    publish_rtc_result(error, false);
-  }
   /* A malformed date is lost-time evidence but successful register access.
    * Failed access must be retried before correction can erase that evidence. */
   if (init_error == ESP_OK &&

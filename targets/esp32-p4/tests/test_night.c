@@ -43,7 +43,7 @@ static void reset(void)
   fake_clock_reset(0);
   config = (device_config_t){ .night_shift_mode = DEVICE_CONFIG_NIGHT_FIXED,
     .night_shift_start = "22:00", .night_shift_end = "06:00",
-    .day_brightness = 80, .night_brightness = 15 };
+    .day_brightness = 80, .night_brightness = 20 };
   clock_snapshot = (wac_time_snapshot_t){0};
   brightness = 0;
   brightness_gets = brightness_sets = 0;
@@ -189,22 +189,23 @@ static void brightness_checks(void)
   tick(1); assert(brightness == 1);
   tick(250); assert(brightness == 6);
   tick(10000); assert(brightness == 11); /* Delayed update cannot jump to target. */
-  tick(250); assert(brightness == 15);
+  tick(250); assert(brightness == 16);
+  tick(250); assert(brightness == 20);
   unsigned sets = brightness_sets; tick(500); assert(brightness_sets == sets);
   config.night_shift_mode = DEVICE_CONFIG_NIGHT_OFF;
-  tick(250); assert(brightness > 15 && brightness < 80);
+  tick(250); assert(brightness > 20 && brightness < 80);
   int before = brightness;
   config.night_shift_mode = DEVICE_CONFIG_NIGHT_ALWAYS_ON;
-  tick(250); assert(brightness < before && brightness >= 15);
+  tick(250); assert(brightness < before && brightness >= 20);
   config.night_brightness = 35;
-  tick(250); assert(brightness > 15 && brightness < 35);
+  tick(250); assert(brightness > 20 && brightness < 35);
   for (unsigned i = 0; i < 10; ++i) tick(250);
   assert(brightness == 35);
   config.day_brightness = 35; config.night_shift_mode = DEVICE_CONFIG_NIGHT_OFF;
   sets = brightness_sets; tick(250); assert(brightness_sets == sets);
-  config.day_brightness = 5;
+  config.day_brightness = 20;
   for (unsigned i = 0; i < 10; ++i) tick(250);
-  assert(brightness == 5);
+  assert(brightness == 20);
   config.day_brightness = 100;
   for (unsigned i = 0; i < 25; ++i) tick(250);
   assert(brightness == 100);
@@ -233,7 +234,7 @@ static void brightness_checks(void)
   assert(wac_night_active() && brightness == 75); /* Save error does not stop fading. */
   fake_nvs_clear_activity();
   for (unsigned i = 0; i < 20; ++i) tick(250);
-  assert(brightness == 15 && fake_nvs_calls(FAKE_SET) == 0);
+  assert(brightness == 20 && fake_nvs_calls(FAKE_SET) == 0);
   config.night_brightness = 30;
   for (unsigned i = 0; i < 4; ++i) tick(250);
   assert(brightness == 30 && fake_nvs_calls(FAKE_SET) == 0);
@@ -256,7 +257,7 @@ static void startup_storage_no_memory_checks(void)
     fake_nvs_clear_activity();
     wac_night_start_backlight(); tick(250);
     for (unsigned step = 0; step < 5; ++step) tick(250);
-    assert(brightness == 15 && wac_night_active());
+    assert(brightness == 20 && wac_night_active());
     assert(fake_nvs_calls(FAKE_SET) == 0);
   }
 }

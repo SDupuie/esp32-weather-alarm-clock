@@ -118,7 +118,7 @@ void device_config_set_defaults(device_config_t *config)
   strcpy(config->night_shift_end, "06:00");
   config->night_shift_mode = DEVICE_CONFIG_NIGHT_OFF;
   config->day_brightness = 80;
-  config->night_brightness = 15;
+  config->night_brightness = 30;
   config->alarm_hour = 7;
   config->alarm_repeat_days = 0x3e;
   config->alarm_sound = DEVICE_CONFIG_ALARM_CLASSIC_BEEP;
@@ -142,8 +142,8 @@ static esp_err_t validate_settings(const device_config_t *config, bool allow_par
       || (unsigned) config->night_shift_mode > DEVICE_CONFIG_NIGHT_SOLAR
       || !offset_valid(config->night_sunset_offset_minutes)
       || !offset_valid(config->night_sunrise_offset_minutes)
-      || config->day_brightness < 5 || config->day_brightness > 100
-      || config->night_brightness < 5 || config->night_brightness > 100
+      || config->day_brightness < DEVICE_CONFIG_MIN_BRIGHTNESS || config->day_brightness > 100
+      || config->night_brightness < DEVICE_CONFIG_MIN_BRIGHTNESS || config->night_brightness > 100
       || config->alarm_hour > 23 || config->alarm_minute > 59
       || config->alarm_repeat_days == 0 || (config->alarm_repeat_days & ~0x7f) != 0
       || (unsigned) config->alarm_sound > DEVICE_CONFIG_ALARM_RISING_TONES
@@ -301,6 +301,13 @@ esp_err_t device_config_init(void)
   if (err != ESP_OK) { goto done; }
   config.alarm_sound = (device_config_alarm_sound_t) value;
 
+  /* Keep the display readable without rewriting stored brightness at startup. */
+  if (config.day_brightness < DEVICE_CONFIG_MIN_BRIGHTNESS) {
+    config.day_brightness = DEVICE_CONFIG_MIN_BRIGHTNESS;
+  }
+  if (config.night_brightness < DEVICE_CONFIG_MIN_BRIGHTNESS) {
+    config.night_brightness = DEVICE_CONFIG_MIN_BRIGHTNESS;
+  }
   err = validate_settings(&config, true);
   if (err == ESP_OK && seeded) {
     err = nvs_commit(handle);

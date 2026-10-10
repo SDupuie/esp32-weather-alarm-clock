@@ -11,6 +11,7 @@
 #define DEVICE_CONFIG_SHORT_STR_LEN 16
 #define DEVICE_CONFIG_TIME_STR_LEN 6
 #define DEVICE_CONFIG_COORD_LEN 16
+#define DEVICE_CONFIG_MIN_BRIGHTNESS 20
 
 typedef enum {
   DEVICE_CONFIG_ALARM_CLASSIC_BEEP = 0,
@@ -65,7 +66,8 @@ void device_config_set_defaults(device_config_t *config);
 esp_err_t device_config_validate(const device_config_t *config);
 
 /* Startup only, after nvs_flash_init and before starting consumers.
- * Initializes missing keys; existing keys are not rewritten. An incomplete
+ * Initializes missing keys; existing keys are not rewritten.
+ * Stored brightness below the minimum is raised only in memory. An incomplete
  * location tuple from a partial save is retained with location_ready=false;
  * device/alarm saves can still apply while the location is being corrected.
  * A failed initialization does not publish its loaded/default values. */

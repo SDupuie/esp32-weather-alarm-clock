@@ -51,7 +51,7 @@ static device_config_t device_edit(device_config_t value)
   value.night_sunset_offset_minutes = -30;
   value.night_sunrise_offset_minutes = 45;
   value.day_brightness = 90;
-  value.night_brightness = 10;
+  value.night_brightness = 30;
   return value;
 }
 
@@ -84,7 +84,7 @@ static void test_defaults_and_read_only_copies(void)
   assert(value.night_shift_mode == DEVICE_CONFIG_NIGHT_OFF);
   assert(!strcmp(value.night_shift_start, "22:00") && !strcmp(value.night_shift_end, "06:00"));
   assert(value.night_sunset_offset_minutes == 0 && value.night_sunrise_offset_minutes == 0);
-  assert(value.day_brightness == 80 && value.night_brightness == 15);
+  assert(value.day_brightness == 80 && value.night_brightness == 30);
   assert(fake_nvs_calls(FAKE_SET) == fake_nvs_key_count());
   assert(fake_nvs_calls(FAKE_COMMIT) == 1);
   for (unsigned i = 0; i < fake_nvs_key_count(); ++i) {
@@ -128,7 +128,9 @@ static void test_validation(void)
   INVALID(strcpy(bad.night_shift_end, "6:00"));
   INVALID(bad.night_sunset_offset_minutes = 125);
   INVALID(bad.night_sunrise_offset_minutes = 7);
-  INVALID(bad.day_brightness = 4);
+  INVALID(bad.day_brightness = 19);
+  INVALID(bad.night_brightness = 19);
+  INVALID(bad.day_brightness = 101);
   INVALID(bad.night_brightness = 101);
   INVALID(strcpy(bad.location, "Cincinnati"));
   base = resolved(base);
@@ -149,11 +151,14 @@ static void test_validation(void)
   strcpy(bad.latitude, "0");
   strcpy(bad.longitude, "0");
   strcpy(bad.timezone, "Etc/UTC");
-  bad.day_brightness = 5;
+  bad.day_brightness = 20;
   bad.night_brightness = 100;
   bad.night_sunset_offset_minutes = -120;
   bad.night_sunrise_offset_minutes = 120;
   strcpy(bad.night_shift_end, bad.night_shift_start);
+  assert(device_config_validate(&bad) == ESP_OK);
+  bad.day_brightness = 100;
+  bad.night_brightness = 20;
   assert(device_config_validate(&bad) == ESP_OK);
   assert(device_config_validate(NULL) == ESP_ERR_INVALID_ARG);
   device_config_t empty = fresh();
@@ -356,7 +361,7 @@ static void test_startup_failures_and_missing_keys(void)
   fake_nvs_clear_activity();
   assert(device_config_init() == ESP_OK);
   after = current();
-  assert(!strcmp(after.room_name, "Bedroom") && after.night_brightness == 15);
+  assert(!strcmp(after.room_name, "Bedroom") && after.night_brightness == 30);
   assert(fake_nvs_calls(FAKE_SET) == 1);
   before = after;
   fake_nvs_put_u8("alarm_enabled", 2);
@@ -365,6 +370,90 @@ static void test_startup_failures_and_missing_keys(void)
   after = current();
   assert_same(&before, &after);
   assert(fake_nvs_calls(FAKE_SET) == 0);
+}
+
+static void test_loaded_brightness_minimum(void)
+{
+  device_config_t base = fresh(), draft = device_edit(base);
+  assert(device_config_save_device(&base, &draft) == ESP_OK);
+  base = current();
+  draft = resolved(base);
+  assert(device_config_save_weather(&base, &draft) == ESP_OK);
+  base = current();
+  draft = alarm_edit(base);
+  assert(device_config_save_alarm(&base, &draft) == ESP_OK);
+  base = current();
+  unsigned keys = fake_nvs_key_count();
+  const uint8_t day[] = {0, 15, 19, 20, 100};
+  const uint8_t night[] = {5, 10, 19, 100, 20};
+  unsigned reads = 0;
+  for (unsigned i = 0; i < sizeof(day) / sizeof(day[0]); ++i) {
+    /* Controlled stored values exercise both fields below the new limit
+     * and values at the valid endpoints. */
+    fake_nvs_put_u8("day_brightness", day[i]);
+    fake_nvs_put_u8("night_bright", night[i]);
+    fake_nvs_clear_activity();
+    assert(device_config_init() == ESP_OK);
+    reads = fake_nvs_calls(FAKE_READ);
+    device_config_t expected = base;
+    expected.day_brightness = day[i] < 20 ? 20 : day[i];
+    expected.night_brightness = night[i] < 20 ? 20 : night[i];
+    device_config_t applied = current();
+    assert_same(&expected, &applied);
+    assert(fake_nvs_key_count() == keys);
+    assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+    nvs_handle_t handle;
+    uint8_t stored;
+    assert(nvs_open("wac_cfg", NVS_READONLY, &handle) == ESP_OK);
+    assert(nvs_get_u8(handle, "day_brightness", &stored) == ESP_OK && stored == day[i]);
+    assert(nvs_get_u8(handle, "night_bright", &stored) == ESP_OK && stored == night[i]);
+    nvs_close(handle);
+  }
+  device_config_t before = current();
+  fake_nvs_put_u8("day_brightness", 15);
+  fake_nvs_put_u8("night_bright", 10);
+  for (unsigned failure = 1; failure <= reads; ++failure) {
+    fake_nvs_clear_activity();
+    fake_nvs_fail(FAKE_READ, failure);
+    assert(device_config_init() == ESP_FAIL);
+    device_config_t applied = current();
+    assert_same(&before, &applied);
+    assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+  }
+  for (unsigned field = 0; field < 2; ++field) {
+    fake_nvs_put_u8("day_brightness", field == 0 ? 101 : 15);
+    fake_nvs_put_u8("night_bright", field == 1 ? 101 : 10);
+    fake_nvs_clear_activity();
+    assert(device_config_init() == ESP_ERR_INVALID_ARG);
+    device_config_t applied = current();
+    assert_same(&before, &applied);
+    assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+  }
+}
+
+static void test_brightness_save_limits(void)
+{
+  device_config_t base = fresh(), draft = base;
+  fake_nvs_clear_activity();
+  draft.day_brightness = 19;
+  assert(device_config_save_device(&base, &draft) == ESP_ERR_INVALID_ARG);
+  draft = base;
+  draft.night_brightness = 19;
+  assert(device_config_save_device(&base, &draft) == ESP_ERR_INVALID_ARG);
+  device_config_t applied = current();
+  assert_same(&base, &applied);
+  assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+  const uint8_t endpoints[] = {20, 100};
+  for (unsigned i = 0; i < sizeof(endpoints) / sizeof(endpoints[0]); ++i) {
+    base = current();
+    draft = base;
+    draft.day_brightness = draft.night_brightness = endpoints[i];
+    assert(device_config_save_device(&base, &draft) == ESP_OK);
+    assert(device_config_init() == ESP_OK);
+    applied = current();
+    assert(applied.day_brightness == endpoints[i]
+           && applied.night_brightness == endpoints[i]);
+  }
 }
 
 static void test_shared_identity_partial_saves(void)
@@ -633,6 +722,8 @@ int main(void)
   test_save_failures(device_config_save_weather, resolved);
   test_save_failures(device_config_save_alarm, alarm_edit);
   test_startup_failures_and_missing_keys();
+  test_loaded_brightness_minimum();
+  test_brightness_save_limits();
   test_shared_identity_partial_saves();
   test_unchanged_saves_write_only_selected_group();
   test_corrected_retry_repairs_partial_shared_mode();

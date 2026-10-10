@@ -2,7 +2,7 @@
 
 This target is the native firmware path for the Waveshare `ESP32-P4-WIFI6-Touch-LCD-3.4C` board family.
 
-The [architecture and product specification](../../docs/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. This checkout implements settings persistence, Save handling, time-source handling, DS3231 integration, backup-clock notices and Night Shift startup fallback/brightness transitions. Normal clock rendering has its own private object owner, with centered digital Night time, a shared unavailable-time surface and face-specific paused-clock notices. Alarm/audio, solar calculations and the remaining weather/settings/alarm screens remain pending; see the root [implementation status](../../README.md). RTC hardware and the physical display remain unverified.
+The [architecture and product specification](../../docs/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. This checkout implements settings persistence, Save handling, time-source handling, DS3231 integration, backup-clock notices and Night Shift startup fallback/brightness transitions. Normal clock rendering has its own private object owner, with centered digital Night time, a shared unavailable-time surface and face-specific paused-clock notices. Alarm/audio, solar calculations and precise device-screen compliance remain pending; see the root [implementation status](../../README.md). The brightness change passed native/build checks and overnight observation. A controlled board comparison identified unnecessary reads after failed RTC initialization as a repeatable touch-error trigger. The small correction retains normal RTC operation and restores BSP-owned display/touch startup, removing the manual timeout helper. All 15 native checks and the firmware build pass. Three restarted instrumented runs were clean, including an eleven-minute weather-refresh observation. Final firmware without diagnostics was loaded and all three images verified; startup and non-resetting live-state checks confirm touch/analog progress. The user subsequently reports that everything seems to be working; detailed physical-control and attached-RTC checks remain pending. See [current development work](../../docs/work.md) for exact results and remaining hardware checks.
 
 ## Prepare the environment (no board needed)
 
@@ -41,6 +41,8 @@ Alternatively, after activating the environment above, run `targets/esp32-p4/scr
 For a deliberate whole-device backup before flashing, `scripts/backup-device.sh <serial-port> [output-dir]` defaults to the ignored `backups/<timestamp>/` directory under this target. Keep backups local. This is a manual hardware tool, separate from application settings saves.
 
 For a diagnostic serial capture, `scripts/capture-serial-log.sh <serial-port> <output-path> [duration-seconds]` captures for the requested duration (150 seconds by default). A successful capture means the log was collected; it does not mean the firmware passed a benchmark or hardware test.
+
+That wrapper requests a restart before capture. To preserve an already frozen state, use existing `tools/capture_serial.py` directly without `--reset-before-capture`; do not reset or flash before collecting the stopped-state evidence.
 
 ## Prepare browser-installation files
 

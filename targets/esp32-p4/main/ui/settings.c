@@ -778,8 +778,8 @@ void wac_settings_render(wac_settings_view_t view)
       button("Done", ACTION_DONE, 270, 662, 260, 88, true); break;
     }
     case WAC_SETTINGS_BRIGHTNESS:
-      slider("Day Brightness", FIELD_DAY_BRIGHTNESS, d->day_brightness, 5, 224);
-      slider("Night Brightness", FIELD_NIGHT_BRIGHTNESS, d->night_brightness, 5, 412);
+      slider("Day Brightness", FIELD_DAY_BRIGHTNESS, d->day_brightness, DEVICE_CONFIG_MIN_BRIGHTNESS, 224);
+      slider("Night Brightness", FIELD_NIGHT_BRIGHTNESS, d->night_brightness, DEVICE_CONFIG_MIN_BRIGHTNESS, 412);
       button("Done", ACTION_DONE, 270, 662, 260, 88, true); break;
     default: break;
   }
@@ -800,7 +800,7 @@ void wac_settings_render(wac_settings_view_t view)
                       SETTINGS_KEYBOARD_SPECIAL_MAP, SETTINGS_KEYBOARD_SPECIAL_CTRL_MAP);
   lv_keyboard_set_popovers(s_settings.keyboard, true);
   lv_obj_set_size(s_settings.keyboard, 680, 280);
-  lv_obj_set_pos(s_settings.keyboard, 60, 480);
+  lv_obj_center(s_settings.keyboard);
   lv_obj_set_style_text_font(s_settings.keyboard, &lv_font_montserrat_24, LV_PART_ITEMS);
   lv_obj_add_event_cb(s_settings.keyboard, keyboard_event, LV_EVENT_READY, NULL);
   lv_obj_add_event_cb(s_settings.keyboard, keyboard_event, LV_EVENT_CANCEL, NULL);

@@ -40,14 +40,18 @@ ctest --test-dir /tmp/esp32-p4-native-tests --output-on-failure
 
 Managed dependencies must already be available from a normal firmware build.
 The UI targets use the existing managed LVGL library with a native configuration.
-The CMake suite contains settings, time, Night Shift, settings-control, UI-shell, weather-service and connectivity
-targets.
+The CMake suite contains settings, time, Night Shift, settings-control, UI-shell,
+weather-service, connectivity and touchscreen-recovery targets.
 
 The settings tests compile `main/device_config.c` with typed NVS substitutes and
 ordinary thread locks. They cover defaults, validation, editor changes merged
 into current settings, full selected-group saves, failure/corrected-retry reads,
 missing keys, returned storage errors, accepted partial saves and readers during
-a blocked save. The substitute deliberately permits stored keys
+a blocked save. Brightness checks cover the 20–100% range, Day/Night defaults,
+rejected saves below the minimum, successful endpoint saves and reloads, and
+loading low stored values at 20% only in memory. They verify unchanged stored
+values and unrelated settings, no startup rewrite, and preserved read-error handling.
+The substitute deliberately permits stored keys
 to change before commit; this is a test example of allowed partial outcomes,
 not evidence of a physical power-cut result.
 
@@ -55,7 +59,10 @@ Time checks compile production `main/clock_time.c` and `main/ds3231.c` with simu
 register access and a substitute system clock. They cover timezone offsets,
 trusted startup, lost time, access failures, correction ordering and retries,
 failed calendar/status writes, warning dismissal, new warnings during dismissal,
-calendar validation and snapshots during blocked register access. They supply
+calendar validation and snapshots during blocked register access. Simulated
+failed initialization results at startup and during correction check that
+calendar access waits for successful initialization, retry timing and limits
+remain, and lost-time evidence is inspected before a later correction. They supply
 network-completion counts; they do not perform real network synchronization or
 change the development computer's clock. No user-settings writes occur in these
 checks.
@@ -105,10 +112,20 @@ Save, duplicate blocking, validation, save failure/retry, resolved-location retr
 without Wi-Fi, immediate enable, stale completion handling, and character entry
 and editing through actual keyboard events. Every settings view is checked for
 keyboard allocation: only Device, Weather Location and Wi-Fi Credentials editors
-allocate one, with the existing layouts preserved. Network work and tasks are substitutes, and navigation callbacks from `ui.c` are substituted;
+allocate one, with the existing layouts preserved. Real pointer taps check all
+five text fields and reopening after hiding the keyboard. Resolved screen
+coordinates check that the centered keyboard's corners are inside the round
+800×800 panel, rather than checking only square-buffer bounds or requested
+offsets. Pointer presses/releases on LVGL's actual
+key rectangles exercise character entry, layout switching and hide controls.
+The shell also checks a pointer tap on the
+empty first-use location field and keyboard retention through a runtime update.
+Network work and tasks are substitutes, and navigation callbacks from `ui.c` are substituted;
 first-use routing is also exercised by the shell target below.
 The UI target also checks the actual generated clock font for live-time and
 unavailable-time characters through LVGL glyph lookup.
+Real LVGL brightness sliders check both endpoints, clamping a below-minimum
+selection to 20%, nested draft values and Cancel without saving.
 
 The shell target compiles production `main/ui/ui.c`, `main/ui/clock_views.c` and
 the settings editor with real LVGL objects and events. It checks authoritative usable/unavailable time,
@@ -143,6 +160,20 @@ controlled stalled-minute snapshots. Pointer gestures and one visible pair of
 message/weather edges are checked through unavailable time and recovery. These
 object checks do not establish the quality of the scaled raster font or physical
 rendering. The unavailable screen omits the still-unimplemented alarm controls.
+
+The touchscreen-recovery target extracts the actual private read callback from
+`main/main.c`, using the installed touch header and real LVGL. Hardware read
+substitutes check every returned error, including `ESP_ERR_INVALID_STATE`, zero
+reported points, failure-only cached-point clearing and recovery on a fresh
+sample. A real LVGL button press interrupted by a failed read must receive press
+cancellation without a click; subsequent normal clicks must work. Successful
+held samples retain the original behavior. The BSP owns display/touch startup;
+firmware compilation and source review cover the public callback installation
+under the initial display lock. The tests do not reproduce the board's I2C
+interrupt sequence, exercise BSP tasks or establish physical gestures and
+shared-bus recovery. The BSP's default unlimited touch wait is unchanged by the
+callback; a read that never returns cannot be recovered there. See the
+[work record](../../../docs/work.md) for the board comparison and its limits.
 
 ## Message acknowledgement, browser listing, discovery and shared handoff
 

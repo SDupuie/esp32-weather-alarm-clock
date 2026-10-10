@@ -35,7 +35,7 @@ Startup and inherited-screen cleanup is the current development priority. Carry 
 
 Remove superseded plans, obsolete implementations, unused experiments and backup copies when they no longer serve a current purpose within the work being performed. Do not create backup or archive copies of material being retired. Retain material only for an identified current application, development, verification or evaluation need.
 
-Any existing `archive/` directory is excluded from development, searches and audits, including commands that otherwise include ignored files. Nothing current may link to or depend on its contents. Do not read or restore it without explicit user direction. Its existence does not require continued retention or new archival copies.
+Any existing `archive/` directory is excluded from ordinary development searches and implementation audits, including commands that otherwise include ignored files. It may be inspected to assess its current purpose and recommend cleanup, but is not an implementation authority. Nothing current may link to or depend on its contents. Do not restore archived material without explicit user direction. Its existence does not require continued retention or new archival copies.
 
 Current local review reports are allowed as evidence, not requirements. A separate original-firmware evaluation checkout has no automatic retention requirement and is not an implementation authority; retain it only while it has an identified current evaluation purpose.
 

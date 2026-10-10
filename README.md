@@ -4,7 +4,9 @@ A round touchscreen clock for your nightstand or desk, with weather forecasts, c
 
 Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 
-**Development status:** Settings persistence, draft editors, production Save handling, time-source handling and DS3231 backup-clock integration are implemented and checked natively. Normal clock screens now include centered, fitted digital Night time, a shared unavailable-time screen and the approved paused-clock notice placement. The backup-clock indicator and notices are connected to the running application. Weather and House Messages remain available. Forecast labels retain provider dates, and weather downloads proceed independently of clock synchronization. Night Shift owns startup appearance, its remembered fallback and configured brightness transitions through the existing clock task. Alarm playback, solar calculations, alarm screens and the remaining weather/settings visual redesign remain pending. A board is now available; hardware testing is pending. Firmware compilation and native checks do not establish hardware behavior.
+**Development status:** Settings persistence, draft editors, production Save handling, time-source handling and DS3231 backup-clock integration are implemented and checked natively. Normal clock screens include centered, fitted digital Night time, a shared unavailable-time screen and the approved paused-clock notice placement. The backup-clock indicator and notices are connected to the running application. Weather and House Messages remain available. Forecast labels retain provider dates, and weather downloads proceed independently of clock synchronization. Night Shift owns startup appearance, its remembered fallback and configured brightness transitions through the existing clock task. The selected brightness minimum is 20%, with a 30% Night default. Alarm playback, solar calculations and alarm screens remain pending. Sunset to Sunrise currently retains the previous appearance because its calculation is unfinished. Detailed mockup comparison found broad unfinished settings presentation, weather-state differences and small clock discrepancies; precise visual compliance remains unfinished.
+
+Board testing confirms keyboard fit and typing, Wi-Fi connection and live weather retrieval; input-field visibility remains unresolved. The brightness change passed native/build checks and overnight observation. Controlled comparison identified unnecessary RTC access after failed initialization as a repeatable touchscreen-error trigger on this board. The small correction stops that attempt, and the 109-line manual display/touch startup workaround is removed in favor of BSP startup. Three restarted instrumented runs were clean, including an eleven-minute run through weather refresh. Final source has no diagnostic logging and passes all 15 native checks and the ESP-IDF 5.5.5 build, with 25% application partition free. All three final images were loaded and verified; a three-minute startup capture and two resumed live-state samples confirm continuing touch polling and analog clock updates. The board is left running this firmware. The user subsequently reports that everything seems to be working. Detailed physical-control checks, attached-RTC behavior, longer-term stability and the precise driver fault remain unverified. Occasional blue flashes are a separate unresolved observation. See [current development work](docs/work.md) for progress and verification limits. Native checks and compilation do not establish visual compliance or all hardware behavior.
 
 - [Features](#features)
 - [Hardware](#hardware)
@@ -152,7 +154,7 @@ Weather normally refreshes every ten minutes. If an update fails, the clock keep
 
 ### Night Shift
 
-Night Shift supplies Day or Night for Off, Always On and the saved Fixed Schedule, with separate configured brightness and gradual transitions, including startup. When a scheduled mode cannot be calculated at startup, it uses the last saved appearance, or Day if none is usable. Solar calculations remain pending; that mode currently uses the fallback and retains the selected appearance. See the [Night Shift rules](docs/architecture.md#night-shift) for defaults and accepted save-failure behavior. Physical brightness and fades remain unverified; board testing is pending.
+Night Shift supplies Day or Night for Off, Always On and the saved Fixed Schedule, with separate configured brightness and gradual transitions, including startup. Both brightness controls use the approved minimum; a saved value below it is raised for the running display without rewriting storage. Existing choices within the allowed range are retained. When a scheduled mode cannot be calculated at startup, it uses the last saved appearance, or Day if none is usable. Solar calculations remain pending; that mode currently uses the fallback and retains the selected appearance. See the [Night Shift rules](docs/architecture.md#night-shift) for the range, defaults and accepted save-failure behavior. The board has visibly responded to brightness changes; low-light usability and fade smoothness remain under test.
 
 ## Household Messages
 
@@ -213,7 +215,7 @@ Swipe down from the clock to open settings. Saved preferences stay on the device
 
 Device Setup and Wi-Fi share a draft for **Save & Restart**. Weather Location saves independently and restarts after success. Alarm **Save** and the Settings-entry alarm toggle apply settings without restarting. Nested **Done** keeps edits in the parent draft; **Cancel** discards that editor's edits. See the [architecture](docs/architecture.md#editing-and-saving-user-settings) for save rules and accepted partial-save behavior.
 
-Settings screens currently use native rollers and the LVGL keyboard with the original three layouts and the added colon. Exact approved control styling and the broader replacement interface remain pending; the mockup remains the visual authority.
+Settings screens currently use native rollers and the LVGL keyboard with the original three layouts and the added colon. Tapping a text field opens the centered keyboard; its Done or hide key reveals the fields again. Tapping the same field reopens it after hiding it. Exact approved control styling and the broader replacement interface remain pending; the mockup remains the visual authority.
 
 ## Development Notes
 
@@ -232,7 +234,7 @@ Read [AGENTS.md](AGENTS.md) before changing the project. The following documents
 
 The source structure in the architecture document is a plan; listed enhancement files are created only when needed. The mockup is a visual reference, not firmware or a hardware emulator.
 
-A board is available, but hardware verification has not started. A successful build does not establish touchscreen behavior, physical brightness, RTC operation, audible alarms, or behavior during power loss.
+The [development-status summary](#esp32-weather-alarm-clock) and [current work record](docs/work.md) distinguish native/build results, observed board behavior and remaining hardware verification.
 
 ## License and attribution
 

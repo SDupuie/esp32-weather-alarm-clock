@@ -1,6 +1,6 @@
 # Weather alarm clock architecture and product specification
 
-Revised October 9, 2026. This is the single authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. It is not an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
+Revised October 10, 2026. This is the single authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. It is not an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
 
 Build the weather alarm clock for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C using the existing ESP-IDF application. Only ESP32-P4 is supported. There is no requirement to maintain Raspberry Pi behavior, another firmware implementation, or backward compatibility with their settings or interfaces.
 
@@ -70,19 +70,20 @@ Ringing preempts menus, notices and previews; preemption alone does not acknowle
 
 The single approved visual entry point is [mockups/alarm-design.html](../mockups/alarm-design.html). It contains the complete combined device preview and the House Messages browser preview, selected using the controls above the previews. Images, fonts and both previews are embedded in that file. It owns appearance and controls; this specification owns behavior, defaults and source placement. Preview selectors and sample values are not production features. The digital ringing layout is the chosen ringing presentation; carousel alternatives are not additional screens.
 
-Use the existing LVGL keyboard with the original lowercase, uppercase and symbols layouts, including `^` on each. Add `:` beside `^` on the symbols layout so both characters remain available. Show the enlarged character while a key is pressed. Retain the current settings keyboard size and position for this input correction.
+Use the existing LVGL keyboard with the original lowercase, uppercase and symbols layouts, including `^` on each. Add `:` beside `^` on the symbols layout so both characters remain available. Show the enlarged character while a key is pressed. Retain the 680×280 settings keyboard size and center it on the round display so all keys remain visible.
 
 ### Night Shift
 
 Night Shift modes remain Off, Always On, Fixed Schedule and Sunset to Sunrise. Fixed equal endpoints mean Night all day; a range across midnight is supported. Solar events are calculated locally with saved offsets. While running, retain the current effective appearance when required inputs/events become unavailable. Apply gradual backlight transitions, including startup.
 
-Defaults: Off, fixed endpoints 22:00/06:00, zero solar offsets and Day/Night brightness 80%/15%. Solar-offset choices are -120..+120 minutes in five-minute steps; brightness choices are 5..100%.
+Defaults: Off, fixed endpoints 22:00/06:00, zero solar offsets and Day/Night brightness 80%/30%. Solar-offset choices are -120..+120 minutes in five-minute steps; brightness choices are 20..100%.
 
 Remember the last effective Day/Night appearance for startup fallback.
 
 - Calculate appearance from the saved mode and available inputs whenever possible. Off selects Day and Always On selects Night without requiring time or location.
 - At startup, when a scheduled mode lacks the inputs needed to calculate appearance, use the last saved Day/Night appearance. If no usable saved appearance exists, use Day.
 - Always apply the current configured brightness for the selected appearance; do not save or restore a historical brightness value.
+- On loading, raise an existing brightness below 20% to 20% in memory so the display remains readable. Do not rewrite that stored preference during startup; an explicit settings save uses the normal save rules. Values above 100% and storage read errors still fail validation/startup. Intermediate startup fade steps may pass below 20%; the minimum applies to the selected brightness.
 - Persist only effective Day/Night changes, not clock ticks, draft previews, or brightness-fade steps.
 - Use ordinary storage operations and error reporting. A failed appearance save does not prevent the display from changing; a later restart may restore the older saved appearance. Do not add snapshots, a journal, or a recovery coordinator for this value.
 
@@ -94,7 +95,7 @@ Network time is primary; trustworthy RTC time can start the clock while synchron
 
 Do not persist RTC warnings or their acknowledgments across restarts. Keep a detected warning in memory for the current run, including after network time corrects the RTC, until the user dismisses it. At each startup, check the RTC again and report problems detected then; do not restore an earlier warning from storage.
 
-Inspect the RTC for lost-time evidence before correcting it, distinguish lost time from failed access, and clear the hardware stop flag only after successful correction. Correcting the RTC must not depend on saving a warning.
+Inspect the RTC for lost-time evidence before correcting it, distinguish lost time from failed access, and clear the hardware stop flag only after successful correction. If RTC initialization fails, end that attempt before reading its calendar; report failed access and retry through the existing correction schedule. Lost-time inspection waits until initialization succeeds and still precedes correction. Correcting the RTC must not depend on saving a warning.
 
 Retain the inherited `Clock paused` warning with its existing 135-second threshold. It reports that the displayed minute has stopped changing while UI updates continue.
 
@@ -377,7 +378,7 @@ Apply configured Wi-Fi credentials through RAM driver storage in common preparat
 
 ### Existing-code changes that matter
 
-- `main.c`: connect owner startup/tasks, remove the unconditional normal-operation backlight-on override, and stop treating an RTC-initialized date as proof of network synchronization.
+- `main.c`: connect owner startup/tasks, remove the unconditional normal-operation backlight-on override, and stop treating an RTC-initialized date as proof of network synchronization. Use the BSP's display/touch startup and default transfer waits, with no copied startup helper or application touch-timeout override. Install the small returned-read-error callback under the initial display lock; clear failed-read points and cancel an interrupted press before normal polling continues. Board facilities and the existing driver retain ownership of the shared I2C bus and recovery. The callback cannot recover a read that never returns.
 - `connectivity.c/.h`: preserve networking and scanning; deliver actual synchronization completion to the time owner and apply the credential rule above. Inspect both the caller and `connectivity_sync_time()` shortcut so RTC startup does not suppress network synchronization.
 - `clock_time.c/.h`: apply the selected system timezone using the existing mapping; move timezone application out of connectivity and UI paths so this owner controls it.
 - `location_lookup.c/.h` and `location_scoring.c/.h`: preserve the query qualifier and enforce the location search/output rules above.

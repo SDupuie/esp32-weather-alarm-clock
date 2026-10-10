@@ -12,7 +12,9 @@
 #include "freertos/task.h"
 
 #include "esp_err.h"
+#include "esp_lcd_touch.h"
 #include "esp_log.h"
+#include "esp_lv_adapter.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
 
@@ -40,6 +42,29 @@ static const uint32_t WEATHER_RETRY_INTERVAL_MS = 20000;
 static app_runtime_state_t s_runtime_state;
 static SemaphoreHandle_t s_runtime_mutex;
 static QueueHandle_t s_clock_commands;
+
+static esp_err_t read_touch(esp_lcd_touch_handle_t touch,
+  esp_lcd_touch_point_data_t *points, uint8_t *point_count,
+  uint8_t max_points, void *user_ctx)
+{
+  (void) user_ctx;
+  esp_err_t err = esp_lcd_touch_read_data(touch);
+  if (err != ESP_OK) {
+    *point_count = 0;
+    /* GT911 keeps points on a failed or not-ready read. Clear only failures
+     * so a later not-ready poll cannot replay the interrupted press. */
+    portENTER_CRITICAL(&touch->data.lock);
+    touch->data.points = 0;
+    portEXIT_CRITICAL(&touch->data.lock);
+    lv_indev_t *active = lv_indev_active();
+    if (active != NULL) {
+      lv_indev_wait_release(active);
+    }
+    ESP_LOGE(TAG, "Touch read failed: %s", esp_err_to_name(err));
+    return err;
+  }
+  return esp_lcd_touch_get_data(touch, points, point_count, max_points);
+}
 
 static void log_device_clock(const char *context)
 {
@@ -460,13 +485,14 @@ void app_main(void)
   );
 
   lv_display_t *display = bsp_display_start();
+  lv_indev_t *input = bsp_display_get_input_dev();
   if (display == NULL) {
     ESP_LOGE(TAG, "Display start failed");
     return;
   }
   (void) display;
 
-  bool touch_ready = (bsp_display_get_input_dev() != NULL);
+  bool touch_ready = (input != NULL);
 
   /* Gather owner data before entering the display lock. */
   static app_runtime_state_t startup_runtime;
@@ -478,6 +504,10 @@ void app_main(void)
     return;
   }
 
+  if (input != NULL) {
+    const esp_lv_adapter_touch_callbacks_t callbacks = {.custom_touch_read = read_touch};
+    ESP_ERROR_CHECK(esp_lv_adapter_set_touch_callbacks(input, &callbacks));
+  }
   app_ui_set_clock_warning_dismiss_handler(request_clock_warning_dismiss);
   ESP_ERROR_CHECK(app_ui_show_boot_screen(&config, &startup_runtime, touch_ready));
   bsp_display_unlock();

@@ -7,14 +7,13 @@ find_package(Threads REQUIRED)
 # are disposable native-build outputs, never added to firmware sources.
 set(platform_headers "${CMAKE_CURRENT_BINARY_DIR}/platform")
 file(MAKE_DIRECTORY "${platform_headers}/freertos" "${platform_headers}/driver" "${platform_headers}/bsp")
-foreach(header bsp/display.h esp_err.h esp_system.h esp_wifi.h esp_event.h esp_check.h esp_netif.h esp_netif_sntp.h esp_sntp.h esp_http_client.h esp_crt_bundle.h nvs.h freertos/FreeRTOS.h freertos/semphr.h freertos/task.h freertos/event_groups.h driver/i2c_master.h bsp/esp32_p4_wifi6_touch_lcd_xc.h)
+foreach(header bsp/display.h esp_err.h esp_system.h esp_wifi.h esp_event.h esp_check.h esp_netif.h esp_netif_sntp.h esp_sntp.h esp_http_client.h esp_crt_bundle.h nvs.h freertos/FreeRTOS.h freertos/semphr.h freertos/task.h freertos/event_groups.h driver/i2c_master.h driver/gpio.h esp_lcd_panel_io.h bsp/esp32_p4_wifi6_touch_lcd_xc.h)
   file(WRITE "${platform_headers}/${header}" "#include \"test_support.h\"\n")
 endforeach()
 
 file(WRITE "${platform_headers}/sdkconfig.h" "#pragma once\n")
 file(WRITE "${platform_headers}/esp_timer.h" "#include \"test_support.h\"\n")
 file(WRITE "${platform_headers}/esp_log.h" "#include <stdio.h>\n#define ESP_LOGI(tag,...) do { (void)(tag); if (0) printf(__VA_ARGS__); } while (0)\n#define ESP_LOGW ESP_LOGI\n")
-file(APPEND "${platform_headers}/bsp/esp32_p4_wifi6_touch_lcd_xc.h" "#define BSP_LCD_H_RES 800\n#define BSP_LCD_V_RES 800\n")
 
 add_executable(test_device_config
   test_device_config.c test_support.c
@@ -142,3 +141,32 @@ target_compile_options(test_ui_shell PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(test_ui_shell PRIVATE lvgl::lvgl Threads::Threads m)
 add_test(NAME ui_shell COMMAND test_ui_shell)
 set_tests_properties(ui_shell PROPERTIES TIMEOUT 15)
+
+# Execute the actual private touch callback with real LVGL input handling;
+# hardware reads alone are substituted. Firmware and hardware checks cover BSP
+# startup, adapter tasks and callback registration.
+set(touch_startup "static const char *TAG = \"native_touch\";\n")
+string(FIND "${weather_main_source}" "static esp_err_t read_touch(" begin)
+if(begin LESS 0)
+  message(FATAL_ERROR "Touch callback missing")
+endif()
+string(SUBSTRING "${weather_main_source}" ${begin} -1 remainder)
+string(FIND "${remainder}" "\n}" end)
+if(end LESS 0)
+  message(FATAL_ERROR "Touch callback incomplete")
+endif()
+math(EXPR length "${end} + 2")
+string(SUBSTRING "${remainder}" 0 ${length} function_source)
+string(APPEND touch_startup "${function_source}\n")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/touch_startup.inc" "${touch_startup}")
+add_executable(test_touch test_ui.c test_support.c)
+target_compile_definitions(test_touch PRIVATE WAC_TOUCH_TEST=1
+  CONFIG_ESP_LCD_TOUCH_MAX_POINTS=5 CONFIG_ESP_LCD_TOUCH_MAX_BUTTONS=0)
+target_include_directories(test_touch PRIVATE
+  "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}"
+  ../managed_components/espressif__esp_lcd_touch/include)
+target_compile_features(test_touch PRIVATE c_std_11)
+target_compile_options(test_touch PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(test_touch PRIVATE lvgl::lvgl Threads::Threads m)
+add_test(NAME touch_recovery COMMAND test_touch)
+set_tests_properties(touch_recovery PROPERTIES TIMEOUT 15)

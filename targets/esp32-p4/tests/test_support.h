@@ -225,3 +225,9 @@ esp_err_t esp_crt_bundle_attach(void *);
   (void)(tag); esp_err_t test_error = (expression); \
   if (test_error != ESP_OK) return test_error; \
 } while (0)
+
+#ifdef WAC_TOUCH_TEST
+/* Opaque platform types required by the retained real touch header. */
+typedef int gpio_num_t;
+typedef struct esp_lcd_panel_io_t *esp_lcd_panel_io_handle_t;
+#endif

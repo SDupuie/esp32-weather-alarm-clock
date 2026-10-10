@@ -71,6 +71,7 @@ static void startup_checks(void)
   reset(); fake_i2c_fail_add(true);
   assert(wac_time_init("") == ESP_OK);
   assert(!snapshot().usable && snapshot().warning == WAC_TIME_WARNING_CONNECTION);
+  assert(snapshot().rtc_error == ESP_ERR_TIMEOUT && fake_i2c_event_count() == 0);
   fake_i2c_fail_add(false); synchronize(1);
   assert(snapshot().usable && writes(0) == 1); /* Retry attachment then inspect. */
   reset(); fake_i2c_registers()[0x0e] = 0x9d;
@@ -102,9 +103,14 @@ static void startup_checks(void)
 
   reset(); fake_clock_fail_set(true);
   assert(wac_time_init("") == ESP_OK); assert(!snapshot().usable);
-  reset(); fake_i2c_fail(false, 0x0e, 1);
+  reset(); fake_i2c_registers()[0x0f] = 0x80; fake_i2c_fail(false, 0x0e, 1);
   assert(wac_time_init("") == ESP_OK); assert(!snapshot().usable);
   assert(snapshot().warning == WAC_TIME_WARNING_CONNECTION);
+  assert(snapshot().rtc_error == ESP_ERR_TIMEOUT && fake_clock_set_calls() == 0);
+  assert(fake_i2c_event_count() == 1); /* Failed initialization skips calendar access. */
+  assert(!fake_i2c_event(0).write && fake_i2c_event(0).reg == 0x0e);
+  assert(fake_i2c_event(0).result == ESP_ERR_TIMEOUT);
+  assert(fake_i2c_registers()[0x0f] & 0x80);
   no_storage_activity();
 }
 static void correction_checks(void)
@@ -154,6 +160,43 @@ static void correction_checks(void)
 }
 static void correction_failure_checks(void)
 {
+  reset(); assert(wac_time_init("") == ESP_OK);
+  fake_i2c_registers()[0x0f] = 0x80; /* Stop detected only after access recovers. */
+  fake_i2c_clear_activity(); fake_i2c_fail(false, 0x0e, 1); synchronize(1);
+  assert(snapshot().usable && snapshot().source == WAC_TIME_SOURCE_NETWORK);
+  assert(snapshot().rtc_error == ESP_ERR_TIMEOUT && snapshot().warning == WAC_TIME_WARNING_CONNECTION);
+  assert(fake_i2c_event_count() == 1); /* No calendar read or write after failed init. */
+  assert(!fake_i2c_event(0).write && fake_i2c_event(0).reg == 0x0e);
+  assert(fake_i2c_event(0).result == ESP_ERR_TIMEOUT);
+  assert(fake_i2c_registers()[0x0f] & 0x80);
+  wac_time_poll(1); assert(fake_i2c_event_count() == 1);
+  fake_clock_advance(4999); wac_time_poll(1); assert(fake_i2c_event_count() == 1);
+  fake_i2c_clear_activity(); fake_clock_advance(1); wac_time_poll(1);
+  assert(snapshot().rtc_error == ESP_OK && snapshot().warning == WAC_TIME_WARNING_LOST_TIME);
+  assert(writes(0) == 1 && writes(0x0f) == 1 && !(fake_i2c_registers()[0x0f] & 0x80));
+  bool inspected = false;
+  for (unsigned i = 0; i < fake_i2c_event_count(); ++i) {
+    fake_i2c_event_t event = fake_i2c_event(i);
+    if (!event.write && event.reg == 0 && event.length == 16 && event.result == ESP_OK)
+      inspected = true;
+    if (event.write && event.reg == 0) assert(inspected);
+  }
+  wac_time_dismiss_warning(WAC_TIME_WARNING_LOST_TIME);
+  assert(snapshot().warning == WAC_TIME_WARNING_CONNECTION); /* Earlier access warning remains. */
+
+  reset(); assert(wac_time_init("") == ESP_OK); fake_i2c_clear_activity();
+  for (unsigned attempt = 0; attempt < 3; ++attempt) {
+    fake_i2c_fail(false, 0x0e, 1);
+    if (attempt == 0) synchronize(1);
+    else { fake_clock_advance(5000); wac_time_poll(1); }
+    assert(fake_i2c_event_count() == attempt + 1 && writes(0) == 0 && writes(0x0f) == 0);
+    assert(snapshot().rtc_error == ESP_ERR_TIMEOUT && snapshot().warning == WAC_TIME_WARNING_CONNECTION);
+  }
+  fake_clock_advance(60000); wac_time_poll(1);
+  assert(fake_i2c_event_count() == 3); /* Failed init consumes the same finite retry budget. */
+  fake_i2c_clear_activity(); synchronize(2);
+  assert(snapshot().rtc_error == ESP_OK && writes(0) == 1);
+
   reset(); fake_i2c_registers()[0x0f] = 0x80; assert(wac_time_init("") == ESP_OK);
   fake_i2c_clear_activity(); fake_i2c_fail(true, 0, 1); synchronize(1);
   assert(snapshot().usable && snapshot().source == WAC_TIME_SOURCE_NETWORK);

@@ -59,6 +59,7 @@ idf_component_register(
   EMBED_TXTFILES
     "web/messages.html"
   REQUIRES
+    espressif__esp_lcd_touch_gt911
     nvs_flash
     esp_event
     esp_http_client

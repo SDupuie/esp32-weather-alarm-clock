@@ -1,9 +1,167 @@
-#ifndef WAC_UI_SHELL_TEST
+#ifdef WAC_TOUCH_TEST
+#include "test_support.h"
+#include "esp_lcd_touch.h"
+#include "lvgl.h"
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+
+#define ESP_LOGE(tag, ...) do { (void)(tag); if (0) printf(__VA_ARGS__); } while (0)
+#include "touch_startup.inc"
+
+/* Controlled read results model the retained GT911 cache. They do not model
+ * the board's I2C interrupt ordering or establish physical recovery. */
+static esp_lcd_touch_t touch = {.data.lock = portMUX_INITIALIZER_UNLOCKED};
+static esp_err_t read_result = ESP_OK;
+static unsigned reads, data_gets;
+static lv_display_t *display;
+static lv_indev_t *pointer;
+static unsigned pressed, lost, clicked;
+
+esp_err_t esp_lcd_touch_read_data(esp_lcd_touch_handle_t handle)
+{
+  assert(handle == &touch);
+  ++reads;
+  return read_result;
+}
+
+esp_err_t esp_lcd_touch_get_data(esp_lcd_touch_handle_t handle,
+  esp_lcd_touch_point_data_t *points, uint8_t *count, uint8_t maximum)
+{
+  assert(handle == &touch && points && count && maximum);
+  ++data_gets;
+  portENTER_CRITICAL(&touch.data.lock);
+  *count = touch.data.points < maximum ? touch.data.points : maximum;
+  memcpy(points, touch.data.coords, *count * sizeof(*points));
+  portEXIT_CRITICAL(&touch.data.lock);
+  return ESP_OK;
+}
+
+static void read_pointer(lv_indev_t *input, lv_indev_data_t *data)
+{
+  assert(input == pointer);
+  esp_lcd_touch_point_data_t point = {0};
+  uint8_t count = 0;
+  esp_err_t result = read_touch(&touch, &point, &count, 1, NULL);
+  /* The adapter's documented custom-read contract supplies released state on
+   * an error. LVGL itself decides whether that release can generate a click. */
+  data->state = result == ESP_OK && count ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+  if (result == ESP_OK && count) data->point = (lv_point_t){point.x, point.y};
+}
+
+static void flush(lv_display_t *screen, const lv_area_t *area, uint8_t *pixels)
+{
+  (void)area; (void)pixels;
+  lv_display_flush_ready(screen);
+}
+
+/* A real LVGL pointer/button verifies press cancellation. Board startup,
+ * task ordering and callback registration require separate firmware checks. */
+static void create_pointer(void)
+{
+  display = lv_display_create(800, 800);
+  static uint8_t buffer[800 * 32 * 4];
+  lv_display_set_buffers(display, buffer, NULL, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
+  lv_display_set_flush_cb(display, flush);
+  pointer = lv_indev_create();
+  lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
+  lv_indev_set_read_cb(pointer, read_pointer);
+}
+
+static void test_read_results(void)
+{
+  const esp_lcd_touch_point_data_t expected[] = {
+    {.track_id = 2, .x = 101, .y = 202, .strength = 9},
+    {.track_id = 7, .x = 303, .y = 404, .strength = 12},
+  };
+  esp_lcd_touch_point_data_t points[2] = {0};
+  uint8_t count = 0;
+  touch.data.points = 2;
+  memcpy(touch.data.coords, expected, sizeof(expected));
+  assert(read_touch(&touch, points, &count, 2, NULL) == ESP_OK);
+  assert(count == 2 && touch.data.points == 2 && !memcmp(points, expected, sizeof(expected)));
+  /* No new data keeps a held touch, as it does in the retained driver. */
+  assert(read_touch(&touch, points, &count, 2, NULL) == ESP_OK);
+  assert(count == 2 && touch.data.points == 2 && !memcmp(points, expected, sizeof(expected)));
+  assert(read_touch(&touch, points, &count, 1, NULL) == ESP_OK && count == 1);
+  assert(touch.data.points == 2 && !memcmp(points, expected, sizeof(*points)));
+  const esp_err_t errors[] = {ESP_FAIL, ESP_ERR_TIMEOUT, ESP_ERR_INVALID_STATE,
+    ESP_ERR_INVALID_ARG, ESP_ERR_NO_MEM, ESP_ERR_INVALID_RESPONSE, -129};
+  for (unsigned i = 0; i < sizeof(errors) / sizeof(*errors); ++i) {
+    read_result = errors[i];
+    touch.data.points = 2;
+    count = 255;
+    unsigned previous_gets = data_gets, previous_reads = reads;
+    assert(read_touch(&touch, points, &count, 2, NULL) == errors[i]);
+    assert(count == 0 && touch.data.points == 0 && data_gets == previous_gets && reads == previous_reads + 1);
+    assert(!memcmp(touch.data.coords, expected, sizeof(expected)));
+    read_result = ESP_OK;
+    assert(read_touch(&touch, points, &count, 2, NULL) == ESP_OK && count == 0);
+    assert(touch.data.points == 0); /* A not-ready poll cannot replay old points. */
+  }
+}
+
+static void button_event(lv_event_t *event)
+{
+  switch (lv_event_get_code(event)) {
+    case LV_EVENT_PRESSED: ++pressed; break;
+    case LV_EVENT_PRESS_LOST: ++lost; break;
+    case LV_EVENT_CLICKED: ++clicked; break;
+    default: break;
+  }
+}
+
+static void test_interrupted_press(void)
+{
+  lv_obj_t *button = lv_button_create(lv_screen_active());
+  lv_obj_set_size(button, 120, 70);
+  lv_obj_center(button);
+  lv_obj_add_event_cb(button, button_event, LV_EVENT_ALL, NULL);
+  lv_obj_update_layout(lv_screen_active());
+  touch.data.coords[0] = (esp_lcd_touch_point_data_t){.x = 400, .y = 400, .strength = 10};
+  touch.data.points = 1;
+  lv_indev_read(pointer);
+  assert(pressed == 1 && lv_obj_has_state(button, LV_STATE_PRESSED));
+  lv_tick_inc(30);
+  lv_indev_read(pointer); /* Held points remain pressed. */
+  assert(pressed == 1 && lost == 0 && clicked == 0 && touch.data.points == 1);
+  read_result = ESP_ERR_INVALID_STATE;
+  lv_indev_read(pointer);
+  assert(lost == 1 && clicked == 0 && !lv_obj_has_state(button, LV_STATE_PRESSED));
+  assert(touch.data.points == 0);
+  read_result = ESP_OK;
+  lv_indev_read(pointer); /* Successful no-new-data poll after the failure. */
+  assert(pressed == 1 && clicked == 0 && lost == 1);
+  touch.data.points = 1;
+  lv_tick_inc(30);
+  lv_indev_read(pointer);
+  assert(pressed == 2 && lv_obj_has_state(button, LV_STATE_PRESSED));
+  touch.data.points = 0; /* Fresh real release after the new press. */
+  lv_tick_inc(30);
+  lv_indev_read(pointer);
+  assert(clicked == 1 && lost == 1 && !lv_obj_has_state(button, LV_STATE_PRESSED));
+}
+
+int main(void)
+{
+  lv_init();
+  create_pointer();
+  test_read_results();
+  test_interrupted_press();
+  lv_indev_delete(pointer);
+  lv_display_delete(display);
+  lv_deinit();
+  puts("Production touch callback checks passed: held points, returned read errors, cache clearing, interrupted press cancellation and fresh click recovery.");
+  return 0;
+}
+
+#elif !defined(WAC_UI_SHELL_TEST)
 #include "test_support.h"
 #include "ui/ui_private.h"
 #include "connectivity.h"
 #include "location_lookup.h"
 #include "assets/lv_font_clock_time_144.h"
+#include "src/widgets/buttonmatrix/lv_buttonmatrix_private.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -150,6 +308,30 @@ static void field(unsigned index, const char *text)
   lv_obj_send_event(obj, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
+static lv_indev_data_t pointer_data;
+static lv_indev_t *pointer;
+static void read_pointer(lv_indev_t *indev, lv_indev_data_t *data)
+{ (void)indev; *data = pointer_data; }
+
+static void press(lv_obj_t *obj)
+{
+  lv_obj_update_layout(lv_screen_active());
+  lv_area_t area;
+  lv_obj_get_coords(obj, &area);
+  pointer_data.point = (lv_point_t){(area.x1 + area.x2) / 2, (area.y1 + area.y2) / 2};
+  pointer_data.state = LV_INDEV_STATE_PRESSED;
+  lv_indev_read(pointer);
+}
+
+static void release(void)
+{
+  lv_tick_inc(30);
+  pointer_data.state = LV_INDEV_STATE_RELEASED;
+  lv_indev_read(pointer);
+}
+
+static void tap(lv_obj_t *obj) { press(obj); release(); }
+
 static void select_roller(unsigned index, unsigned selected)
 {
   lv_obj_t *obj = find_type(lv_screen_active(), &lv_roller_class, &index);
@@ -197,13 +379,39 @@ static void keyboard_control(lv_obj_t *keyboard, const char *text,
 
 static void keyboard_key(lv_obj_t *keyboard, const char *text, bool preview)
 {
+  lv_obj_update_layout(lv_screen_active());
   uint32_t id = keyboard_button(keyboard, text);
   if (preview) {
     assert(lv_keyboard_get_popovers(keyboard));
     assert(lv_buttonmatrix_has_button_ctrl(keyboard, id, LV_BUTTONMATRIX_CTRL_POPOVER));
   }
-  lv_buttonmatrix_set_selected_button(keyboard, id);
-  assert(lv_obj_send_event(keyboard, LV_EVENT_VALUE_CHANGED, NULL) == LV_RESULT_OK);
+  /* Read LVGL's actual key rectangles rather than duplicate its layout. */
+  lv_area_t area;
+  lv_obj_get_coords(keyboard, &area);
+  const lv_area_t *key = &((lv_buttonmatrix_t *)keyboard)->button_areas[id];
+  pointer_data.point = (lv_point_t){area.x1 + (key->x1 + key->x2) / 2,
+                                  area.y1 + (key->y1 + key->y2) / 2};
+  assert(pointer_data.point.x >= 0 && pointer_data.point.x < 800
+         && pointer_data.point.y >= 0 && pointer_data.point.y < 800);
+  pointer_data.state = LV_INDEV_STATE_PRESSED;
+  lv_indev_read(pointer);
+  assert(lv_obj_has_state(keyboard, LV_STATE_PRESSED));
+  assert(lv_keyboard_get_selected_button(keyboard) == id);
+  release();
+  assert(!lv_obj_has_state(keyboard, LV_STATE_PRESSED));
+}
+
+static void assert_inside_round_panel(const lv_area_t *area)
+{
+  int x[] = {area->x1, area->x2}, y[] = {area->y1, area->y2};
+  for (unsigned i = 0; i < 2; ++i) {
+    for (unsigned j = 0; j < 2; ++j) {
+      int dx = x[i] - 400, dy = y[j] - 400;
+      if (dx * dx + dy * dy > 400 * 400)
+        fprintf(stderr, "Keyboard corner (%d,%d) is outside the round panel\n", x[i], y[j]);
+      assert(dx * dx + dy * dy <= 400 * 400);
+    }
+  }
 }
 
 static void test_credentials_keyboard(void)
@@ -221,13 +429,19 @@ static void test_credentials_keyboard(void)
   assert(password && keyboard && lv_textarea_get_password_mode(password));
   assert(lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
   assert(lv_keyboard_get_textarea(keyboard) == NULL);
-  lv_obj_send_event(password, LV_EVENT_CLICKED, NULL);
+  tap(password);
+  assert(lv_obj_has_state(password, LV_STATE_FOCUSED));
   assert(!lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
   assert(lv_keyboard_get_textarea(keyboard) == password);
   lv_obj_update_layout(lv_screen_active());
   assert(lv_obj_get_width(keyboard) == 680 && lv_obj_get_height(keyboard) == 280);
-  assert(lv_obj_get_style_x(keyboard, LV_PART_MAIN) == 60
-         && lv_obj_get_style_y(keyboard, LV_PART_MAIN) == 480);
+  lv_area_t area;
+  lv_obj_get_coords(keyboard, &area);
+  assert_inside_round_panel(&area);
+  if (area.x1 != 60 || area.y1 != 260 || area.x2 != 739 || area.y2 != 539)
+    fprintf(stderr, "Keyboard screen bounds: (%d,%d)-(%d,%d), expected (60,260)-(739,539)\n",
+            (int)area.x1, (int)area.y1, (int)area.x2, (int)area.y2);
+  assert(area.x1 == 60 && area.y1 == 260 && area.x2 == 739 && area.y2 == 539);
   assert(lv_keyboard_get_mode(keyboard) == LV_KEYBOARD_MODE_TEXT_LOWER);
   keyboard_control(keyboard, LV_SYMBOL_KEYBOARD, 2, false);
   keyboard_control(keyboard, LV_SYMBOL_OK, 2, false);
@@ -272,7 +486,7 @@ static void test_credentials_keyboard(void)
   assert(lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
   assert(lv_keyboard_get_textarea(keyboard) == NULL);
   assert(view == WAC_SETTINGS_CREDENTIALS && task_count == 0);
-  lv_obj_send_event(password, LV_EVENT_CLICKED, NULL);
+  tap(password);
   assert(lv_keyboard_get_textarea(keyboard) == password);
   keyboard_key(keyboard, LV_SYMBOL_KEYBOARD, false);
   assert(lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
@@ -333,6 +547,37 @@ static void test_nested_done_and_cancel(void)
   device_config_t value = current();
   assert(!strcmp(value.room_name, "Clock") && !value.wifi_ssid[0]);
   assert(fake_nvs_calls(FAKE_SET) == 0);
+}
+
+static void test_brightness_limits_and_cancel(void)
+{
+  const int endpoints[] = {20, 100};
+  for (unsigned endpoint = 0; endpoint < 2; ++endpoint) {
+    fresh_editor();
+    click("Device Setup");
+    click("Night Shift");
+    click("Brightness");
+    for (unsigned index = 0; index < 2; ++index) {
+      unsigned slider_index = index;
+      lv_obj_t *slider = find_type(lv_screen_active(), &lv_slider_class, &slider_index);
+      assert(slider && lv_slider_get_min_value(slider) == 20
+             && lv_slider_get_max_value(slider) == 100);
+      lv_slider_set_value(slider, endpoint == 0 ? 19 : 100, LV_ANIM_OFF);
+      assert(lv_slider_get_value(slider) == endpoints[endpoint]);
+      lv_obj_send_event(slider, LV_EVENT_VALUE_CHANGED, NULL);
+    }
+    assert(fake_nvs_calls(FAKE_SET) == 0 && task_count == 0);
+    click("Done");
+    char value[48];
+    snprintf(value, sizeof(value), "Brightness\nDay %d%% · Night %d%%",
+             endpoints[endpoint], endpoints[endpoint]);
+    assert(find_label(lv_screen_active(), value));
+    click("Done");
+    click("Cancel");
+    device_config_t applied = current();
+    assert(applied.day_brightness == 80 && applied.night_brightness == 30);
+    assert(fake_nvs_calls(FAKE_SET) == 0 && task_count == 0);
+  }
 }
 
 static void test_selected_time_format(void)
@@ -550,12 +795,25 @@ static void test_keyboard_only_on_text_editors(void)
     if (text_editor) {
       assert(lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
       assert(lv_keyboard_get_textarea(keyboard) == NULL);
-      index = 0;
-      lv_obj_t *textarea = find_type(lv_screen_active(), &lv_textarea_class, &index);
-      assert(textarea);
-      lv_obj_send_event(textarea, LV_EVENT_CLICKED, NULL);
-      assert(!lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
-      assert(lv_keyboard_get_textarea(keyboard) == textarea);
+      unsigned fields = next == WAC_SETTINGS_WEATHER ? 1 : 2;
+      for (unsigned field_index = 0; field_index < fields; ++field_index) {
+        index = field_index;
+        lv_obj_t *textarea = find_type(lv_screen_active(), &lv_textarea_class, &index);
+        assert(textarea);
+        tap(textarea);
+        assert(lv_obj_has_state(textarea, LV_STATE_FOCUSED));
+        assert(!lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
+        assert(lv_keyboard_get_textarea(keyboard) == textarea);
+        lv_area_t area;
+        lv_obj_get_coords(keyboard, &area);
+        assert_inside_round_panel(&area);
+        keyboard_key(keyboard, LV_SYMBOL_OK, false);
+        assert(lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
+        tap(textarea); /* Reopen the same field without another focus event. */
+        assert(!lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
+        assert(lv_keyboard_get_textarea(keyboard) == textarea);
+        keyboard_key(keyboard, LV_SYMBOL_KEYBOARD, false);
+      }
     }
   }
   wac_ui_settings_close();
@@ -569,9 +827,13 @@ int main(void)
   static uint8_t buffer[800 * 32 * 4];
   lv_display_set_buffers(display, buffer, NULL, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_set_flush_cb(display, flush);
+  pointer = lv_indev_create();
+  lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
+  lv_indev_set_read_cb(pointer, read_pointer);
   test_credentials_keyboard();
   test_keyboard_only_on_text_editors();
   test_nested_done_and_cancel();
+  test_brightness_limits_and_cancel();
   test_selected_time_format();
   test_alarm_failed_save_retry_and_toggle();
   test_required_editor_fields_before_submission();
@@ -579,6 +841,7 @@ int main(void)
   test_weather_failure_retains_draft_and_success_restarts();
   assert(task_count == 0);
   wac_ui_settings_close();
+  lv_indev_delete(pointer);
   lv_display_delete(display);
   lv_deinit();
   puts("Production UI checks passed: clock time font, credentials keyboard, nested drafts, cancellation, deferred saves, errors, retry, toggle, stale completion, location restart.");
@@ -752,11 +1015,11 @@ static void click(const char *text)
                     LV_EVENT_CLICKED, NULL); }
 static lv_obj_t *overlay(void)
 { return lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(label("DISMISS")))); }
-static lv_obj_t *find_textarea(lv_obj_t *root)
+static lv_obj_t *find_widget(lv_obj_t *root, const lv_obj_class_t *type)
 {
-  if (lv_obj_check_type(root, &lv_textarea_class)) return root;
+  if (lv_obj_check_type(root, type)) return root;
   for (uint32_t i = 0; i < lv_obj_get_child_count(root); ++i) {
-    lv_obj_t *found = find_textarea(lv_obj_get_child(root, i));
+    lv_obj_t *found = find_widget(lv_obj_get_child(root, i), type);
     if (found) return found;
   }
   return NULL;
@@ -1326,7 +1589,7 @@ static void test_backup_clock_ui(lv_indev_t *pointer)
   wac_settings_begin(lv_obj_get_parent(indicator()), &config);
   wac_ui_settings_navigate(WAC_SETTINGS_DEVICE);
   assert(!visible(overlay()) && !visible(indicator()));
-  lv_obj_t *room = find_textarea(lv_screen_active());
+  lv_obj_t *room = find_widget(lv_screen_active(), &lv_textarea_class);
   assert(room);
   lv_textarea_set_text(room, "Draft room");
   lv_obj_send_event(room, LV_EVENT_VALUE_CHANGED, NULL);
@@ -1440,7 +1703,7 @@ static void test_background_message_ui(lv_indev_t *pointer, bool night_active)
   assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
   click("Device Setup\nClock");
   click("Device Settings\nClock");
-  lv_obj_t *room = find_textarea(lv_screen_active());
+  lv_obj_t *room = find_widget(lv_screen_active(), &lv_textarea_class);
   assert(room);
   lv_textarea_set_text(room, "Message-waiting draft");
   lv_obj_send_event(room, LV_EVENT_VALUE_CHANGED, NULL);
@@ -1451,7 +1714,7 @@ static void test_background_message_ui(lv_indev_t *pointer, bool night_active)
   assert(fake_nvs_calls(FAKE_SET) == 0);
 }
 
-static void test_first_use_boot(void)
+static void test_first_use_boot(lv_indev_t *pointer)
 {
   fake_nvs_reset();
   assert(device_config_init() == ESP_OK);
@@ -1483,7 +1746,7 @@ static void test_first_use_boot(void)
   assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
   assert(wac_ui_settings_view() == WAC_SETTINGS_WEATHER);
   assert(visible(label("Weather Location")) && visible(label("City, State")));
-  lv_obj_t *location = find_textarea(lv_screen_active());
+  lv_obj_t *location = find_widget(lv_screen_active(), &lv_textarea_class);
   assert(location && !lv_textarea_get_text(location)[0]);
   assert(!visible(indicator()) && !visible(overlay()));
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
@@ -1492,6 +1755,18 @@ static void test_first_use_boot(void)
   assert(dismissal_count == submissions_before_boot);
   assert(runtime.clock.warning == WAC_TIME_WARNING_LOST_TIME);
   assert(fake_nvs_calls(FAKE_SET) == 0);
+  lv_obj_t *keyboard = find_widget(lv_screen_active(), &lv_keyboard_class);
+  assert(keyboard && lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
+  lv_obj_update_layout(lv_screen_active());
+  lv_area_t area;
+  lv_obj_get_coords(location, &area);
+  int x = (area.x1 + area.x2) / 2, y = (area.y1 + area.y2) / 2;
+  swipe(pointer, x, y, x, y);
+  assert(visible(keyboard) && lv_keyboard_get_textarea(keyboard) == location);
+  lv_obj_get_coords(keyboard, &area);
+  assert(area.x1 == 60 && area.y1 == 260 && area.x2 == 739 && area.y2 == 539);
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(visible(keyboard) && lv_keyboard_get_textarea(keyboard) == location);
   wac_settings_close();
 }
 
@@ -1656,7 +1931,7 @@ int main(void)
   test_backup_clock_ui(pointer);
   test_background_message_ui(pointer, false);
   test_background_message_ui(pointer, true);
-  test_first_use_boot();
+  test_first_use_boot(pointer);
   test_indicator_pulses();
   lv_indev_delete(pointer);
   lv_display_delete(display);
