@@ -4,7 +4,7 @@ A round touchscreen clock for your nightstand or desk, with weather forecasts, c
 
 Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 
-**Development status:** Settings persistence, draft editors, production Save handling, time-source handling and DS3231 backup-clock integration are implemented and checked natively. The backup-clock indicator and notices are connected to the running application. Weather and House Messages remain available. Forecast labels retain provider dates, and weather downloads proceed independently of clock synchronization. Alarm playback, solar Night Shift, brightness/fades and the full approved visual redesign remain pending. No board is available; firmware compilation and native checks do not establish hardware behavior.
+**Development status:** Settings persistence, draft editors, production Save handling, time-source handling and DS3231 backup-clock integration are implemented and checked natively. Normal clock screens now include centered, fitted digital Night time, a shared unavailable-time screen and the approved paused-clock notice placement. The backup-clock indicator and notices are connected to the running application. Weather and House Messages remain available. Forecast labels retain provider dates, and weather downloads proceed independently of clock synchronization. Night Shift owns startup appearance, its remembered fallback and configured brightness transitions through the existing clock task. Alarm playback, solar calculations, alarm screens and the remaining weather/settings visual redesign remain pending. A board is now available; hardware testing is pending. Firmware compilation and native checks do not establish hardware behavior.
 
 - [Features](#features)
 - [Hardware](#hardware)
@@ -20,6 +20,7 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 ### Available in the current firmware
 
 - Analog and digital clock faces, with 12-hour or 24-hour time and an optional leading zero.
+- Large, centered digital time in Night Shift and a common unavailable-time screen for either clock face.
 - Current temperature, today's high and low, and weather icons that change between day and night.
 - A forecast for the next five days, with icons chosen to represent the daytime weather.
 - A conditions screen with wind, gusts, pressure, rain or snow, and a short weather outlook.
@@ -27,17 +28,17 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 - Weather from Open-Meteo, with no API key to configure.
 - Time synchronized over Wi-Fi.
 - DS3231 backup-clock support for startup while network synchronization proceeds, with lost-time and connection notices.
-- A red Night Shift appearance with Off, Always On or Fixed Schedule preferences.
+- A red Night Shift appearance with Off, Always On or Fixed Schedule preferences, remembered startup fallback, and separate Day/Night brightness with gradual transitions.
 - Household messages sent from a phone or computer on the same network, with optional sharing among multiple ESP32-P4 clocks.
-- Touchscreen settings for Wi-Fi, location, display, messaging and saved alarm/night preferences. Alarm and expanded night runtime work remains pending.
+- Touchscreen settings for Wi-Fi, location, display, messaging and saved alarm/night preferences. Alarm operation and solar scheduling remain pending.
 - Automatic startup when the board receives power.
 
 ### Planned enhancements
 
 - One recurring alarm with selectable days, sound and volume, plus snooze and dismissal.
 - Classic Beep, Gentle Chime, and Rising Tones, with a sound preview and gradually increasing alarm volume.
-- Expanded Night Shift choices: Off, Always On, Fixed Schedule, and Sunset to Sunrise, with separate day/night brightness and gradual transitions.
-- A redesigned interface for settings, ringing, snooze, and clock notices.
+- Sunset to Sunrise scheduling with saved offsets.
+- A redesigned interface for settings, ringing, snooze, and missed-alarm notices.
 
 The approved design is in [docs/architecture.md](docs/architecture.md). Open [mockups/alarm-design.html](mockups/alarm-design.html) in a browser to explore the planned clock screens and House Messages page.
 
@@ -151,7 +152,7 @@ Weather normally refreshes every ten minutes. If an update fails, the clock keep
 
 ### Night Shift
 
-The Night Shift owner supplies Day or Night to the renderer for Off, Always On and the saved Fixed Schedule. The editors also retain solar offsets and brightness preferences. Solar operation, remembered startup appearance and physical backlight fades remain pending; saving these preferences is not evidence that those features run.
+Night Shift supplies Day or Night for Off, Always On and the saved Fixed Schedule, with separate configured brightness and gradual transitions, including startup. When a scheduled mode cannot be calculated at startup, it uses the last saved appearance, or Day if none is usable. Solar calculations remain pending; that mode currently uses the fallback and retains the selected appearance. See the [Night Shift rules](docs/architecture.md#night-shift) for defaults and accepted save-failure behavior. Physical brightness and fades remain unverified; board testing is pending.
 
 ## Household Messages
 
@@ -207,7 +208,7 @@ Swipe down from the clock to open settings. Saved preferences stay on the device
 | Time format | **12-hour** or **24-hour**. |
 | Leading zero | Whether 12-hour time displays `07:00 AM` or `7:00 AM`. |
 | Units | **Imperial** or **Metric** weather measurements. |
-| Night Shift | Saved appearance, schedule, solar offsets and brightness preferences; full runtime integration is pending. |
+| Night Shift | Mode, fixed schedule and Day/Night brightness; solar offsets are saved, but solar calculations remain pending. |
 | Alarm | Saved time, repeat days, sound, volume, snooze and enable preference; ringing and preview are pending. |
 
 Device Setup and Wi-Fi share a draft for **Save & Restart**. Weather Location saves independently and restarts after success. Alarm **Save** and the Settings-entry alarm toggle apply settings without restarting. Nested **Done** keeps edits in the parent draft; **Cancel** discards that editor's edits. See the [architecture](docs/architecture.md#editing-and-saving-user-settings) for save rules and accepted partial-save behavior.
@@ -231,7 +232,7 @@ Read [AGENTS.md](AGENTS.md) before changing the project. The following documents
 
 The source structure in the architecture document is a plan; listed enhancement files are created only when needed. The mockup is a visual reference, not firmware or a hardware emulator.
 
-No board is available for verification of this fork yet. A successful build does not establish touchscreen behavior, physical brightness, RTC operation, audible alarms, or behavior during power loss.
+A board is available, but hardware verification has not started. A successful build does not establish touchscreen behavior, physical brightness, RTC operation, audible alarms, or behavior during power loss.
 
 ## License and attribution
 

@@ -149,9 +149,7 @@ static void runtime_state_snapshot(app_runtime_state_t *out_runtime, const devic
       out_runtime->has_important_message = has_important_message;
     }
   }
-  /* Startup finishes before the heartbeat starts; this policy has one caller
-   * at a time, including snapshots where other owner data is unavailable. */
-  out_runtime->night_active = wac_night_update(config, &out_runtime->clock);
+  out_runtime->night_active = wac_night_active();
 }
 
 static bool runtime_state_has_valid_weather(void)
@@ -184,6 +182,7 @@ static void clock_control_task(void *arg)
 {
   (void) arg;
   esp_err_t last_rtc_error = ESP_OK;
+  esp_err_t last_night_error = ESP_OK;
   while (true) {
     wac_time_warning_t warning;
     while (xQueueReceive(s_clock_commands, &warning, 0) == pdTRUE) {
@@ -199,6 +198,14 @@ static void clock_control_task(void *arg)
         ESP_LOGI(TAG, "Backup clock correction completed");
       }
       last_rtc_error = clock.rtc_error;
+    }
+    device_config_t config;
+    if (device_config_copy(&config) == ESP_OK) {
+      esp_err_t error = wac_night_update(&config, &clock);
+      if (error != ESP_OK && error != last_night_error) {
+        ESP_LOGW(TAG, "Night Shift storage or backlight operation failed: %s", esp_err_to_name(error));
+      }
+      last_night_error = error;
     }
     vTaskDelay(pdMS_TO_TICKS(250));
   }
@@ -418,6 +425,12 @@ void app_main(void)
   ESP_ERROR_CHECK(device_config_copy(&config));
   ESP_ERROR_CHECK(wac_time_init(config.timezone));
   log_device_clock("Clock after boot timezone apply");
+  wac_time_snapshot_t startup_clock;
+  wac_time_snapshot(&startup_clock);
+  esp_err_t night_err = wac_night_init(&config, &startup_clock);
+  if (night_err != ESP_OK) {
+    ESP_LOGW(TAG, "Night Shift startup returned %s", esp_err_to_name(night_err));
+  }
 
   s_runtime_mutex = xSemaphoreCreateMutex();
   if (s_runtime_mutex == NULL) {
@@ -469,10 +482,8 @@ void app_main(void)
   ESP_ERROR_CHECK(app_ui_show_boot_screen(&config, &startup_runtime, touch_ready));
   bsp_display_unlock();
 
-  esp_err_t backlight_err = bsp_display_backlight_on();
-  if (backlight_err != ESP_OK) {
-    ESP_LOGW(TAG, "Backlight enable returned %s", esp_err_to_name(backlight_err));
-  }
+  /* The clock task advances the configured fade after the display is ready. */
+  wac_night_start_backlight();
 
   ESP_LOGI(TAG, "Display ready, touch %s", touch_ready ? "detected" : "not detected");
 

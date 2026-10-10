@@ -7,7 +7,7 @@ find_package(Threads REQUIRED)
 # are disposable native-build outputs, never added to firmware sources.
 set(platform_headers "${CMAKE_CURRENT_BINARY_DIR}/platform")
 file(MAKE_DIRECTORY "${platform_headers}/freertos" "${platform_headers}/driver" "${platform_headers}/bsp")
-foreach(header esp_err.h esp_system.h esp_wifi.h esp_event.h esp_check.h esp_netif.h esp_netif_sntp.h esp_sntp.h esp_http_client.h esp_crt_bundle.h nvs.h freertos/FreeRTOS.h freertos/semphr.h freertos/task.h freertos/event_groups.h driver/i2c_master.h bsp/esp32_p4_wifi6_touch_lcd_xc.h)
+foreach(header bsp/display.h esp_err.h esp_system.h esp_wifi.h esp_event.h esp_check.h esp_netif.h esp_netif_sntp.h esp_sntp.h esp_http_client.h esp_crt_bundle.h nvs.h freertos/FreeRTOS.h freertos/semphr.h freertos/task.h freertos/event_groups.h driver/i2c_master.h bsp/esp32_p4_wifi6_touch_lcd_xc.h)
   file(WRITE "${platform_headers}/${header}" "#include \"test_support.h\"\n")
 endforeach()
 
@@ -72,21 +72,20 @@ if(NOT native_lv_conf STREQUAL previous_lv_conf)
   file(WRITE "${LV_BUILD_CONF_PATH}" "${native_lv_conf}")
 endif()
 add_subdirectory(../managed_components/lvgl__lvgl "${CMAKE_CURRENT_BINARY_DIR}/lvgl")
+find_path(CJSON_INCLUDE_DIR cJSON.h
+  HINTS "$ENV{IDF_PATH}/components/json/cJSON"
+        "$ENV{HOME}/.espressif/v5.5.5/esp-idf/components/json/cJSON"
+  REQUIRED)
 add_executable(test_ui test_ui.c test_support.c
   ../main/ui/settings.c ../main/device_config.c ../main/timezone_table.c
   ../main/assets/lv_font_clock_time_144.c)
 target_include_directories(test_ui PRIVATE
-  "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)
+  "${CJSON_INCLUDE_DIR}" "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)
 target_compile_features(test_ui PRIVATE c_std_11)
 target_compile_options(test_ui PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(test_ui PRIVATE lvgl::lvgl Threads::Threads m)
 add_test(NAME settings_ui COMMAND test_ui)
 set_tests_properties(settings_ui PROPERTIES TIMEOUT 15)
-
-find_path(CJSON_INCLUDE_DIR cJSON.h
-  HINTS "$ENV{IDF_PATH}/components/json/cJSON"
-        "$ENV{HOME}/.espressif/v5.5.5/esp-idf/components/json/cJSON"
-  REQUIRED)
 
 # Exercise the existing private worker and its publication helpers without a
 # firmware test interface or a second implementation in the maintained test.
@@ -131,7 +130,7 @@ add_test(NAME weather_service COMMAND test_weather_service)
 set_tests_properties(weather_service PROPERTIES TIMEOUT 15)
 
 add_executable(test_ui_shell test_ui.c test_support.c
-  ../main/ui/ui.c ../main/ui/settings.c
+  ../main/ui/ui.c ../main/ui/clock_views.c ../main/ui/settings.c
   ../main/device_config.c ../main/timezone_table.c ../main/weather_icon_names.c
   ../main/assets/lv_font_clock_time_144.c ../main/assets/lv_font_temp_102.c
   ../main/assets/lv_font_temp_105.c ../main/assets/lv_font_wind_speed_70.c)

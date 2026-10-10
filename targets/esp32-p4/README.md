@@ -2,7 +2,7 @@
 
 This target is the native firmware path for the Waveshare `ESP32-P4-WIFI6-Touch-LCD-3.4C` board family.
 
-The [architecture and product specification](../../docs/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. This checkout implements settings persistence, Save handling, time-source handling, DS3231 integration and backup-clock notices. Alarm/audio, full Night Shift runtime and the broader visual redesign remain pending; see the root [implementation status](../../README.md). RTC hardware and the physical display remain unverified.
+The [architecture and product specification](../../docs/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. This checkout implements settings persistence, Save handling, time-source handling, DS3231 integration, backup-clock notices and Night Shift startup fallback/brightness transitions. Normal clock rendering has its own private object owner, with centered digital Night time, a shared unavailable-time surface and face-specific paused-clock notices. Alarm/audio, solar calculations and the remaining weather/settings/alarm screens remain pending; see the root [implementation status](../../README.md). RTC hardware and the physical display remain unverified.
 
 ## Prepare the environment (no board needed)
 
@@ -80,6 +80,8 @@ One `main` component holds the application, grouped by function. UI files use `m
   Firmware entrypoint
 - `main/app_ui.h` and `main/ui/`
   Public UI interface, retained clock/weather/message rendering and settings draft editors
+- `main/ui/clock_views.c`
+  Private clock, unavailable-time, status and backup-notice drawing objects; `ui.c` retains navigation and notice actions
 - `main/connectivity.*`
   WiFi station connect, scanning, and time sync
 - `main/device_config.*`
@@ -89,7 +91,7 @@ One `main` component holds the application, grouped by function. UI files use `m
 - `main/ds3231.*`
   DS3231 register access using the existing board I2C bus; UTC dates from 2000 through 2099
 - `main/night.*`
-  Current Off/Always On/Fixed Schedule appearance decision; solar, remembered appearance and backlight ownership remain pending
+  Off/Always On/Fixed Schedule appearance, remembered startup fallback and gradual configured backlight changes; solar calculations remain pending
 - `main/location_lookup.*`
   On-device Open-Meteo geocoding for the setup UI
 - `main/message_service.*`

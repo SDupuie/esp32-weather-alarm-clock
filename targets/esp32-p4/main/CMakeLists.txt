@@ -39,6 +39,7 @@ idf_component_register(
     "assets/weather_icons.c"
     "main.c"
     "ui/ui.c"
+    "ui/clock_views.c"
     "ui/settings.c"
     "clock_time.c"
     "night.c"

@@ -14,7 +14,7 @@ Use existing ESP-IDF, LVGL, and board facilities. Reuse and change existing appl
 
 Use plain language. Report only credible, consequential audit findings.
 
-Test affected behavior and compile firmware after source changes; distinguish these checks from hardware verification. No board is available yet. Do not push, merge, or flash without authorization.
+Test affected behavior and compile firmware after source changes; distinguish these checks from hardware verification. A board is available; hardware testing is pending. Do not push, merge, or flash without authorization.
 
 ## Document authority
 

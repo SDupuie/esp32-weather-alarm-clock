@@ -340,7 +340,7 @@ UI screen assignments follow the [approved visual reference](#ui-and-visual-refe
 
 A copied value is a snapshot for a consumer, not another authority. Runtime fields about time and appearance come from their owners. Screens do not calculate alarm eligibility, infer RTC health, or drive the backlight. Feature-owner headers declare their own data; `app_runtime.h` holds data used for display, including values required by the approved weather age/stale presentation. Intermediate forecast calculations stay with `weather_client`; the display consumes the selected icon. There is no general `wac_types.h` container. DS3231 access reuses the board bus and existing driver facilities without creating a second bus or an application fork of downloaded drivers.
 
-Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
+Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. Clock object handles remain private to `clock_views.c`; its private interface receives display inputs and callbacks from `ui.c` without exporting the shell's state or retaining another service/configuration model. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
 
 ### Execution
 
@@ -348,6 +348,8 @@ Retain the existing network/message workers, LVGL task, and UI heartbeat. Add tw
 
 - A clock-control task, started by `main.c`, runs time maintenance, alarm evaluation, and Night Shift updates by ordinary calls to their owners. It never waits for the display lock, network requests, or audio streaming. Evaluate due alarms before other optional work. RTC calls use finite timeouts; brightness fades advance in steps, not a sleep loop.
 - The audio worker performs playback. Alarm requests take priority over preview requests, and stop/snooze remains responsive during playback.
+
+Initialize Night Shift's appearance before starting the clock task. Time maintenance can start before the display; signal backlight readiness only after board display initialization and the initial draw. The clock task then advances the configured brightness transition. The UI reads the owner's copied appearance without running its policy or touching the backlight.
 
 Settings saves, Wi-Fi scans, and location lookup use short-lived background work, following the existing scan/lookup approach. A pending operation disables duplicate submission; completion is handed back as data, not a pointer to a screen that may have closed. Slow settings writes do not hold the lock used to read the current configuration. There is no permanent storage worker or general job system.
 

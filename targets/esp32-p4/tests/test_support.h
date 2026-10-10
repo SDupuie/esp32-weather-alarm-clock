@@ -63,9 +63,13 @@ typedef enum { FAKE_OPEN, FAKE_READ, FAKE_SET, FAKE_COMMIT, FAKE_OP_COUNT } fake
 void fake_nvs_reset(void);
 void fake_nvs_clear_activity(void);
 void fake_nvs_fail(fake_op_t, unsigned call);
+void fake_nvs_fail_with_error(fake_op_t, unsigned call, esp_err_t error);
 unsigned fake_nvs_calls(fake_op_t);
 unsigned fake_nvs_key_count(void);
 const char *fake_nvs_key(unsigned index);
+const char *fake_nvs_namespace(unsigned index);
+int bsp_display_brightness_get(void);
+esp_err_t bsp_display_brightness_set(int percent);
 void fake_nvs_remove(const char *key);
 void fake_nvs_put_str(const char *key, const char *value);
 void fake_nvs_put_u8(const char *key, uint8_t value);

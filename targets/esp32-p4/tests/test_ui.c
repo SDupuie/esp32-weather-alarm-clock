@@ -593,6 +593,7 @@ int main(void)
 #include "location_lookup.h"
 #include "message_service.h"
 #include "assets/weather_icons.h"
+#include "assets/lv_font_clock_time_144.h"
 
 #include <assert.h>
 #include <stdarg.h>
@@ -698,14 +699,57 @@ static bool visible(lv_obj_t *object)
     if (lv_obj_has_flag(object, LV_OBJ_FLAG_HIDDEN)) return false;
   return true;
 }
+static lv_obj_t *find_visible_label(lv_obj_t *root, const char *text)
+{
+  if (!visible(root)) return NULL;
+  if (lv_obj_check_type(root, &lv_label_class)
+      && !strcmp(lv_label_get_text(root), text)) return root;
+  for (uint32_t i = 0; i < lv_obj_get_child_count(root); ++i) {
+    lv_obj_t *found = find_visible_label(lv_obj_get_child(root, i), text);
+    if (found) return found;
+  }
+  return NULL;
+}
+static lv_obj_t *find_image_source(lv_obj_t *root, const void *source)
+{
+  if (lv_obj_check_type(root, &lv_image_class) && lv_image_get_src(root) == source) return root;
+  for (uint32_t i = 0; i < lv_obj_get_child_count(root); ++i) {
+    lv_obj_t *found = find_image_source(lv_obj_get_child(root, i), source);
+    if (found) return found;
+  }
+  return NULL;
+}
+static unsigned visible_image_count(lv_obj_t *root, const void *source)
+{
+  if (!visible(root)) return 0;
+  unsigned count = lv_obj_check_type(root, &lv_image_class) && lv_image_get_src(root) == source;
+  for (uint32_t i = 0; i < lv_obj_get_child_count(root); ++i)
+    count += visible_image_count(lv_obj_get_child(root, i), source);
+  return count;
+}
+static void assert_home_edges(void)
+{
+  assert(visible_image_count(lv_screen_active(), &analog_edge_indicator) == 1);
+  assert(visible_image_count(lv_screen_active(), &conditions_edge_indicator) == 1);
+}
 static lv_obj_t *label(const char *text)
 { lv_obj_t *found = find_label(lv_screen_active(), text);
   if (!found) fprintf(stderr, "Missing shell label: %s\n", text);
   assert(found); return found; }
-static void click(const char *text)
-{ lv_obj_send_event(lv_obj_get_parent(label(text)), LV_EVENT_CLICKED, NULL); }
+static lv_obj_t *find_warning_button(lv_obj_t *root)
+{
+  if (lv_obj_check_type(root, &lv_button_class) && find_label(root, LV_SYMBOL_WARNING)) return root;
+  for (uint32_t i = 0; i < lv_obj_get_child_count(root); ++i) {
+    lv_obj_t *found = find_warning_button(lv_obj_get_child(root, i));
+    if (found) return found;
+  }
+  return NULL;
+}
 static lv_obj_t *indicator(void)
-{ return lv_obj_get_parent(label(LV_SYMBOL_WARNING)); }
+{ lv_obj_t *button = find_warning_button(lv_screen_active()); assert(button); return button; }
+static void click(const char *text)
+{ lv_obj_send_event(!strcmp(text, LV_SYMBOL_WARNING) ? indicator() : lv_obj_get_parent(label(text)),
+                    LV_EVENT_CLICKED, NULL); }
 static lv_obj_t *overlay(void)
 { return lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(label("DISMISS")))); }
 static lv_obj_t *find_textarea(lv_obj_t *root)
@@ -915,6 +959,279 @@ static void test_provider_forecast_dates(lv_indev_t *pointer)
   tzset();
 }
 
+static void test_normal_clock_surfaces(lv_indev_t *pointer)
+{
+  fake_nvs_reset();
+  assert(device_config_init() == ESP_OK);
+  device_config_t config;
+  assert(device_config_copy(&config) == ESP_OK);
+  config.location_ready = true;
+  config.wifi_ready = true;
+  fake_nvs_clear_activity();
+
+  /* Controlled owner snapshots exercise rendering; these do not establish
+   * whether a real RTC or network supplied trustworthy time. */
+  for (unsigned analog = 0; analog < 2; ++analog) {
+    snprintf(config.default_clock_face, sizeof(config.default_clock_face), "%s",
+             analog ? "analog" : "digital");
+    snprintf(config.time_format, sizeof(config.time_format), "12");
+    config.leading_zero_12h = false;
+    app_runtime_state_t runtime = {0};
+    runtime.clock.usable = true;
+    runtime.clock.source = WAC_TIME_SOURCE_RTC;
+    runtime.clock.utc_now = local_epoch(2026, 10, 9, 7, 6) + 30;
+    runtime.unread_message_count = 1;
+    runtime.has_important_message = true;
+    runtime.weather.valid = true;
+    runtime.weather.has_conditions = true;
+    runtime.weather.conditions.alert = true;
+    snprintf(runtime.weather.icon_name, sizeof(runtime.weather.icon_name), "clear-day");
+    snprintf(runtime.weather_status, sizeof(runtime.weather_status), "Weather test status");
+    assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+    assert_home_edges();
+    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    assert(find_visible_label(lv_screen_active(), analog ? "Oct 9" : "OCT 9"));
+    assert(find_visible_label(lv_screen_active(), "Weather test status"));
+    lv_obj_t *hour = find_image_source(lv_screen_active(), &analog_hour_hand);
+    lv_obj_t *minute = find_image_source(lv_screen_active(), &analog_minute_hand);
+    lv_obj_t *second = find_image_source(lv_screen_active(), &analog_second_hand);
+    assert(hour && minute && second);
+    if (analog) {
+      assert(visible(hour) && visible(minute) && visible(second));
+      assert(lv_image_get_rotation(hour) == 2130);
+      assert(lv_image_get_rotation(minute) == 360);
+      assert(lv_image_get_rotation(second) == 1800);
+    } else {
+      assert(find_visible_label(lv_screen_active(), "7:06"));
+      assert(find_visible_label(lv_screen_active(), "AM"));
+      config.leading_zero_12h = true;
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      assert(find_visible_label(lv_screen_active(), "07:06"));
+      runtime.clock.utc_now = local_epoch(2026, 10, 9, 0, 0);
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      assert(find_visible_label(lv_screen_active(), "12:00"));
+      assert(find_visible_label(lv_screen_active(), "AM"));
+      runtime.clock.utc_now = local_epoch(2026, 10, 9, 12, 0);
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      assert(find_visible_label(lv_screen_active(), "12:00"));
+      assert(find_visible_label(lv_screen_active(), "PM"));
+      snprintf(config.time_format, sizeof(config.time_format), "24");
+      runtime.clock.utc_now = local_epoch(2026, 10, 9, 0, 6);
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      assert(find_visible_label(lv_screen_active(), "00:06"));
+      assert(!find_visible_label(lv_screen_active(), "AM"));
+      assert(!find_visible_label(lv_screen_active(), "PM"));
+      runtime.clock.utc_now = local_epoch(2026, 10, 9, 23, 59);
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      assert(find_visible_label(lv_screen_active(), "23:59"));
+    }
+
+    /* The owner selects appearance even when the saved mode says Day. */
+    config.night_shift_mode = DEVICE_CONFIG_NIGHT_OFF;
+    runtime.night_active = true;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert_home_edges();
+    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    assert(find_visible_label(lv_screen_active(), analog ? "Oct 9" : "OCT 9"));
+    assert(!find_visible_label(lv_screen_active(), "Weather test status"));
+    assert(visible(find_image_source(lv_screen_active(),
+                                  analog ? &analog_stage_night : &digital_stage_night)));
+    config.night_shift_mode = DEVICE_CONFIG_NIGHT_ALWAYS_ON;
+    runtime.night_active = false;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert_home_edges();
+    assert(find_visible_label(lv_screen_active(), "Weather test status"));
+    assert(visible(find_image_source(lv_screen_active(),
+                                  analog ? &analog_stage_day : &digital_stage_day)));
+
+    /* Updating an unchanged minute must keep the inherited pause diagnostic.
+     * Seconds advancing alone are deliberately insufficient to clear it. */
+    runtime.clock.source = WAC_TIME_SOURCE_NETWORK;
+    runtime.clock.utc_now = local_epoch(2026, 10, 9, 7, 6);
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    for (unsigned i = 0; i < 135; ++i) {
+      lv_tick_inc(1000);
+      runtime.clock.utc_now = local_epoch(2026, 10, 9, 7, 6) + i % 60;
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      assert(!find_visible_label(lv_screen_active(), "Clock paused"));
+    }
+    lv_tick_inc(1); /* Preserves the existing strictly-after-135-seconds edge. */
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    lv_obj_t *paused = find_visible_label(lv_screen_active(), "Clock paused");
+    assert(paused);
+    assert(lv_obj_get_style_text_font(paused, 0) == &lv_font_montserrat_28);
+    lv_obj_update_layout(lv_screen_active());
+    lv_area_t notice;
+    lv_obj_get_coords(lv_obj_get_parent(paused), &notice);
+    assert(notice.x1 == (analog ? 220 : 170) && notice.y1 == (analog ? 220 : 642));
+    assert(lv_area_get_width(&notice) == (analog ? 360 : 460));
+    assert(lv_area_get_height(&notice) == (analog ? 72 : 80));
+    runtime.clock.utc_now = local_epoch(2026, 10, 9, 7, 7);
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(!find_visible_label(lv_screen_active(), "Clock paused"));
+
+    /* A plausible epoch with unusable trust must never appear as real time. */
+    runtime.clock.usable = false;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert_home_edges();
+    const char *unavailable_text[] = {"Time unavailable", "--:--", "Waiting for time sync"};
+    const int x[] = {140, 140, 120}, y[] = {140, 228, 405}, width[] = {520, 520, 560};
+    for (unsigned i = 0; i < 3; ++i) {
+      lv_obj_t *text = find_visible_label(lv_screen_active(), unavailable_text[i]);
+      assert(text);
+      lv_obj_update_layout(lv_screen_active());
+      lv_area_t coords;
+      lv_obj_get_coords(text, &coords);
+      assert(coords.x1 == x[i] && coords.y1 == y[i]);
+      assert(lv_area_get_width(&coords) == width[i]);
+      assert(lv_obj_get_style_text_font(text, 0) == (i == 1 ? &lv_font_clock_time_144 : &lv_font_montserrat_36));
+    }
+    assert(!find_visible_label(lv_screen_active(), "Clock pending network sync"));
+    assert(!find_visible_label(lv_screen_active(), "Weather test status"));
+    assert(!find_visible_label(lv_screen_active(), "Alarm Settings"));
+    assert(!visible(hour) && !visible(minute) && !visible(second));
+    runtime.night_active = true;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert_home_edges();
+    assert(find_visible_label(lv_screen_active(), "Time unavailable"));
+    assert(find_visible_label(lv_screen_active(), "--:--"));
+    assert(find_visible_label(lv_screen_active(), "Waiting for time sync"));
+    swipe(pointer, 600, 200, 300, 200);
+    assert(!find_visible_label(lv_screen_active(), "Time unavailable"));
+    swipe(pointer, 300, 200, 600, 200);
+    assert(find_visible_label(lv_screen_active(), "Time unavailable"));
+    runtime.night_active = false;
+    runtime.clock.usable = true;
+    runtime.clock.source = WAC_TIME_SOURCE_RTC;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert_home_edges();
+    assert(!find_visible_label(lv_screen_active(), "Clock pending network sync"));
+    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    if (analog) assert(visible(hour) && visible(minute) && visible(second));
+
+    /* Both configured faces retain the real-pointer navigation map. */
+    swipe(pointer, 600, 200, 300, 200);
+    assert(!find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    swipe(pointer, 300, 200, 600, 200);
+    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    swipe(pointer, 300, 200, 600, 200);
+    assert(!find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    swipe(pointer, 600, 200, 300, 200);
+    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    swipe(pointer, 600, 400, 600, 200); /* Up remains reserved. */
+    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    swipe(pointer, 600, 200, 600, 400);
+    assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
+    wac_ui_settings_close();
+    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+  }
+  assert(fake_nvs_calls(FAKE_SET) == 0);
+}
+
+static void test_digital_night_layout(void)
+{
+  fake_nvs_reset();
+  assert(device_config_init() == ESP_OK);
+  device_config_t config;
+  assert(device_config_copy(&config) == ESP_OK);
+  config.location_ready = true;
+  config.wifi_ready = true;
+  snprintf(config.default_clock_face, sizeof(config.default_clock_face), "digital");
+  snprintf(config.time_format, sizeof(config.time_format), "12");
+  config.leading_zero_12h = false;
+  app_runtime_state_t runtime = {0};
+  runtime.clock.usable = true;
+  runtime.clock.source = WAC_TIME_SOURCE_NETWORK;
+  runtime.clock.utc_now = local_epoch(2026, 10, 9, 7, 6);
+  assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+  lv_obj_t *time = find_visible_label(lv_screen_active(), "7:06");
+  assert(time);
+  lv_obj_update_layout(lv_screen_active());
+  lv_area_t day_coords;
+  lv_obj_get_coords(time, &day_coords);
+  assert(lv_obj_get_style_transform_scale_x_safe(time, 0) == 256);
+
+  runtime.night_active = true;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  lv_obj_update_layout(lv_screen_active());
+  lv_area_t reserved;
+  lv_obj_get_coords(time, &reserved);
+  int scale = lv_obj_get_style_transform_scale_x_safe(time, 0);
+  assert(scale > 256);
+  assert(scale == lv_obj_get_style_transform_scale_y_safe(time, 0));
+  int pivot_x = lv_obj_get_style_transform_pivot_x(time, 0);
+  int pivot_y = lv_obj_get_style_transform_pivot_y(time, 0);
+  int center_x = reserved.x1 + pivot_x
+    + ((lv_area_get_width(&reserved) / 2 - pivot_x) * scale) / 256;
+  int center_y = reserved.y1 + pivot_y
+    + ((lv_area_get_height(&reserved) / 2 - pivot_y) * scale) / 256;
+  assert(abs(center_x - 400) <= 2 && abs(center_y - 400) <= 2);
+  assert(find_visible_label(lv_screen_active(), "FRIDAY"));
+  assert(find_visible_label(lv_screen_active(), "OCT 9"));
+
+  const int hours[] = {8, 11, 12, 23};
+  const int minutes[] = {8, 59, 0, 59};
+  const char *texts[] = {"8:08", "11:59", "12:00", "11:59"};
+  for (unsigned i = 0; i < 4; ++i) {
+    runtime.clock.utc_now = local_epoch(2026, 10, 9, hours[i], minutes[i]);
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    lv_obj_update_layout(lv_screen_active());
+    assert(find_visible_label(lv_screen_active(), texts[i]) == time);
+    assert(lv_obj_get_style_transform_scale_x_safe(time, 0) == scale);
+    lv_area_t now;
+    lv_obj_get_coords(time, &now);
+    center_x = now.x1 + pivot_x
+      + ((lv_area_get_width(&now) / 2 - pivot_x) * scale) / 256;
+    center_y = now.y1 + pivot_y
+      + ((lv_area_get_height(&now) / 2 - pivot_y) * scale) / 256;
+    assert(abs(center_x - 400) <= 2 && abs(center_y - 400) <= 2);
+    lv_obj_t *period = find_visible_label(lv_screen_active(), i < 2 ? "AM" : "PM");
+    assert(period);
+    lv_area_t period_coords;
+    lv_obj_get_coords(period, &period_coords);
+    /* The right-hand period must fit the round display as well as the time.
+     * This checks LVGL layout bounds; small image substitutes cannot prove
+     * raster-font sharpness or a physical screen's clipping. */
+    int dx = period_coords.x2 - 400, dy = period_coords.y2 - 400;
+    assert(dx * dx + dy * dy <= 390 * 390);
+    const lv_font_t *font = lv_obj_get_style_text_font(period, 0);
+    assert(font == &lv_font_montserrat_24);
+    int digit_baseline = now.y1 + pivot_y
+      + ((lv_font_clock_time_144.line_height - lv_font_clock_time_144.base_line - pivot_y) * scale) / 256;
+    int period_baseline = period_coords.y1 + font->line_height - font->base_line;
+    assert(abs(digit_baseline - period_baseline) <= 3);
+  }
+
+  runtime.night_active = false;
+  runtime.clock.utc_now = local_epoch(2026, 10, 9, 7, 6);
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  lv_obj_update_layout(lv_screen_active());
+  lv_area_t restored;
+  lv_obj_get_coords(time, &restored);
+  assert(lv_obj_get_style_transform_scale_x_safe(time, 0) == 256);
+  assert(restored.x1 == day_coords.x1 && restored.y1 == day_coords.y1
+    && restored.x2 == day_coords.x2 && restored.y2 == day_coords.y2);
+
+  /* 24-hour Night reserves its widest five-character time as well. */
+  snprintf(config.time_format, sizeof(config.time_format), "24");
+  runtime.night_active = true;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  lv_obj_update_layout(lv_screen_active());
+  assert(find_visible_label(lv_screen_active(), "07:06") == time);
+  lv_obj_get_coords(time, &reserved);
+  scale = lv_obj_get_style_transform_scale_x_safe(time, 0);
+  runtime.clock.utc_now = local_epoch(2026, 10, 9, 23, 59);
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  lv_obj_update_layout(lv_screen_active());
+  assert(find_visible_label(lv_screen_active(), "23:59") == time);
+  lv_obj_get_coords(time, &restored);
+  assert(lv_obj_get_style_transform_scale_x_safe(time, 0) == scale);
+  assert(abs(restored.x1 + lv_area_get_width(&restored) * scale / 512 - 400) <= 2);
+  assert(restored.y1 == reserved.y1 && restored.y2 == reserved.y2);
+  assert(!find_visible_label(lv_screen_active(), "AM"));
+  assert(!find_visible_label(lv_screen_active(), "PM"));
+}
+
 static void test_backup_clock_ui(lv_indev_t *pointer)
 {
   fake_nvs_reset();
@@ -930,7 +1247,7 @@ static void test_backup_clock_ui(lv_indev_t *pointer)
   /* Registration must survive boot's UI-state reset. */
   app_ui_set_clock_warning_dismiss_handler(submit_dismissal);
   assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
-  assert(visible(label("--:--")) && visible(indicator()));
+  assert(find_visible_label(lv_screen_active(), "--:--") && visible(indicator()));
   lv_obj_update_layout(lv_screen_active());
   assert(lv_obj_get_x(indicator()) == 464 && lv_obj_get_y(indicator()) == 56);
   assert(!visible(overlay()));
@@ -945,7 +1262,7 @@ static void test_backup_clock_ui(lv_indev_t *pointer)
     == lv_font_montserrat_28.line_height);
   assert(lv_obj_get_style_text_font(label("DISMISS"), 0) == &lv_font_montserrat_36);
   swipe(pointer, 600, 200, 300, 200);
-  assert(visible(overlay()) && visible(label("--:--")));
+  assert(visible(overlay()) && find_visible_label(lv_screen_active(), "--:--"));
   swipe(pointer, 600, 200, 600, 400);
   assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
 
@@ -1049,7 +1366,7 @@ static void test_backup_clock_ui(lv_indev_t *pointer)
   runtime.clock.usable = false;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   lv_obj_update_layout(lv_screen_active());
-  assert(visible(label("Waiting for time")) && lv_obj_get_y(indicator()) == 56);
+  assert(find_visible_label(lv_screen_active(), "Time unavailable") && lv_obj_get_y(indicator()) == 56);
   assert(fake_nvs_calls(FAKE_SET) == 0);
 }
 
@@ -1334,6 +1651,8 @@ int main(void)
   lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(pointer, read_pointer);
   test_provider_forecast_dates(pointer);
+  test_normal_clock_surfaces(pointer);
+  test_digital_night_layout();
   test_backup_clock_ui(pointer);
   test_background_message_ui(pointer, false);
   test_background_message_ui(pointer, true);

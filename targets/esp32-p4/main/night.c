@@ -4,7 +4,25 @@
 #include <string.h>
 #include <time.h>
 
-static bool current_night;
+#include "bsp/display.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "nvs.h"
+
+#define NIGHT_NAMESPACE "wac_night"
+#define NIGHT_EFFECTIVE_KEY "effective"
+#define FADE_POINT_US 50000
+#define FADE_MAX_STEP 5
+
+/* Only these copied values are shared. All other state belongs to the single
+ * clock-control writer; no lock is held across NVS or backlight calls. */
+static portMUX_TYPE s_copy_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_night;
+static bool s_backlight_ready;
+static bool s_initialized;
+static bool s_fade_started;
+static int s_brightness;
+static int64_t s_fade_step_us;
 
 static int parse_hhmm_minutes(const char *value)
 {
@@ -18,23 +36,138 @@ static int parse_hhmm_minutes(const char *value)
   return hours * 60 + minutes;
 }
 
-bool wac_night_update(const device_config_t *config, const wac_time_snapshot_t *clock)
+static bool select_appearance(const device_config_t *config,
+                              const wac_time_snapshot_t *clock, bool previous)
 {
-  if (config == NULL || config->night_shift_mode == DEVICE_CONFIG_NIGHT_OFF
-      || config->night_shift_mode == DEVICE_CONFIG_NIGHT_SOLAR) {
-    current_night = false;
-  } else if (config->night_shift_mode == DEVICE_CONFIG_NIGHT_ALWAYS_ON) {
-    current_night = true;
-  } else if (clock != NULL && clock->usable) {
-    struct tm local_time = {0};
-    localtime_r(&clock->utc_now, &local_time);
-    int start = parse_hhmm_minutes(config->night_shift_start);
-    int end = parse_hhmm_minutes(config->night_shift_end);
-    int now_minutes = local_time.tm_hour * 60 + local_time.tm_min;
-    if (start < 0 || end < 0) current_night = false;
-    else if (start == end) current_night = true;
-    else if (start < end) current_night = now_minutes >= start && now_minutes < end;
-    else current_night = now_minutes >= start || now_minutes < end;
+  if (config->night_shift_mode == DEVICE_CONFIG_NIGHT_OFF) return false;
+  if (config->night_shift_mode == DEVICE_CONFIG_NIGHT_ALWAYS_ON) return true;
+  /* Solar-event calculation is a later slice. Unavailable scheduled inputs
+   * retain the selected appearance, including the saved startup fallback. */
+  if (config->night_shift_mode == DEVICE_CONFIG_NIGHT_SOLAR
+      || clock == NULL || !clock->usable) return previous;
+
+  struct tm local_time = {0};
+  if (localtime_r(&clock->utc_now, &local_time) == NULL) return previous;
+  int start = parse_hhmm_minutes(config->night_shift_start);
+  int end = parse_hhmm_minutes(config->night_shift_end);
+  int now_minutes = local_time.tm_hour * 60 + local_time.tm_min;
+  if (start < 0 || end < 0) return false;
+  if (start == end) return true;
+  if (start < end) return now_minutes >= start && now_minutes < end;
+  return now_minutes >= start || now_minutes < end;
+}
+
+static void publish_appearance(bool night)
+{
+  portENTER_CRITICAL(&s_copy_lock);
+  s_night = night;
+  portEXIT_CRITICAL(&s_copy_lock);
+}
+
+static esp_err_t save_appearance(bool night)
+{
+  nvs_handle_t handle;
+  esp_err_t err = nvs_open(NIGHT_NAMESPACE, NVS_READWRITE, &handle);
+  if (err != ESP_OK) return err;
+  err = nvs_set_u8(handle, NIGHT_EFFECTIVE_KEY, night ? 1 : 0);
+  if (err == ESP_OK) err = nvs_commit(handle);
+  nvs_close(handle);
+  return err;
+}
+
+esp_err_t wac_night_init(const device_config_t *config, const wac_time_snapshot_t *clock)
+{
+  if (config == NULL) return ESP_ERR_INVALID_ARG;
+
+  bool saved_night = false;
+  nvs_handle_t handle;
+  esp_err_t err = nvs_open(NIGHT_NAMESPACE, NVS_READONLY, &handle);
+  if (err == ESP_OK) {
+    uint8_t value = 0;
+    err = nvs_get_u8(handle, NIGHT_EFFECTIVE_KEY, &value);
+    if (err == ESP_OK && value <= 1) saved_night = value == 1;
+    nvs_close(handle);
   }
-  return current_night;
+  /* A missing or unusable appearance is ordinary startup fallback, rather
+   * than evidence of a storage connection/read failure. */
+  if (err == ESP_ERR_NVS_NOT_FOUND || err == ESP_ERR_NVS_TYPE_MISMATCH) err = ESP_OK;
+
+  bool selected = select_appearance(config, clock, saved_night);
+  portENTER_CRITICAL(&s_copy_lock);
+  s_night = selected;
+  s_backlight_ready = false;
+  portEXIT_CRITICAL(&s_copy_lock);
+  s_fade_started = false;
+  s_initialized = true;
+  /* Do not overwrite a record whose actual read failed. Its error is returned.
+   * The live selection still applies for this run. */
+  if (err == ESP_OK && selected != saved_night) err = save_appearance(selected);
+  return err;
+}
+
+bool wac_night_active(void)
+{
+  portENTER_CRITICAL(&s_copy_lock);
+  bool night = s_night;
+  portEXIT_CRITICAL(&s_copy_lock);
+  return night;
+}
+
+void wac_night_start_backlight(void)
+{
+  portENTER_CRITICAL(&s_copy_lock);
+  s_backlight_ready = true;
+  portEXIT_CRITICAL(&s_copy_lock);
+}
+
+static esp_err_t advance_backlight(int target)
+{
+  portENTER_CRITICAL(&s_copy_lock);
+  bool ready = s_backlight_ready;
+  portEXIT_CRITICAL(&s_copy_lock);
+  if (!ready) return ESP_OK;
+
+  int64_t now = esp_timer_get_time();
+  if (!s_fade_started) {
+    s_brightness = bsp_display_brightness_get();
+    s_fade_step_us = now;
+    s_fade_started = true;
+    return ESP_OK;
+  }
+  if (s_brightness == target) {
+    s_fade_step_us = now;
+    return ESP_OK;
+  }
+  int64_t elapsed_steps = (now - s_fade_step_us) / FADE_POINT_US;
+  if (elapsed_steps <= 0) return ESP_OK;
+  int step = elapsed_steps > FADE_MAX_STEP ? FADE_MAX_STEP : (int) elapsed_steps;
+  int next = s_brightness < target ? s_brightness + step : s_brightness - step;
+  if ((s_brightness < target && next > target)
+      || (s_brightness > target && next < target)) next = target;
+  esp_err_t err = bsp_display_brightness_set(next);
+  /* BSP updates its cached value before checking LEDC errors. Keep our last
+   * successful level so a failed step is not mistaken for completed hardware. */
+  if (err == ESP_OK) s_brightness = next;
+  if (err != ESP_OK || elapsed_steps > FADE_MAX_STEP || next == target) {
+    s_fade_step_us = now;
+  } else {
+    s_fade_step_us += step * FADE_POINT_US;
+  }
+  return err;
+}
+
+esp_err_t wac_night_update(const device_config_t *config, const wac_time_snapshot_t *clock)
+{
+  if (config == NULL) return ESP_ERR_INVALID_ARG;
+  if (!s_initialized) return ESP_ERR_INVALID_STATE;
+  bool previous = wac_night_active();
+  bool selected = select_appearance(config, clock, previous);
+  esp_err_t err = ESP_OK;
+  if (selected != previous) {
+    publish_appearance(selected);
+    err = save_appearance(selected);
+  }
+  int target = selected ? config->night_brightness : config->day_brightness;
+  esp_err_t fade_err = advance_backlight(target);
+  return err != ESP_OK ? err : fade_err;
 }

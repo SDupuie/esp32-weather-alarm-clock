@@ -9,6 +9,7 @@
 
 typedef enum { STRING, U8, I16 } value_type_t;
 typedef struct {
+  char namespace[16];
   char key[16];
   value_type_t type;
   char string[256];
@@ -16,7 +17,10 @@ typedef struct {
 } entry_t;
 
 static entry_t entries[64];
+static char namespaces[8][16];
+static unsigned namespace_count;
 static unsigned count, calls[FAKE_OP_COUNT], failure[FAKE_OP_COUNT];
+static esp_err_t failure_error[FAKE_OP_COUNT];
 static pthread_mutex_t fake_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t fake_condition = PTHREAD_COND_INITIALIZER;
 static bool block_set, blocked, released;
@@ -29,7 +33,7 @@ static struct timespec deadline(void)
   return until;
 }
 
-static bool operation(fake_op_t op)
+static esp_err_t operation(fake_op_t op)
 {
   pthread_mutex_lock(&fake_lock);
   ++calls[op];
@@ -46,25 +50,33 @@ static bool operation(fake_op_t op)
   }
   bool failed = failure[op] && calls[op] == failure[op];
   pthread_mutex_unlock(&fake_lock);
-  return failed;
+  return failed ? failure_error[op] : ESP_OK;
 }
 
-static entry_t *find(const char *key)
+static const char *namespace_for(nvs_handle_t handle)
+{
+  assert(handle > 0 && handle <= namespace_count);
+  return namespaces[handle - 1];
+}
+
+static entry_t *find(const char *name, const char *key)
 {
   for (unsigned i = 0; i < count; ++i) {
-    if (!strcmp(entries[i].key, key)) return &entries[i];
+    if (!strcmp(entries[i].namespace, name) && !strcmp(entries[i].key, key)) return &entries[i];
   }
   return NULL;
 }
 
-static entry_t *put(const char *key, value_type_t type)
+static entry_t *put(const char *name, const char *key, value_type_t type)
 {
-  entry_t *entry = find(key);
+  entry_t *entry = find(name, key);
   if (!entry) {
     assert(count < 64);
     entry = &entries[count++];
     assert(strlen(key) < sizeof(entry->key));
     strcpy(entry->key, key);
+    assert(strlen(name) < sizeof(entry->namespace));
+    strcpy(entry->namespace, name);
   }
   entry->type = type;
   return entry;
@@ -74,17 +86,26 @@ void fake_nvs_clear_activity(void)
 {
   memset(calls, 0, sizeof(calls));
   memset(failure, 0, sizeof(failure));
+  for (unsigned i = 0; i < FAKE_OP_COUNT; ++i) failure_error[i] = ESP_FAIL;
 }
 
 void fake_nvs_reset(void)
 {
   memset(entries, 0, sizeof(entries));
-  count = 0;
+  count = namespace_count = 0;
+  memset(namespaces, 0, sizeof(namespaces));
   fake_nvs_clear_activity();
   block_set = blocked = released = false;
 }
 
-void fake_nvs_fail(fake_op_t op, unsigned call) { failure[op] = call; }
+void fake_nvs_fail_with_error(fake_op_t op, unsigned call, esp_err_t error)
+{
+  assert(error != ESP_OK); failure[op] = call; failure_error[op] = error;
+}
+void fake_nvs_fail(fake_op_t op, unsigned call)
+{
+  fake_nvs_fail_with_error(op, call, ESP_FAIL);
+}
 unsigned fake_nvs_calls(fake_op_t op)
 {
   pthread_mutex_lock(&fake_lock);
@@ -93,39 +114,49 @@ unsigned fake_nvs_calls(fake_op_t op)
   return result;
 }
 unsigned fake_nvs_key_count(void) { return count; }
+const char *fake_nvs_namespace(unsigned index) { assert(index < count); return entries[index].namespace; }
 const char *fake_nvs_key(unsigned index) { assert(index < count); return entries[index].key; }
 void fake_nvs_remove(const char *key)
 {
-  entry_t *entry = find(key);
+  entry_t *entry = find("wac_cfg", key);
   assert(entry);
   *entry = entries[--count];
 }
 void fake_nvs_put_str(const char *key, const char *value)
 {
-  entry_t *entry = put(key, STRING);
+  entry_t *entry = put("wac_cfg", key, STRING);
   assert(strlen(value) < sizeof(entry->string));
   strcpy(entry->string, value);
 }
-void fake_nvs_put_u8(const char *key, uint8_t value) { put(key, U8)->number = value; }
+void fake_nvs_put_u8(const char *key, uint8_t value) { put("wac_cfg", key, U8)->number = value; }
 
 esp_err_t nvs_open(const char *name, nvs_open_mode_t mode, nvs_handle_t *handle)
 {
-  assert(name && !strcmp(name, "wac_cfg") && mode == NVS_READWRITE && handle);
-  if (operation(FAKE_OPEN)) return ESP_FAIL;
-  *handle = 1;
+  assert(name && (mode == NVS_READWRITE || mode == NVS_READONLY) && handle);
+  esp_err_t error = operation(FAKE_OPEN);
+  if (error != ESP_OK) return error;
+  unsigned index = 0;
+  while (index < namespace_count && strcmp(namespaces[index], name)) ++index;
+  if (index == namespace_count && mode == NVS_READONLY) return ESP_ERR_NVS_NOT_FOUND;
+  if (index == namespace_count) {
+    assert(namespace_count < 8 && strlen(name) < sizeof(namespaces[0]));
+    strcpy(namespaces[namespace_count++], name);
+  }
+  *handle = index + 1;
   return ESP_OK;
 }
-void nvs_close(nvs_handle_t handle) { assert(handle == 1); }
+void nvs_close(nvs_handle_t handle) { (void)namespace_for(handle); }
 esp_err_t nvs_commit(nvs_handle_t handle)
 {
-  assert(handle == 1);
-  return operation(FAKE_COMMIT) ? ESP_FAIL : ESP_OK;
+  (void)namespace_for(handle);
+  return operation(FAKE_COMMIT);
 }
 esp_err_t nvs_get_str(nvs_handle_t handle, const char *key, char *value, size_t *size)
 {
-  assert(handle == 1 && key && size);
-  if (operation(FAKE_READ)) return ESP_FAIL;
-  entry_t *entry = find(key);
+  assert(key && size);
+  esp_err_t error = operation(FAKE_READ);
+  if (error != ESP_OK) return error;
+  entry_t *entry = find(namespace_for(handle), key);
   if (!entry) return ESP_ERR_NVS_NOT_FOUND;
   if (entry->type != STRING) return ESP_ERR_NVS_TYPE_MISMATCH;
   size_t needed = strlen(entry->string) + 1;
@@ -136,18 +167,22 @@ esp_err_t nvs_get_str(nvs_handle_t handle, const char *key, char *value, size_t 
 }
 esp_err_t nvs_set_str(nvs_handle_t handle, const char *key, const char *value)
 {
-  assert(handle == 1);
-  if (operation(FAKE_SET)) return ESP_FAIL;
-  fake_nvs_put_str(key, value);
+  (void)namespace_for(handle);
+  esp_err_t error = operation(FAKE_SET);
+  if (error != ESP_OK) return error;
+  entry_t *entry = put(namespace_for(handle), key, STRING);
+  assert(strlen(value) < sizeof(entry->string));
+  strcpy(entry->string, value);
   return ESP_OK;
 }
 
 #define NUMBER_ACCESSORS(suffix, ctype, kind) \
   esp_err_t nvs_get_##suffix(nvs_handle_t handle, const char *key, ctype *value) \
   { \
-    assert(handle == 1 && value); \
-    if (operation(FAKE_READ)) return ESP_FAIL; \
-    entry_t *entry = find(key); \
+    assert(value); \
+    esp_err_t error = operation(FAKE_READ); \
+    if (error != ESP_OK) return error; \
+    entry_t *entry = find(namespace_for(handle), key); \
     if (!entry) return ESP_ERR_NVS_NOT_FOUND; \
     if (entry->type != kind) return ESP_ERR_NVS_TYPE_MISMATCH; \
     *value = (ctype)entry->number; \
@@ -155,9 +190,10 @@ esp_err_t nvs_set_str(nvs_handle_t handle, const char *key, const char *value)
   } \
   esp_err_t nvs_set_##suffix(nvs_handle_t handle, const char *key, ctype value) \
   { \
-    assert(handle == 1); \
-    if (operation(FAKE_SET)) return ESP_FAIL; \
-    put(key, kind)->number = value; \
+    (void)namespace_for(handle); \
+    esp_err_t error = operation(FAKE_SET); \
+    if (error != ESP_OK) return error; \
+    put(namespace_for(handle), key, kind)->number = value; \
     return ESP_OK; \
   }
 NUMBER_ACCESSORS(u8, uint8_t, U8)

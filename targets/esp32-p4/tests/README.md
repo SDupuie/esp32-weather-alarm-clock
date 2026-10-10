@@ -60,12 +60,19 @@ network-completion counts; they do not perform real network synchronization or
 change the development computer's clock. No user-settings writes occur in these
 checks.
 
-Night Shift checks compile production `main/night.c`. They cover the current
+Night Shift checks compile production `main/night.c`. They cover
 Off/Always On/Fixed Schedule decisions, equal endpoints, ranges across midnight,
-local timezone rules and retention while time is unavailable. They also check
-that this policy performs no storage writes. Invalid schedule values are
-controlled test examples. Solar events, remembered startup appearance, configured
-brightness and backlight fades are not implemented or established by these checks.
+local timezone rules, saved startup fallback and retention while time is
+unavailable. Typed storage substitutes check that only effective appearance
+changes write the separate operating record, including failures and restart
+outcomes; settings are not rewritten. Substitute brightness calls and elapsed
+time check startup readiness, intermediate fade steps, changed targets, bounded
+steps after a delay and retries from the last successful level when the BSP
+reports failure. Readers are checked while storage or backlight work is pending.
+Invalid schedules and returned failures are controlled test examples. The clock
+task/startup integration is reviewed from source and compiled by the firmware
+build; these native checks do not execute the full startup or task. Solar
+calculations and physical brightness/fades remain unverified.
 
 Connectivity checks compile production `main/connectivity.c` with native network,
 Wi-Fi driver and task substitutes. They exercise initialization shared by connecting
@@ -103,8 +110,8 @@ first-use routing is also exercised by the shell target below.
 The UI target also checks the actual generated clock font for live-time and
 unavailable-time characters through LVGL glyph lookup.
 
-The shell target compiles production `main/ui/ui.c` and the settings editor with
-real LVGL objects and events. It checks authoritative usable/unavailable time,
+The shell target compiles production `main/ui/ui.c`, `main/ui/clock_views.c` and
+the settings editor with real LVGL objects and events. It checks authoritative usable/unavailable time,
 backup-clock notice wording, layout and fonts, failed dismissal submission,
 duplicate blocking, owner acknowledgment and a different warning arriving while
 dismissal is pending. It also checks first-use routing, settings draft retention,
@@ -125,6 +132,17 @@ small substitutes, so these checks do not establish artwork rendering, complete
 visual parity or physical touch behavior. The main task's command queue is
 reviewed from source and compiled by the firmware build; the actual network-time
 callback is exercised by the connectivity checks.
+
+Clock checks cover both configured faces, analog hand rotation, midnight/noon,
+12/24-hour and leading-zero formats, and recovery through unavailable Day/Night
+surfaces. Night digit size remains fixed across minute and AM/PM changes, with
+measured centering, baseline alignment and room for the period inside the round
+face; returning to Day restores native font size and position. The existing
+135-second paused-clock threshold and its face-specific notice are checked with
+controlled stalled-minute snapshots. Pointer gestures and one visible pair of
+message/weather edges are checked through unavailable time and recovery. These
+object checks do not establish the quality of the scaled raster font or physical
+rendering. The unavailable screen omits the still-unimplemented alarm controls.
 
 ## Message acknowledgement, browser listing, discovery and shared handoff
 
