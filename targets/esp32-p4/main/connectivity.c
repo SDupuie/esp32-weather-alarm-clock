@@ -32,6 +32,11 @@ static bool s_wifi_driver_initialized;
 static bool s_wifi_started;
 static bool s_wifi_event_handlers_registered;
 static atomic_bool s_wifi_auto_connect_enabled;
+/* The low two bits hold the pending connection phase. A revision prevents a
+ * failed scan-cleanup connect call from replacing a newer callback retry.
+ * The existing event-group bit remains the authority for acquired IP. */
+static atomic_uint s_wifi_status;
+#define WIFI_STATE_MASK 3u
 static bool s_sntp_initialized;
 static bool s_runtime_prepared;
 static portMUX_TYPE s_time_sync_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -54,6 +59,28 @@ static SemaphoreHandle_t connectivity_operation_lock(void)
   return lock;
 }
 
+static unsigned connectivity_set_wifi_state(connectivity_wifi_state_t state)
+{
+  unsigned previous = atomic_load(&s_wifi_status);
+  unsigned updated;
+  do {
+    updated = ((previous + WIFI_STATE_MASK + 1u) & ~WIFI_STATE_MASK) | (unsigned) state;
+  } while (!atomic_compare_exchange_weak(&s_wifi_status, &previous, updated));
+  return updated;
+}
+
+static esp_err_t connectivity_connect(connectivity_wifi_state_t phase)
+{
+  unsigned attempt = connectivity_set_wifi_state(phase);
+  esp_err_t err = esp_wifi_connect();
+  if (err != ESP_OK) {
+    unsigned disconnected = ((attempt + WIFI_STATE_MASK + 1u) & ~WIFI_STATE_MASK)
+      | CONNECTIVITY_WIFI_DISCONNECTED;
+    (void) atomic_compare_exchange_strong(&s_wifi_status, &attempt, disconnected);
+  }
+  return err;
+}
+
 static void connectivity_event_handler(
   void *arg,
   esp_event_base_t event_base,
@@ -67,16 +94,17 @@ static void connectivity_event_handler(
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
     if (s_wifi_auto_connect_enabled) {
       ESP_LOGI(TAG, "Starting Wi-Fi station connection");
-      (void) esp_wifi_connect();
+      (void) connectivity_connect(CONNECTIVITY_WIFI_CONNECTING);
     }
     return;
   }
 
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    connectivity_set_wifi_state(CONNECTIVITY_WIFI_DISCONNECTED);
     if (s_wifi_auto_connect_enabled) {
       ESP_LOGW(TAG, "Wi-Fi disconnected, retrying");
-      (void) esp_wifi_connect();
+      (void) connectivity_connect(CONNECTIVITY_WIFI_RETRYING);
     }
     return;
   }
@@ -199,6 +227,7 @@ static esp_err_t connectivity_init_locked(const device_config_t *config)
 
   s_wifi_auto_connect_enabled = true;
   xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+  connectivity_set_wifi_state(CONNECTIVITY_WIFI_DISCONNECTED);
 
   ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "esp_wifi_set_mode failed");
   ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &wifi_config), TAG, "esp_wifi_set_config failed");
@@ -208,7 +237,7 @@ static esp_err_t connectivity_init_locked(const device_config_t *config)
     s_wifi_started = true;
   } else {
     (void) esp_wifi_disconnect();
-    ESP_RETURN_ON_ERROR(esp_wifi_connect(), TAG, "esp_wifi_connect failed");
+    ESP_RETURN_ON_ERROR(connectivity_connect(CONNECTIVITY_WIFI_CONNECTING), TAG, "esp_wifi_connect failed");
   }
 
   s_wifi_initialized = true;
@@ -332,7 +361,7 @@ static esp_err_t connectivity_scan_networks_locked(
 cleanup:
   s_wifi_auto_connect_enabled = restore_auto_connect;
   if (restore_auto_connect && !connectivity_is_wifi_connected()) {
-    (void) esp_wifi_connect();
+    (void) connectivity_connect(CONNECTIVITY_WIFI_RETRYING);
   }
 
   return err;
@@ -379,6 +408,13 @@ bool connectivity_is_wifi_connected(void)
 
   EventBits_t bits = xEventGroupGetBits(s_wifi_event_group);
   return (bits & WIFI_CONNECTED_BIT) != 0;
+}
+
+connectivity_wifi_state_t connectivity_get_wifi_state(void)
+{
+  connectivity_wifi_state_t phase = (connectivity_wifi_state_t)
+    (atomic_load(&s_wifi_status) & WIFI_STATE_MASK);
+  return connectivity_is_wifi_connected() ? CONNECTIVITY_WIFI_CONNECTED : phase;
 }
 
 bool connectivity_get_local_ipv4(char *buffer, size_t buffer_size)

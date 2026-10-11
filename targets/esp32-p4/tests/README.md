@@ -112,20 +112,85 @@ Save, duplicate blocking, validation, save failure/retry, resolved-location retr
 without Wi-Fi, immediate enable, stale completion handling, and character entry
 and editing through actual keyboard events. Every settings view is checked for
 keyboard allocation: only Device, Weather Location and Wi-Fi Credentials editors
-allocate one, with the existing layouts preserved. Real pointer taps check all
-five text fields and reopening after hiding the keyboard. Resolved screen
-coordinates check that the centered keyboard's corners are inside the round
-800×800 panel, rather than checking only square-buffer bounds or requested
-offsets. Pointer presses/releases on LVGL's actual
-key rectangles exercise character entry, layout switching and hide controls.
+allocate one. Real pointer taps check all five text fields and reopening after
+hiding the keyboard. The mockup's four maps, key widths, gaps, style and keyboard
+box are checked against actual LVGL objects. Resolved screen coordinates verify
+round-panel fit and the active field above the keyboard. Pointer presses/releases
+on LVGL's actual key rectangles exercise character entry, layout switching,
+held-key editing, popovers and hide controls.
 The shell also checks a pointer tap on the
 empty first-use location field and keyboard retention through a runtime update.
 Network work and tasks are substitutes, and navigation callbacks from `ui.c` are substituted;
 first-use routing is also exercised by the shell target below.
 The UI target also checks the actual generated clock font for live-time and
 unavailable-time characters through LVGL glyph lookup.
-Real LVGL brightness sliders check both endpoints, clamping a below-minimum
+Real LVGL Volume and Day/Night Brightness sliders check the [approved slider
+geometry](../../../docs/architecture.md#ui-and-visual-reference), existing Day/Night
+colors and resolved touch bounds. Actual pointer taps near the top/bottom of the
+48px touch area and held-pointer dragging check selection and live percentage
+updates. Brightness checks retain both endpoints, clamping a below-minimum
 selection to 20%, nested draft values and Cancel without saving.
+
+The Settings Entry, Device Setup and Display checks compare actual LVGL row,
+heading, footer, switch and chevron boxes, typography, border/radius and
+Day/Night colors against the approved mockup. Pointer taps exercise switches
+and navigation. Live appearance changes retain nested drafts, the active field,
+keyboard, focus and cursor. Captions use saved alarm/repeat values and distinguish
+the applied Wi-Fi network from a new draft; font checks verify middle dot/en dash
+and ordinary-character fallback. Save/Cancel, nested Done and first-use exit
+checks remain. These object checks do not establish physical pixel parity.
+
+Device, Weather Location and Network Details checks compare normal fields,
+labels, notes and footer boxes, and the complete temporary typing composition.
+Closing restores inactive controls and unsaved values without saving. Missing
+Room/ID/location/network-name errors focus the correct field; Device Setup still
+permits no Wi-Fi profile. Actual substituted lookup/storage failures check concise
+typing notices, no overlap with the field, and restoration of the full error on
+Close without additional writes or lookup. Password masking, configured length
+limits, first-use guards, save failure and resolved-location retry remain covered.
+Generated curved keyboard masks and punctuation coverage are checked; the exact
+SVG paths come from the mockup's pinned Lucide source through existing artwork
+tools. These checks do not establish physical raster or touch compliance.
+
+Nearby-network checks exercise real LVGL pointer scrolling beyond the first three
+rows, actual Open/Secured and dBm captions, scan loading/empty/error states,
+Refresh/Manual/Back behavior and stale completion handling. Weather checks cover
+actual pending lookup, retained resolved values after failed storage, concise
+lookup errors and saved values. Separate fresh-process invocations check Weather
+and credentials restart compositions without adding a production reset hook.
+Device Setup captions consume a substituted connectivity-owner phase and reject
+claims that a different draft network is connected. Connectivity tests exercise
+the production phase publication, returned connect failures and overlapping
+callback attempts; existing retry calls remain. Native checks do not establish
+radio timing, physical rendering or restart navigation on the board.
+
+Shared arrow-picker checks use real pointer events for five-minute steps,
+minute carry/borrow through hour, noon and midnight boundaries, separate hour
+buttons, and AM/PM selection in Alarm and both Night endpoints in 12/24-hour
+formats. They retain arbitrary saved minutes when opening/canceling and check
+five-minute wrapping from a saved 59 without rounding. Done remains
+draft-only; the existing Alarm Save checks verify applied values and unrelated
+room/brightness preferences.
+Repeat checks cover shortcuts, full day captions and zero-day Done blocking.
+Night checks cover mode descriptions/selections, fixed-schedule boundary notes,
+offset direction/steps/limits and brightness label updates in place. Cancel and
+nested drafts cause no writes or backlight preview; production saves verify the
+actual Alarm and Night values. Generated numeric-font line boxes/baselines and
+glyph offsets are checked against the reference font metrics; 32px icon sources,
+boxes and tint are checked in both appearances. Physical rendering remains
+unverified; the mockup’s browser-native slider track is not a fixed raster asset.
+
+Alarm/Sound/Snooze/Solar menu checks compare actual rows, switches, footers,
+descriptions, selected checks and icon/text spacing with both reference palettes.
+They verify draft-only time/repeat/sound/snooze edits, Alarm Save without restart,
+immediate enabled-only writes, failed Save/retry and pending controls. Volume
+checks open the real Sound editor, use Done and save unrelated alarm edits while
+preserving stored 0/7/37 values. Actual pointer and keyboard input then checks
+five-point steps, 10–100% selections and label updates without rebuilding it.
+Preview is disabled until audio is implemented. Solar uses the applied location,
+unavailable event times and truthful appearance-retention guidance; offsets
+remain draft-only. These checks do not establish playback, solar calculations,
+physical touch or complete raster equality with a browser-native range control.
 
 The shell target compiles production `main/ui/ui.c`, `main/ui/clock_views.c` and
 the settings editor with real LVGL objects and events. It checks authoritative usable/unavailable time,
@@ -160,6 +225,27 @@ controlled stalled-minute snapshots. Pointer gestures and one visible pair of
 message/weather edges are checked through unavailable time and recovery. These
 object checks do not establish the quality of the scaled raster font or physical
 rendering. The unavailable screen omits the still-unimplemented alarm controls.
+
+Digital Night sizing additionally checks all 4,320 hour/minute/format combinations
+using actual LVGL objects. It verifies the selected nominal 250px formats and
+retained padded 12-hour fit, steady scale, all transformed time/AM-PM corners
+inside the round-screen bound, centering, AM/PM baseline/gap and restored Day
+positions. These layout checks do not establish physical clipping or font sharpness.
+
+The approved screen-walkthrough checks exercise first-download waiting on both
+clock faces, Day/Night transitions, hidden fallback artwork and restored live
+weather. Forecast keeps its date/temperature layout while all five pictures are
+invisible; actual font lookup verifies that the loading ellipses exist. Failed
+requests, retained weather through failed refreshes and later success check the
+Forecast/Conditions notice wording, boxes and styling, including immediate
+repositioning during pointer swipes and preserved home/progress messages.
+Checks also retain provider-date pairing, the declined Night typography and
+Conditions presentation, and verify the approved AM/PM, temperature, High/Low,
+divider and Dismiss-button changes. Synthetic RTC/network snapshots check
+“Waiting for sync,” clearing despite a remaining backup warning, unusable time,
+paused-warning priority after 135 seconds and hiding during navigation/settings.
+These are actual LVGL object/event checks using supplied snapshots, not
+observations of weather failures, synchronization or rendering on the board.
 
 The touchscreen-recovery target extracts the actual private read callback from
 `main/main.c`, using the installed touch header and real LVGL. Hardware read

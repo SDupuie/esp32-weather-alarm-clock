@@ -1,0 +1,22 @@
+#pragma once
+
+#include "lvgl.h"
+
+extern const lv_image_dsc_t wac_icon_keyboard_delete;
+extern const lv_image_dsc_t wac_icon_keyboard_shift;
+extern const lv_image_dsc_t wac_icon_wifi;
+extern const lv_image_dsc_t wac_icon_wifi_high;
+extern const lv_image_dsc_t wac_icon_wifi_low;
+extern const lv_image_dsc_t wac_icon_refresh;
+extern const lv_image_dsc_t wac_icon_chevron_left;
+extern const lv_image_dsc_t wac_icon_chevron_right;
+extern const lv_image_dsc_t wac_icon_chevron_up;
+extern const lv_image_dsc_t wac_icon_chevron_down;
+extern const lv_image_dsc_t wac_icon_check;
+extern const lv_image_dsc_t wac_icon_plus;
+extern const lv_image_dsc_t wac_icon_minus;
+extern const lv_image_dsc_t wac_icon_volume_2;
+extern const lv_image_dsc_t wac_icon_wifi_mark;
+extern const lv_image_dsc_t wac_icon_wifi_off_mark;
+extern const lv_image_dsc_t wac_icon_circle_check_mark;
+extern const lv_image_dsc_t wac_icon_clock;

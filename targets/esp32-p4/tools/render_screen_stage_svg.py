@@ -168,6 +168,57 @@ def build_forecast_frame(mode: str) -> str:
 """
 
 
+def build_settings_icon(variant: str, size: int = 24) -> str:
+    # Exact paths from the mockup's pinned Lucide 1.17.0. Keyboard utility
+    # marks use integer 24px lines; scaled 32px marks retain SVG antialiasing.
+    paths = {
+        "chevron_left": ("m15 18-6-6 6-6",),
+        "chevron_right": ("m9 18 6-6-6-6",),
+        "chevron_up": ("m18 15-6-6-6 6",),
+        "chevron_down": ("m6 9 6 6 6-6",),
+        "check": ("M20 6 9 17l-5-5",),
+        "plus": ("M12 5v14", "M5 12h14"),
+        "minus": ("M5 12h14",),
+        "volume_2": (
+            "M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z",
+            "M16 9a5 5 0 0 1 0 6", "M19.364 18.364a9 9 0 0 0 0-12.728",
+        ),
+        "keyboard_delete": (
+            "M10 5a2 2 0 0 0-1.344.519l-6.328 5.74a1 1 0 0 0 0 1.481l6.328 5.741A2 2 0 0 0 10 19h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z",
+            "m12 9 6 6", "m18 9-6 6",
+        ),
+        "keyboard_shift": (
+            "M9 19a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-6a1 1 0 0 1 1-1h3.293a.707.707 0 0 0 .5-1.207l-7.086-7.086a1 1 0 0 0-1.414 0l-7.086 7.086a.707.707 0 0 0 .5 1.207H8a1 1 0 0 1 1 1z",
+        ),
+        "wifi": (
+            "M12 20h.01", "M2 8.82a15 15 0 0 1 20 0",
+            "M5 12.859a10 10 0 0 1 14 0", "M8.5 16.429a5 5 0 0 1 7 0",
+        ),
+        "wifi_high": (
+            "M12 20h.01", "M5 12.859a10 10 0 0 1 14 0",
+            "M8.5 16.429a5 5 0 0 1 7 0",
+        ),
+        "wifi_low": ("M12 20h.01", "M8.5 16.429a5 5 0 0 1 7 0"),
+        "wifi_off": (
+            "M12 20h.01", "M8.5 16.429a5 5 0 0 1 7 0",
+            "M5 12.859a10 10 0 0 1 5.17-2.69", "M19 12.859a10 10 0 0 0-2.007-1.523",
+            "M2 8.82a15 15 0 0 1 4.177-2.643", "M22 8.82a15 15 0 0 0-11.288-3.764",
+            "m2 2 20 20",
+        ),
+        "circle_check": ("m9 12 2 2 4-4",),
+        "clock": ("M12 6v6l4 2",),
+        "refresh": (
+            "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8",
+            "M21 3v5h-5", "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16",
+            "M8 16H3v5",
+        ),
+    }
+    inner = "".join(f'<path d="{path}"/>' for path in paths[variant])
+    if variant in ("circle_check", "clock"):
+        inner = '<circle cx="12" cy="12" r="10"/>' + inner
+    return f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{inner}</svg>'
+
+
 def build_svg(variant: str, mode: str) -> str:
     if variant == "round_stage":
         return build_round_stage(mode)

@@ -63,7 +63,7 @@ set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 set(LV_BUILD_CONF_PATH "${CMAKE_CURRENT_BINARY_DIR}/lv_conf.h" CACHE PATH "" FORCE)
-set(native_lv_conf "#pragma once\n#define LV_CONF_H\n#define LV_MEM_SIZE (4 * 1024 * 1024)\n#define LV_FONT_MONTSERRAT_14 1\n#define LV_FONT_MONTSERRAT_28 1\n#define LV_FONT_MONTSERRAT_48 1\n#define LV_FONT_MONTSERRAT_18 1\n#define LV_FONT_MONTSERRAT_24 1\n#define LV_FONT_MONTSERRAT_32 1\n#define LV_FONT_MONTSERRAT_36 1\n")
+set(native_lv_conf "#pragma once\n#define LV_CONF_H\n#define LV_MEM_SIZE (4 * 1024 * 1024)\n#define LV_FONT_MONTSERRAT_14 1\n#define LV_FONT_MONTSERRAT_28 1\n#define LV_FONT_MONTSERRAT_26 1\n#define LV_FONT_MONTSERRAT_48 1\n#define LV_FONT_MONTSERRAT_18 1\n#define LV_FONT_MONTSERRAT_24 1\n#define LV_FONT_MONTSERRAT_22 1\n#define LV_FONT_MONTSERRAT_32 1\n#define LV_FONT_MONTSERRAT_34 1\n#define LV_FONT_MONTSERRAT_36 1\n")
 if(EXISTS "${LV_BUILD_CONF_PATH}")
   file(READ "${LV_BUILD_CONF_PATH}" previous_lv_conf)
 endif()
@@ -77,13 +77,17 @@ find_path(CJSON_INCLUDE_DIR cJSON.h
   REQUIRED)
 add_executable(test_ui test_ui.c test_support.c
   ../main/ui/settings.c ../main/device_config.c ../main/timezone_table.c
-  ../main/assets/lv_font_clock_time_144.c)
+  ../main/assets/lv_font_clock_time_144.c ../main/assets/wac_fonts.c ../main/assets/wac_icons.c)
 target_include_directories(test_ui PRIVATE
   "${CJSON_INCLUDE_DIR}" "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)
 target_compile_features(test_ui PRIVATE c_std_11)
 target_compile_options(test_ui PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(test_ui PRIVATE lvgl::lvgl Threads::Threads m)
 add_test(NAME settings_ui COMMAND test_ui)
+# Successful restart phases need separate runs: esp_restart never returns on hardware.
+add_test(NAME settings_wifi_restart COMMAND test_ui wifi_restart)
+add_test(NAME settings_weather_saved COMMAND test_ui weather_saved)
+set_tests_properties(settings_wifi_restart settings_weather_saved PROPERTIES TIMEOUT 15)
 set_tests_properties(settings_ui PROPERTIES TIMEOUT 15)
 
 # Exercise the existing private worker and its publication helpers without a
@@ -132,7 +136,7 @@ add_executable(test_ui_shell test_ui.c test_support.c
   ../main/ui/ui.c ../main/ui/clock_views.c ../main/ui/settings.c
   ../main/device_config.c ../main/timezone_table.c ../main/weather_icon_names.c
   ../main/assets/lv_font_clock_time_144.c ../main/assets/lv_font_temp_102.c
-  ../main/assets/lv_font_temp_105.c ../main/assets/lv_font_wind_speed_70.c)
+  ../main/assets/lv_font_temp_105.c ../main/assets/lv_font_wind_speed_70.c ../main/assets/wac_fonts.c ../main/assets/wac_icons.c)
 target_compile_definitions(test_ui_shell PRIVATE WAC_UI_SHELL_TEST=1)
 target_include_directories(test_ui_shell PRIVATE
   "${CJSON_INCLUDE_DIR}" "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)

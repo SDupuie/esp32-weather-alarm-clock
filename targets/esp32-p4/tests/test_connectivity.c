@@ -181,7 +181,12 @@ esp_err_t esp_wifi_start(void)
   if (err == ESP_OK) emit(WIFI_EVENT, WIFI_EVENT_STA_START);
   return err;
 }
-esp_err_t esp_wifi_connect(void) { return visit(CONNECT); }
+esp_err_t esp_wifi_connect(void)
+{
+  connectivity_wifi_state_t phase = connectivity_get_wifi_state();
+  assert(phase == CONNECTIVITY_WIFI_CONNECTING || phase == CONNECTIVITY_WIFI_RETRYING);
+  return visit(CONNECT);
+}
 esp_err_t esp_wifi_disconnect(void)
 {
   esp_err_t err = visit(DISCONNECT);
@@ -308,6 +313,8 @@ static void overlapping_requests(bool scan_first, operation_t pause)
    * cannot create another interface; during scanning it cannot apply a profile. */
   assert(call_count(STA_CREATE) == 1 && call_count(CONFIG) == 0);
   assert(call_count(DRIVER_INIT) == (pause == STA_CREATE ? 0u : 1u));
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_DISCONNECTED);
+  assert(call_count(CONNECT) == 0);
   release_operation();
   assert(pthread_join(first_thread, NULL) == 0);
   assert(pthread_join(second_thread, NULL) == 0);
@@ -315,14 +322,21 @@ static void overlapping_requests(bool scan_first, operation_t pause)
   assert_results(scan_first ? &first : &second);
   assert_shared_setup();
   assert(call_count(STORAGE) == 2 && call_count(CONFIG) == 1);
+  assert(connectivity_get_wifi_state() == (scan_first
+    ? CONNECTIVITY_WIFI_CONNECTING : CONNECTIVITY_WIFI_RETRYING));
   unsigned connections = call_count(CONNECT);
   emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED);
   assert(call_count(CONNECT) == connections + 1);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_RETRYING);
   /* Successful init stays idempotent and public preparation shares the lock. */
   device_config_t config = profile();
   assert(connectivity_prepare_runtime() == ESP_OK);
   assert(connectivity_init(&config) == ESP_OK);
   assert(call_count(CONFIG) == 1);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_RETRYING);
+  emit(IP_EVENT, IP_EVENT_STA_GOT_IP);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_CONNECTED);
+  assert(connectivity_is_wifi_connected() && connectivity_wait_for_wifi(0) == ESP_OK);
 }
 static void init_errors(void)
 {
@@ -340,7 +354,21 @@ static void init_errors(void)
   assert(connectivity_init(&config) == ESP_FAIL);
   fail_next(START);
   assert(connectivity_init(&config) == ESP_FAIL);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_DISCONNECTED);
+  /* A failed driver connect from its START callback leaves init's historical
+   * success return intact, but must not claim an attempt is still pending. */
+  fail_next(CONNECT);
   assert(connectivity_init(&config) == ESP_OK);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_DISCONNECTED);
+  assert(!connectivity_is_wifi_connected());
+  assert(connectivity_wait_for_wifi(0) == ESP_ERR_TIMEOUT);
+  emit(WIFI_EVENT, WIFI_EVENT_STA_START);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_CONNECTING);
+  fail_next(CONNECT);
+  emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_DISCONNECTED);
+  emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_RETRYING);
   assert(call_count(STA_CREATE) == 1 && call_count(DRIVER_INIT) == 2);
   assert(call_count(WIFI_HANDLER) == 1 && call_count(IP_HANDLER) == 1);
   request_t scan = { .scan = true };
@@ -353,6 +381,7 @@ static void scan_errors(void)
 {
   device_config_t config = profile();
   assert(connectivity_init(&config) == ESP_OK);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_CONNECTING);
   const operation_t failures[] = { STORAGE, MODE, SCAN, AP_COUNT, AP_RECORDS };
   for (unsigned i = 0; i < sizeof(failures) / sizeof(failures[0]); ++i) {
     unsigned connections = call_count(CONNECT);
@@ -376,6 +405,14 @@ static void scan_errors(void)
   assert(connectivity_scan_networks(NULL, 1, &count) == ESP_ERR_INVALID_ARG);
   assert(connectivity_scan_networks(scan.networks, 4, NULL) == ESP_ERR_INVALID_ARG);
   request(&scan); assert_results(&scan);
+  /* The scan result remains successful when its historical cleanup connect
+   * returns an error; only the displayed connection phase changes. */
+  fail_next(CONNECT);
+  request(&scan); assert_results(&scan);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_DISCONNECTED);
+  assert(!connectivity_is_wifi_connected());
+  emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_RETRYING);
 }
 static void disconnect_during_cleanup(void)
 {
@@ -390,29 +427,62 @@ static void disconnect_during_cleanup(void)
   unsigned before = call_count(CONNECT);
   emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED);
   assert(call_count(CONNECT) == before);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_DISCONNECTED);
   release_operation();
   assert(pthread_join(thread, NULL) == 0);
   assert_results(&scan);
   assert(call_count(CONNECT) == before + 1);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_RETRYING);
 
   /* Once cleanup restores intent, its still-held operation mutex cannot drop
    * a disconnect retry. The callback completes while cleanup remains blocked. */
+  fail_next(CONNECT);
   block_next(CONNECT);
   assert(pthread_create(&thread, NULL, request, &scan) == 0);
   wait_blocked();
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_RETRYING);
   before = call_count(CONNECT);
   emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED);
   assert(call_count(CONNECT) == before + 1);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_RETRYING);
   release_operation();
   assert(pthread_join(thread, NULL) == 0);
   assert_results(&scan);
+  /* The older failed cleanup attempt cannot overwrite the newer retry. */
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_RETRYING);
   emit(IP_EVENT, IP_EVENT_STA_GOT_IP);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_CONNECTED);
   assert(connectivity_is_wifi_connected());
   assert(connectivity_wait_for_wifi(0) == ESP_OK);
+
+  /* An IP callback can also complete while cleanup holds its operation lock. */
+  emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED);
+  fail_next(CONNECT);
+  block_next(CONNECT);
+  assert(pthread_create(&thread, NULL, request, &scan) == 0);
+  wait_blocked();
+  emit(IP_EVENT, IP_EVENT_STA_GOT_IP);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_CONNECTED);
+  release_operation();
+  assert(pthread_join(thread, NULL) == 0);
+  assert_results(&scan);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_CONNECTED);
+  assert(connectivity_wait_for_wifi(0) == ESP_OK);
+
+  /* A scan without a disconnect retains an already connected phase and does
+   * not introduce another connection attempt. */
+  before = call_count(CONNECT);
+  request(&scan);
+  assert_results(&scan);
+  assert(call_count(CONNECT) == before);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_CONNECTED);
 }
 int main(int argc, char **argv)
 {
   assert(argc == 2);
+  assert(connectivity_get_wifi_state() == CONNECTIVITY_WIFI_DISCONNECTED);
+  assert(!connectivity_is_wifi_connected());
+  assert(connectivity_wait_for_wifi(0) == ESP_ERR_INVALID_STATE);
   if (!strcmp(argv[1], "init_first")) overlapping_requests(false, STA_CREATE);
   else if (!strcmp(argv[1], "scan_first")) overlapping_requests(true, STA_CREATE);
   else if (!strcmp(argv[1], "scan_busy")) overlapping_requests(true, SCAN);

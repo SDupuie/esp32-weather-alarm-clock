@@ -23,6 +23,8 @@
 #include "assets/lv_font_clock_time_144.h"
 #include "assets/lv_font_temp_102.h"
 #include "assets/lv_font_temp_105.h"
+#include "assets/wac_icons.h"
+#include "assets/wac_fonts.h"
 
 /* This panel's visible round glass is mounted a bit high relative to the
  * pixel array (not a coordinate bug — ticks/numerals computed from
@@ -100,7 +102,7 @@
  * PM/divider line below it. +27 restores the original baseline position. */
 #define DIGITAL_TIME_TOP 177
 #define DIGITAL_TIME_WIDTH 620
-#define DIGITAL_MERIDIEM_TOP 268
+#define DIGITAL_MERIDIEM_TOP 257
 /* Approved appearance is documented in mockups/alarm-design.html. The
  * constants below define the ESP32-P4 layout values used by this file. */
 #define DIGITAL_TIME_GAP 14
@@ -110,7 +112,7 @@
 #define DIGITAL_CURRENT_TOP 320
 #define DIGITAL_CURRENT_WIDTH 600
 #define DIGITAL_CURRENT_HEIGHT 150
-#define DIGITAL_CURRENT_TEMP_LEFT 25
+#define DIGITAL_CURRENT_TEMP_LEFT 35
 #define DIGITAL_CURRENT_COPY_LEFT 400
 #define DIGITAL_CURRENT_COPY_WIDTH 270
 #define DIGITAL_CURRENT_ICON_SIZE 200
@@ -127,6 +129,11 @@ typedef struct {
   lv_obj_t *clock_status_label;
   lv_obj_t *clock_status_container;
   lv_obj_t *clock_status_icon;
+  lv_obj_t *clock_status_sync_icon;
+  lv_obj_t *analog_weather_waiting;
+  lv_obj_t *digital_weather_waiting;
+  bool weather_available;
+  bool night;
   lv_obj_t *unavailable_view;
   lv_obj_t *unavailable_stage;
   lv_obj_t *unavailable_title;
@@ -545,30 +552,29 @@ static void layout_digital_time_group(bool show_meridiem)
   );
 }
 
-/* Reserve the widest digits and period from the approved preview. The scale
- * depends on the font, not the current minute, so its size stays steady. */
-static void layout_digital_night_time(bool show_meridiem)
+/* Use the approved 250px size except for padded 12-hour time, which keeps its
+ * existing widest-digit fit. Neither size depends on the current minute. */
+static void layout_digital_night_time(const device_config_t *config, bool show_meridiem)
 {
-  lv_point_t size;
-  int32_t widest = 0;
-  for (int digit = 0; digit < 10; ++digit) {
-    char sample[6];
-    snprintf(sample, sizeof(sample), "%d%d:%d%d", digit, digit, digit, digit);
-    lv_text_get_size(&size, sample, &lv_font_clock_time_144, -2, 0,
-      LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    if (size.x > widest) widest = size.x;
-  }
-  int32_t period_width = 0;
-  if (show_meridiem) {
+  double max_size = 250.0;
+  if (show_meridiem && config->leading_zero_12h) {
+    lv_point_t size;
+    int32_t widest = 0;
+    for (int digit = 0; digit < 10; ++digit) {
+      char sample[6];
+      snprintf(sample, sizeof(sample), "%d%d:%d%d", digit, digit, digit, digit);
+      lv_text_get_size(&size, sample, &lv_font_clock_time_144, -2, 0,
+        LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+      if (size.x > widest) widest = size.x;
+    }
+    int32_t period_width = 0;
     const char *periods[] = {"AM", "PM"};
     for (size_t i = 0; i < 2; ++i) {
       lv_text_get_size(&size, periods[i], &lv_font_montserrat_24, 2, 0,
         LV_COORD_MAX, LV_TEXT_FLAG_NONE);
       if (size.x > period_width) period_width = size.x;
     }
-  }
-  double max_size = 752.0 / hypot(widest / 144.0, 1.0);
-  if (show_meridiem) {
+    max_size = 752.0 / hypot(widest / 144.0, 1.0);
     double low = 144.0, high = max_size;
     for (int pass = 0; pass < 12; ++pass) {
       double candidate = (low + high) / 2.0;
@@ -638,7 +644,29 @@ static void start_indicator_pulse(lv_obj_t *indicator)
 
 static void format_high_low(char *out, size_t out_size, int high, int low)
 {
-  snprintf(out, out_size, "H:%d°  L:%d°", high, low);
+  snprintf(out, out_size, "H: %d°  L: %d°", high, low);
+}
+
+/* These flags describe rendered data and appearance, not fetch/retry policy. */
+static void apply_clock_weather_visibility(void)
+{
+  lv_obj_t *weather[] = {s_clock.analog_temp_container, s_clock.digital_current_panel,
+    s_clock.digital_forecast_container};
+  for (size_t i = 0; i < sizeof(weather) / sizeof(weather[0]); ++i) {
+    if (!weather[i]) continue;
+    if (s_clock.night || !s_clock.weather_available) lv_obj_add_flag(weather[i], LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_remove_flag(weather[i], LV_OBJ_FLAG_HIDDEN);
+  }
+  lv_obj_t *waiting[] = {s_clock.analog_weather_waiting, s_clock.digital_weather_waiting};
+  for (size_t i = 0; i < sizeof(waiting) / sizeof(waiting[0]); ++i) {
+    if (!waiting[i]) continue;
+    if (s_clock.night || s_clock.weather_available) lv_obj_add_flag(waiting[i], LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_remove_flag(waiting[i], LV_OBJ_FLAG_HIDDEN);
+  }
+  if (s_clock.analog_weather_icon) {
+    if (!s_clock.weather_available) lv_obj_add_flag(s_clock.analog_weather_icon, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_remove_flag(s_clock.analog_weather_icon, LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 static void apply_analog_night_state(bool active)
@@ -660,14 +688,6 @@ static void apply_analog_night_state(bool active)
   }
 
   apply_analog_dial_palette(active);
-
-  if (s_clock.analog_temp_container != NULL) {
-    if (active) {
-      lv_obj_add_flag(s_clock.analog_temp_container, LV_OBJ_FLAG_HIDDEN);
-    } else {
-      lv_obj_clear_flag(s_clock.analog_temp_container, LV_OBJ_FLAG_HIDDEN);
-    }
-  }
 
   if (s_clock.analog_temp_label != NULL) {
     lv_obj_set_style_text_color(s_clock.analog_temp_label, active ? wac_ui_color_night_primary() : color_temp(), 0);
@@ -717,15 +737,8 @@ static void apply_digital_night_state(bool active)
     lv_obj_set_style_text_color(s_clock.digital_meridiem_label, active ? wac_ui_color_night_muted() : color_accent(), 0);
   }
 
-  if (s_clock.digital_current_panel != NULL) {
-    if (active) {
-      lv_obj_add_flag(s_clock.digital_current_panel, LV_OBJ_FLAG_HIDDEN);
-    } else {
-      lv_obj_clear_flag(s_clock.digital_current_panel, LV_OBJ_FLAG_HIDDEN);
-    }
-  }
-
   if (s_clock.digital_divider_top != NULL) {
+    lv_obj_set_style_bg_color(s_clock.digital_divider_top, lv_color_hex(active ? 0xe1b6b6 : 0x93d1ff), 0);
     if (active) {
       lv_obj_add_flag(s_clock.digital_divider_top, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -734,6 +747,7 @@ static void apply_digital_night_state(bool active)
   }
 
   if (s_clock.digital_divider_bottom != NULL) {
+    lv_obj_set_style_bg_color(s_clock.digital_divider_bottom, lv_color_hex(active ? 0xe1b6b6 : 0x93d1ff), 0);
     if (active) {
       lv_obj_add_flag(s_clock.digital_divider_bottom, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -741,13 +755,6 @@ static void apply_digital_night_state(bool active)
     }
   }
 
-  if (s_clock.digital_forecast_container != NULL) {
-    if (active) {
-      lv_obj_add_flag(s_clock.digital_forecast_container, LV_OBJ_FLAG_HIDDEN);
-    } else {
-      lv_obj_clear_flag(s_clock.digital_forecast_container, LV_OBJ_FLAG_HIDDEN);
-    }
-  }
 }
 
 static void apply_edge_indicator_state(lv_obj_t *indicator, bool visible, bool important, bool night_active)
@@ -802,6 +809,11 @@ void wac_clock_build_analog(lv_obj_t *parent)
   s_clock.analog_stage_image = lv_image_create(s_clock.analog_view);
   lv_image_set_src(s_clock.analog_stage_image, &analog_stage_day);
   lv_obj_align(s_clock.analog_stage_image, LV_ALIGN_CENTER, 0, 0);
+
+  s_clock.analog_weather_waiting = wac_ui_create_label(s_clock.analog_view,
+    &wac_font_settings_28, wac_ui_color_text_muted(), LV_TEXT_ALIGN_CENTER, "Waiting for weather…");
+  lv_obj_set_pos(s_clock.analog_weather_waiting, 150, 550);
+  lv_obj_set_width(s_clock.analog_weather_waiting, 500);
 
   s_clock.analog_weather_layer = lv_obj_create(s_clock.analog_view);
   lv_obj_set_size(s_clock.analog_weather_layer, ANALOG_FACE_SIZE, ANALOG_FACE_SIZE);
@@ -937,6 +949,11 @@ void wac_clock_build_digital(lv_obj_t *parent)
   lv_image_set_src(s_clock.digital_stage_image, &digital_stage_day);
   lv_obj_align(s_clock.digital_stage_image, LV_ALIGN_CENTER, 0, 0);
 
+  s_clock.digital_weather_waiting = wac_ui_create_label(s_clock.digital_view,
+    &wac_font_settings_28, wac_ui_color_text_muted(), LV_TEXT_ALIGN_CENTER, "Waiting for weather…");
+  lv_obj_set_pos(s_clock.digital_weather_waiting, 150, 390);
+  lv_obj_set_width(s_clock.digital_weather_waiting, 500);
+
   lv_obj_t *digital_face = lv_obj_create(s_clock.digital_view);
   lv_obj_set_size(digital_face, FACE_CONTENT_SIZE, FACE_CONTENT_SIZE);
   lv_obj_align(digital_face, LV_ALIGN_CENTER, 0, 0);
@@ -984,8 +1001,8 @@ void wac_clock_build_digital(lv_obj_t *parent)
   wac_ui_clear_container_chrome(s_clock.digital_divider_top);
   lv_obj_set_size(s_clock.digital_divider_top, DIGITAL_DIVIDER_WIDTH, 1);
   lv_obj_align(s_clock.digital_divider_top, LV_ALIGN_TOP_MID, 0, DIGITAL_DIVIDER_TOP);
-  lv_obj_set_style_bg_color(s_clock.digital_divider_top, lv_color_hex(0x82cbff), 0);
-  lv_obj_set_style_bg_opa(s_clock.digital_divider_top, LV_OPA_50, 0);
+  lv_obj_set_style_bg_color(s_clock.digital_divider_top, lv_color_hex(0x93d1ff), 0);
+  lv_obj_set_style_bg_opa(s_clock.digital_divider_top, (lv_opa_t)89, 0);
 
   s_clock.digital_current_panel = lv_obj_create(digital_face);
   wac_ui_clear_container_chrome(s_clock.digital_current_panel);
@@ -1049,8 +1066,8 @@ void wac_clock_build_digital(lv_obj_t *parent)
   wac_ui_clear_container_chrome(s_clock.digital_divider_bottom);
   lv_obj_set_size(s_clock.digital_divider_bottom, DIGITAL_DIVIDER_WIDTH, 1);
   lv_obj_align(s_clock.digital_divider_bottom, LV_ALIGN_TOP_MID, 0, DIGITAL_DIVIDER_BOTTOM);
-  lv_obj_set_style_bg_color(s_clock.digital_divider_bottom, lv_color_hex(0x82cbff), 0);
-  lv_obj_set_style_bg_opa(s_clock.digital_divider_bottom, LV_OPA_50, 0);
+  lv_obj_set_style_bg_color(s_clock.digital_divider_bottom, lv_color_hex(0x93d1ff), 0);
+  lv_obj_set_style_bg_opa(s_clock.digital_divider_bottom, (lv_opa_t)89, 0);
 
   s_clock.digital_forecast_container = lv_obj_create(digital_face);
   wac_ui_clear_container_chrome(s_clock.digital_forecast_container);
@@ -1139,7 +1156,7 @@ void wac_clock_build_backup(lv_obj_t *parent, lv_event_cb_t open_cb, lv_event_cb
   wac_ui_clear_container_chrome(s_clock.backup_dismiss);
   lv_obj_set_pos(s_clock.backup_dismiss, 84, 161);
   lv_obj_set_size(s_clock.backup_dismiss, 350, 96);
-  lv_obj_set_style_radius(s_clock.backup_dismiss, 24, 0);
+  lv_obj_set_style_radius(s_clock.backup_dismiss, 32, 0);
   lv_obj_set_style_bg_opa(s_clock.backup_dismiss, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(s_clock.backup_dismiss, 1, 0);
   lv_obj_set_style_text_font(s_clock.backup_dismiss, &lv_font_montserrat_36, 0);
@@ -1324,6 +1341,7 @@ void wac_clock_set_visible(bool analog, bool digital, bool usable)
 
 void wac_clock_apply_night(bool active)
 {
+  s_clock.night = active;
   if (s_clock.unavailable_stage) {
     lv_image_set_src(s_clock.unavailable_stage, active ? &round_stage_night : &round_stage_day);
     lv_color_t primary = active ? wac_ui_color_night_primary() : wac_ui_color_text_primary();
@@ -1334,10 +1352,12 @@ void wac_clock_apply_night(bool active)
   }
   apply_analog_night_state(active);
   apply_digital_night_state(active);
+  apply_clock_weather_visibility();
   if (s_clock.clock_status_label) {
     lv_color_t color = active ? wac_ui_color_night_muted() : wac_ui_color_text_muted();
     lv_obj_set_style_text_color(s_clock.clock_status_label, color, 0);
     lv_obj_set_style_text_color(s_clock.clock_status_icon, color, 0);
+    lv_obj_set_style_image_recolor(s_clock.clock_status_sync_icon, color, 0);
   }
 }
 
@@ -1346,7 +1366,7 @@ void wac_clock_update_time(const device_config_t *config, const struct tm *local
   if (local_time) {
     update_day_labels(local_time);
     update_digital_clock(config, local_time);
-    if (night) layout_digital_night_time(!wac_ui_strings_equal_ignore_case(config->time_format, "24"));
+    if (night) layout_digital_night_time(config, !wac_ui_strings_equal_ignore_case(config->time_format, "24"));
     update_analog_clock(local_time);
   }
   lv_obj_t *hands[] = {s_clock.second_hand, s_clock.analog_hour_asset, s_clock.analog_minute_asset};
@@ -1359,34 +1379,9 @@ void wac_clock_update_time(const device_config_t *config, const struct tm *local
 
 void wac_clock_update_weather(const app_weather_snapshot_t *weather)
 {
-  if (weather == NULL) {
-    const char *summary = "Loading Weather";
-    const char *pending_temp = "--";
-    const char *pending_range = "Please wait";
-    const lv_image_dsc_t *fallback_icon = weather_icon_image_for_name(weather_icon_fallback_name());
-    wac_ui_set_label_text(s_clock.analog_temp_label, pending_temp);
-    wac_ui_set_label_text(s_clock.analog_high_low_label, pending_range);
-    if (s_clock.analog_weather_icon != NULL) {
-      lv_image_set_src(s_clock.analog_weather_icon, fallback_icon);
-    }
-
-    wac_ui_set_label_text(s_clock.digital_temp_label, pending_temp);
-    wac_ui_set_label_text(s_clock.digital_summary_label, summary);
-    wac_ui_set_label_text(s_clock.digital_high_low_label, pending_range);
-    if (s_clock.digital_current_icon != NULL) {
-      lv_image_set_src(s_clock.digital_current_icon, fallback_icon);
-    }
-
-    for (int i = 0; i < DAY_COUNT; ++i) {
-      wac_ui_set_label_text(s_clock.digital_forecast_day_labels[i], "--");
-      wac_ui_set_label_text(s_clock.digital_forecast_temp_labels[i], pending_temp);
-      if (s_clock.digital_forecast_icons[i] != NULL) {
-        lv_image_set_src(s_clock.digital_forecast_icons[i], fallback_icon);
-      }
-    }
-
-    return;
-  }
+  s_clock.weather_available = weather != NULL;
+  apply_clock_weather_visibility();
+  if (weather == NULL) return;
   char high_low[24];
   char temps[24];
 
@@ -1442,13 +1437,25 @@ void wac_clock_build_status(lv_obj_t *parent)
   lv_obj_remove_flag(s_clock.clock_status_container, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
   s_clock.clock_status_icon = wac_ui_create_label(s_clock.clock_status_container,
     &lv_font_montserrat_28, wac_ui_color_text_muted(), LV_TEXT_ALIGN_CENTER, LV_SYMBOL_WARNING);
+  s_clock.clock_status_sync_icon = lv_image_create(s_clock.clock_status_container);
+  lv_image_set_src(s_clock.clock_status_sync_icon, &wac_icon_clock);
+  lv_obj_set_style_image_recolor(s_clock.clock_status_sync_icon, wac_ui_color_text_muted(), 0);
+  lv_obj_set_style_image_recolor_opa(s_clock.clock_status_sync_icon, LV_OPA_COVER, 0);
+  lv_obj_add_flag(s_clock.clock_status_sync_icon, LV_OBJ_FLAG_HIDDEN);
   s_clock.clock_status_label = wac_ui_create_label(s_clock.clock_status_container,
     &lv_font_montserrat_28, wac_ui_color_text_muted(), LV_TEXT_ALIGN_CENTER, "");
   lv_obj_add_flag(s_clock.clock_status_container, LV_OBJ_FLAG_HIDDEN);
 }
 
-void wac_clock_update_status(const char *text, bool analog)
+void wac_clock_update_status(const char *text, bool analog, bool waiting_for_sync)
 {
+  if (waiting_for_sync) {
+    lv_obj_add_flag(s_clock.clock_status_icon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_clock.clock_status_sync_icon, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_remove_flag(s_clock.clock_status_icon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_clock.clock_status_sync_icon, LV_OBJ_FLAG_HIDDEN);
+  }
   wac_ui_set_label_text(s_clock.clock_status_label, text);
   lv_obj_set_pos(s_clock.clock_status_container, analog ? 220 : 170, analog ? 220 : 642);
   lv_obj_set_size(s_clock.clock_status_container, analog ? 360 : 460, analog ? 72 : 80);

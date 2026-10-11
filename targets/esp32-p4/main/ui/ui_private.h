@@ -21,6 +21,7 @@ void wac_ui_settings_navigate(wac_settings_view_t view);
 wac_settings_view_t wac_ui_settings_view(void);
 void wac_ui_settings_close(void);
 void wac_settings_begin(lv_obj_t *parent, const device_config_t *config);
+void wac_settings_apply_night(bool active);
 void wac_settings_start_weather(const device_config_t *config);
 void wac_settings_render(wac_settings_view_t view);
 void wac_settings_close(void);
@@ -54,7 +55,7 @@ void wac_clock_update_weather(const app_weather_snapshot_t *weather);
 void wac_clock_log_weather(const app_weather_snapshot_t *weather);
 void wac_clock_update_indicators(bool unread, bool important, bool weather_alert, bool night);
 void wac_clock_build_status(lv_obj_t *parent);
-void wac_clock_update_status(const char *text, bool analog);
+void wac_clock_update_status(const char *text, bool analog, bool waiting_for_sync);
 void wac_clock_build_backup(lv_obj_t *parent, lv_event_cb_t open_cb, lv_event_cb_t dismiss_cb);
 void wac_clock_update_backup(bool home, bool analog, bool usable,
   wac_time_warning_t warning, bool open, bool dismiss_pending, const char *error, bool night);

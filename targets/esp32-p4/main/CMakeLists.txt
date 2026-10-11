@@ -37,6 +37,8 @@ idf_component_register(
     "assets/weather_icon_thundersnow.c"
     "assets/weather_icon_thunderstorm.c"
     "assets/weather_icons.c"
+    "assets/wac_fonts.c"
+    "assets/wac_icons.c"
     "main.c"
     "ui/ui.c"
     "ui/clock_views.c"

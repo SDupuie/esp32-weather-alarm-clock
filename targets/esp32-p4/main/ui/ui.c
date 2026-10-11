@@ -24,6 +24,7 @@
 #include "assets/forecast_tomorrow_frame_day.h"
 #include "assets/forecast_tomorrow_frame_night.h"
 #include "assets/lv_font_wind_speed_70.h"
+#include "assets/wac_fonts.h"
 #include "assets/round_stage_day.h"
 #include "assets/round_stage_night.h"
 #include "assets/weather_icon_clear_day.h"
@@ -45,13 +46,13 @@
 #define FORECAST_TOMORROW_ICON_SIZE 364
 #define FORECAST_TOMORROW_TEMPS_TOP 464
 #define FORECAST_ROW_ICON_SIZE 90
-#define FORECAST_ROW1_X 205
+#define FORECAST_ROW1_X 220
 #define FORECAST_ROW1_Y 600
-#define FORECAST_ROW2_X 315
+#define FORECAST_ROW2_X 330
 #define FORECAST_ROW2_Y 640
-#define FORECAST_ROW3_X 435
+#define FORECAST_ROW3_X 450
 #define FORECAST_ROW3_Y 640
-#define FORECAST_ROW4_X 545
+#define FORECAST_ROW4_X 560
 #define FORECAST_ROW4_Y 600
 /* Conditions-view positions use a 760px face coordinate space. The face
  * container is 760px and centered on screen. */
@@ -108,6 +109,7 @@ typedef struct {
   lv_obj_t *forecast_tomorrow_frame;
   lv_obj_t *forecast_tomorrow_day_label;
   lv_obj_t *forecast_tomorrow_icon;
+  lv_obj_t *forecast_updating_label;
   lv_obj_t *forecast_tomorrow_temps_label;
   lv_obj_t *forecast_row_day_labels[FORECAST_ROW_COUNT];
   lv_obj_t *forecast_row_icons[FORECAST_ROW_COUNT];
@@ -162,6 +164,9 @@ typedef struct {
   bool pending_weather_diag_logged;
   lv_point_precise_t conditions_tick_points[COND_TICK_COUNT][2];
   app_weather_snapshot_t weather;
+  /* Raw owner text is retained only to redraw it when navigation changes
+   * the notice's wording and position. */
+  char weather_status[APP_STATUS_TEXT_LEN];
   device_config_t config_snapshot;
   int last_displayed_minute_key;
   int64_t last_minute_advance_ms;
@@ -376,6 +381,7 @@ static void update_backup_notice(void);
 static void apply_view_night_state(bool active);
 static void apply_conditions_colors(void);
 static void update_conditions_view(void);
+static void update_weather_status(void);
 static void refresh_message_ui_state(
   const app_message_snapshot_t *snapshot,
   uint32_t unread_count,
@@ -423,6 +429,7 @@ void wac_ui_settings_navigate(wac_settings_view_t view)
   if (view != WAC_SETTINGS_NONE) {
     s_ui.message_ack_return_allowed = false;
     s_ui.message_held = false;
+    wac_clock_update_status("", s_ui.current_view == APP_VIEW_ANALOG, false);
   }
   s_ui.backup_notice_open = false;
   s_ui.settings_view = view;
@@ -450,6 +457,7 @@ void wac_ui_settings_close(void)
 static void open_settings(void)
 {
   if (settings_visible()) return;
+  wac_settings_apply_night(s_ui.night_overlay_active);
   wac_settings_begin(s_ui.stage, &s_ui.config_snapshot);
   wac_ui_settings_navigate(!s_ui.config_snapshot.location_ready
     ? (s_ui.config_snapshot.wifi_ready ? WAC_SETTINGS_WEATHER : WAC_SETTINGS_DEVICE_SETUP)
@@ -459,22 +467,15 @@ static void open_settings(void)
 static void update_pending_weather_labels(void)
 {
   const char *pending_temp = "--";
-  const lv_image_dsc_t *fallback_icon = weather_icon_image_for_name(weather_icon_fallback_name());
 
   wac_clock_update_weather(NULL);
 
   wac_ui_set_label_text(s_ui.forecast_tomorrow_day_label, "--");
   wac_ui_set_label_text(s_ui.forecast_tomorrow_temps_label, pending_temp);
-  if (s_ui.forecast_tomorrow_icon != NULL) {
-    lv_image_set_src(s_ui.forecast_tomorrow_icon, fallback_icon);
-  }
 
   for (int i = 0; i < FORECAST_ROW_COUNT; ++i) {
     wac_ui_set_label_text(s_ui.forecast_row_day_labels[i], "--");
     wac_ui_set_label_text(s_ui.forecast_row_temps_labels[i], pending_temp);
-    if (s_ui.forecast_row_icons[i] != NULL) {
-      lv_image_set_src(s_ui.forecast_row_icons[i], fallback_icon);
-    }
   }
 }
 
@@ -504,6 +505,7 @@ void wac_ui_apply_image_night_tint(lv_obj_t *image, bool active, lv_color_t tint
 
 static void apply_forecast_night_state(bool active)
 {
+  lv_opa_t icon_opa = !s_ui.weather.valid ? LV_OPA_TRANSP : active ? LV_OPA_80 : LV_OPA_COVER;
   if (s_ui.forecast_stage_image != NULL) {
     lv_image_set_src(s_ui.forecast_stage_image, active ? &round_stage_night : &round_stage_day);
   }
@@ -525,7 +527,14 @@ static void apply_forecast_night_state(bool active)
 
   if (s_ui.forecast_tomorrow_icon != NULL) {
     wac_ui_apply_image_night_tint(s_ui.forecast_tomorrow_icon, active, lv_color_hex(0xb06b6b), LV_OPA_40);
-    lv_obj_set_style_opa(s_ui.forecast_tomorrow_icon, active ? LV_OPA_80 : LV_OPA_COVER, 0);
+    lv_obj_set_style_opa(s_ui.forecast_tomorrow_icon, icon_opa, 0);
+  }
+
+  if (s_ui.forecast_updating_label != NULL) {
+    lv_obj_set_style_text_color(s_ui.forecast_updating_label,
+      active ? wac_ui_color_night_muted() : wac_ui_color_text_muted(), 0);
+    if (s_ui.weather.valid) lv_obj_add_flag(s_ui.forecast_updating_label, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_clear_flag(s_ui.forecast_updating_label, LV_OBJ_FLAG_HIDDEN);
   }
 
   for (int i = 0; i < FORECAST_ROW_COUNT; ++i) {
@@ -547,7 +556,9 @@ static void apply_forecast_night_state(bool active)
 
     if (s_ui.forecast_row_icons[i] != NULL) {
       wac_ui_apply_image_night_tint(s_ui.forecast_row_icons[i], active, lv_color_hex(0xb06b6b), LV_OPA_40);
-      lv_obj_set_style_opa(s_ui.forecast_row_icons[i], active ? LV_OPA_80 : LV_OPA_COVER, 0);
+      /* Keep the icon's space in the flex row so waiting does not move the
+       * provider-date and temperature labels. */
+      lv_obj_set_style_opa(s_ui.forecast_row_icons[i], icon_opa, 0);
     }
   }
 }
@@ -624,6 +635,8 @@ static void set_view_mode(app_view_mode_t next_view)
   }
 
   wac_clock_set_visible(next_view == APP_VIEW_ANALOG, next_view == APP_VIEW_DIGITAL, s_ui.clock_usable);
+  if (next_view != APP_VIEW_ANALOG && next_view != APP_VIEW_DIGITAL)
+    wac_clock_update_status("", false, false);
 
   if (s_ui.forecast_view != NULL) {
     if (next_view == APP_VIEW_FORECAST) {
@@ -658,6 +671,7 @@ static void set_view_mode(app_view_mode_t next_view)
   }
 
   apply_view_night_state(s_ui.night_overlay_active);
+  update_weather_status();
 }
 
 /* During a storm alert, conditions jumps ahead of the forecast so one swipe
@@ -812,11 +826,17 @@ static void build_forecast_view(lv_obj_t *parent)
   lv_image_set_src(s_ui.forecast_tomorrow_icon, weather_icon_image_for_name(weather_icon_fallback_name()));
   lv_obj_set_size(s_ui.forecast_tomorrow_icon, FORECAST_TOMORROW_ICON_SIZE, FORECAST_TOMORROW_ICON_SIZE);
   lv_image_set_inner_align(s_ui.forecast_tomorrow_icon, LV_IMAGE_ALIGN_CONTAIN);
-  lv_obj_set_style_opa(s_ui.forecast_tomorrow_icon, LV_OPA_COVER, 0);
+  lv_obj_set_style_opa(s_ui.forecast_tomorrow_icon, LV_OPA_TRANSP, 0);
   lv_obj_align(s_ui.forecast_tomorrow_icon, LV_ALIGN_TOP_MID, 0, FORECAST_TOMORROW_ICON_TOP);
 
+  s_ui.forecast_updating_label = wac_ui_create_label(
+    s_ui.forecast_view, &wac_font_weather_32, wac_ui_color_text_muted(), LV_TEXT_ALIGN_CENTER, "Updating…"
+  );
+  lv_obj_set_width(s_ui.forecast_updating_label, 400);
+  lv_obj_set_pos(s_ui.forecast_updating_label, 200, 290);
+
   s_ui.forecast_tomorrow_temps_label = wac_ui_create_label(
-    forecast_face, &lv_font_montserrat_48, lv_color_hex(0xf1f7ff), LV_TEXT_ALIGN_CENTER, "61° / 48°"
+    forecast_face, &lv_font_montserrat_48, lv_color_hex(0xf1f7ff), LV_TEXT_ALIGN_CENTER, "--"
   );
   lv_obj_set_width(s_ui.forecast_tomorrow_temps_label, LV_PCT(100));
   lv_obj_align(s_ui.forecast_tomorrow_temps_label, LV_ALIGN_TOP_MID, 0, FORECAST_TOMORROW_TEMPS_TOP);
@@ -856,10 +876,10 @@ static void build_forecast_view(lv_obj_t *parent)
     lv_image_set_src(s_ui.forecast_row_icons[i], weather_icon_image_for_name(weather_icon_fallback_name()));
     lv_obj_set_size(s_ui.forecast_row_icons[i], FORECAST_ROW_ICON_SIZE, FORECAST_ROW_ICON_SIZE);
     lv_image_set_inner_align(s_ui.forecast_row_icons[i], LV_IMAGE_ALIGN_CONTAIN);
-    lv_obj_set_style_opa(s_ui.forecast_row_icons[i], LV_OPA_COVER, 0);
+    lv_obj_set_style_opa(s_ui.forecast_row_icons[i], LV_OPA_TRANSP, 0);
 
     s_ui.forecast_row_temps_labels[i] = wac_ui_create_label(
-      row, &lv_font_montserrat_24, lv_color_hex(0xe8f0fb), LV_TEXT_ALIGN_CENTER, "64° / 50°"
+      row, &lv_font_montserrat_24, lv_color_hex(0xe8f0fb), LV_TEXT_ALIGN_CENTER, "--"
     );
     lv_obj_set_width(s_ui.forecast_row_temps_labels[i], LV_PCT(100));
   }
@@ -1143,8 +1163,8 @@ static void build_conditions_view(lv_obj_t *parent)
     wac_ui_clear_container_chrome(line);
     lv_obj_set_height(line, 1);
     lv_obj_set_flex_grow(line, 1);
-    lv_obj_set_style_bg_color(line, color_conditions_accent(), 0);
-    lv_obj_set_style_bg_opa(line, LV_OPA_40, 0);
+    lv_obj_set_style_bg_color(line, lv_color_hex(0x93d1ff), 0);
+    lv_obj_set_style_bg_opa(line, 89, 0); /* 35% of 255. */
     s_ui.conditions_divider_lines[i] = line;
     if (i == 0) {
       s_ui.conditions_change_label = wac_ui_create_label(divider, &lv_font_montserrat_18, color_conditions_accent(), LV_TEXT_ALIGN_CENTER, "");
@@ -1492,7 +1512,8 @@ static void apply_conditions_colors(void)
     0
   );
   for (int i = 0; i < 2; ++i) {
-    lv_obj_set_style_bg_color(s_ui.conditions_divider_lines[i], accent, 0);
+    lv_obj_set_style_bg_color(s_ui.conditions_divider_lines[i],
+      lv_color_hex(night ? 0xe1b6b6 : 0x93d1ff), 0);
   }
 
   bool column_alert[COND_COLUMN_COUNT] = {wind_alert, pressure_alert, precip_alert};
@@ -1625,17 +1646,25 @@ void app_ui_complete_message_acknowledgment(esp_err_t result)
   if (still_here) set_view_mode(s_ui.last_home_view);
 }
 
-static void update_clock_status(bool clock_estimated)
+static void update_clock_status(const wac_time_snapshot_t *clock)
 {
   bool home = s_ui.current_view == APP_VIEW_ANALOG || s_ui.current_view == APP_VIEW_DIGITAL;
   const char *text = "";
+  bool waiting_for_sync = false;
   if (!home) reset_clock_health();
-  else if (!clock_estimated && clock_is_stale()) text = "Clock paused";
-  wac_clock_update_status(text, s_ui.current_view == APP_VIEW_ANALOG);
+  else if (!settings_visible() && clock->usable) {
+    if (clock_is_stale()) text = "Clock paused";
+    else if (clock->source == WAC_TIME_SOURCE_RTC) {
+      text = "Waiting for sync";
+      waiting_for_sync = true;
+    }
+  }
+  wac_clock_update_status(text, s_ui.current_view == APP_VIEW_ANALOG, waiting_for_sync);
 }
 
-static void update_weather_status(const char *status_text)
+static void update_weather_status(void)
 {
+  const char *status_text = s_ui.weather_status;
   bool unavailable_home = !s_ui.clock_usable
     && (s_ui.current_view == APP_VIEW_ANALOG || s_ui.current_view == APP_VIEW_DIGITAL);
   if (s_ui.night_overlay_active || s_ui.current_view == APP_VIEW_MESSAGE || unavailable_home) {
@@ -1644,7 +1673,28 @@ static void update_weather_status(const char *status_text)
     return;
   }
 
-  if (status_text != NULL && status_text[0] != '\0') {
+  bool weather_view = s_ui.current_view == APP_VIEW_FORECAST || s_ui.current_view == APP_VIEW_CONDITIONS;
+  bool have_status = status_text != NULL && status_text[0] != '\0';
+  bool data_warning = weather_view
+    && ((!have_status && s_ui.weather.valid && s_ui.weather.stale)
+      || (have_status && (!strcmp(status_text, "Weather request failed. Retrying...")
+        || !strcmp(status_text, "Weather refresh failed. Showing last update until retry."))));
+  if (have_status || data_warning) {
+    if (data_warning) {
+      bool forecast = s_ui.current_view == APP_VIEW_FORECAST;
+      lv_obj_set_width(s_ui.status_stack, forecast ? 440 : 500);
+      lv_obj_align(s_ui.status_stack, LV_ALIGN_TOP_LEFT, forecast ? 180 : 150, forecast ? 48 : 680);
+      lv_obj_set_style_text_font(s_ui.weather_status_label, &lv_font_montserrat_22, 0);
+      lv_obj_set_style_text_opa(s_ui.weather_status_label, LV_OPA_COVER, 0);
+      lv_obj_set_style_text_letter_space(s_ui.weather_status_label, 0, 0);
+      status_text = s_ui.weather.valid ? "Weather data stale" : "Weather update failed.";
+    } else {
+      lv_obj_set_width(s_ui.status_stack, 360);
+      lv_obj_align(s_ui.status_stack, LV_ALIGN_BOTTOM_MID, 0, -56);
+      lv_obj_set_style_text_font(s_ui.weather_status_label, &lv_font_montserrat_18, 0);
+      lv_obj_set_style_text_opa(s_ui.weather_status_label, LV_OPA_70, 0);
+      lv_obj_set_style_text_letter_space(s_ui.weather_status_label, 1, 0);
+    }
     wac_ui_set_label_text(s_ui.weather_status_label, status_text);
     lv_obj_clear_flag(s_ui.weather_status_label, LV_OBJ_FLAG_HIDDEN);
     return;
@@ -1771,9 +1821,11 @@ esp_err_t app_ui_update_runtime(
   }
   refresh_message_ui_state(&runtime->message, runtime->unread_message_count, runtime->has_important_message);
   s_ui.night_overlay_active = runtime->night_active;
+  wac_settings_apply_night(runtime->night_active);
   apply_view_night_state(s_ui.night_overlay_active);
-  update_clock_status(!runtime->clock.usable);
-  update_weather_status(runtime->weather_status);
+  update_clock_status(&runtime->clock);
+  snprintf(s_ui.weather_status, sizeof(s_ui.weather_status), "%s", runtime->weather_status);
+  update_weather_status();
   s_ui.config_snapshot = *config;
   wac_settings_poll();
 

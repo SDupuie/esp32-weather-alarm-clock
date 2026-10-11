@@ -1,6 +1,6 @@
 # Weather alarm clock architecture and product specification
 
-Revised October 10, 2026. This is the single authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. It is not an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
+Revised October 11, 2026. This is the single authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. It is not an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
 
 Build the weather alarm clock for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C using the existing ESP-IDF application. Only ESP32-P4 is supported. There is no requirement to maintain Raspberry Pi behavior, another firmware implementation, or backward compatibility with their settings or interfaces.
 
@@ -70,7 +70,15 @@ Ringing preempts menus, notices and previews; preemption alone does not acknowle
 
 The single approved visual entry point is [mockups/alarm-design.html](../mockups/alarm-design.html). It contains the complete combined device preview and the House Messages browser preview, selected using the controls above the previews. Images, fonts and both previews are embedded in that file. It owns appearance and controls; this specification owns behavior, defaults and source placement. Preview selectors and sample values are not production features. The digital ringing layout is the chosen ringing presentation; carousel alternatives are not additional screens.
 
-Use the existing LVGL keyboard with the original lowercase, uppercase and symbols layouts, including `^` on each. Add `:` beside `^` on the symbols layout so both characters remain available. Show the enlarged character while a key is pressed. Retain the 680×280 settings keyboard size and center it on the round display so all keys remain visible.
+Use LVGL for the keyboard, matching the approved mockup’s lowercase, uppercase, numbers and symbols arrangements, size and position. The temporary typing layout hides inactive controls and shows the active input above the keyboard. Show the enlarged character while a key is pressed. This replaces the earlier retained-key-map and larger centered-keyboard choices; caret and colon remain available on the illustrated symbol layouts.
+
+Alarm Time and Fixed Schedule start/end use the same time control. Each minute-arrow press adds or subtracts five minutes, advancing or reducing the hour when minutes cross an hour boundary. This also changes AM/PM across noon or midnight and wraps between 23:55 and 00:00. Opening or leaving a time editor does not round an existing saved minute value. These user-selected changes replace the reference’s previous one-minute step and independent minute wrapping; the separate hour and AM/PM buttons retain their behavior.
+
+Volume and Day/Night Brightness sliders use an 8px visible track and a 36px circular handle, centered in the existing 48px-high touch area. Retain their Day/Night colors, values, increments and draft/save behavior. This user-approved styling replaces the former browser-dependent slider painting and the firmware’s thick track; the illustrated control positions and surrounding layout remain.
+
+Normal Digital Night time uses a 250px nominal display size in 24-hour mode and in 12-hour mode with Leading Zero Off. Keep the existing fitted size for 12-hour Leading Zero On. Each format's size stays steady as time advances; preserve proportional Montserrat Medium digits, the existing spacing, centering and AM/PM baseline and gap. Day and alarm-specific layouts retain their separate sizes.
+
+After Save & Restart, retain normal startup navigation to the clock or required unfinished setup. Wi-Fi connection status belongs in Device Setup; the mockup's connection previews do not require a separate startup screen or a saved return-route flag.
 
 ### Night Shift
 
@@ -93,6 +101,8 @@ It does not authorize background rewriting of user settings.
 
 Network time is primary; trustworthy RTC time can start the clock while synchronization proceeds. The RTC stores UTC. An observed stop flag makes RTC time untrustworthy; failed access is a distinct connection warning. No compile-time substitute for the actual time: without usable time, show unavailable time and wait before triggering alarms. Keep the backup oscillator enabled and correct the RTC following successful network synchronization.
 
+When the running clock uses trustworthy backup-clock time and has not yet accepted network synchronization in the current run, show the visual reference's muted clock icon and “Waiting for sync” notice on either clock face, in Day and Night. Clear it when network synchronization succeeds, independently of backup-clock correction. It may remain while offline; losing Wi-Fi after successful synchronization does not bring it back. The existing “Clock paused” warning takes priority. This notice does not make backup-clock time unusable or change alarm eligibility, weather downloads or Night Shift decisions.
+
 Do not persist RTC warnings or their acknowledgments across restarts. Keep a detected warning in memory for the current run, including after network time corrects the RTC, until the user dismisses it. At each startup, check the RTC again and report problems detected then; do not restore an earlier warning from storage.
 
 Inspect the RTC for lost-time evidence before correcting it, distinguish lost time from failed access, and clear the hardware stop flag only after successful correction. If RTC initialization fails, end that attempt before reading its calendar; report failed access and retry through the existing correction schedule. Lost-time inspection waits until initialization succeeds and still precedes correction. Correcting the RTC must not depend on saving a warning.
@@ -106,10 +116,11 @@ Retain the inherited `Clock paused` warning with its existing 135-second thresho
 - Weather source: Open-Meteo
 - Refresh interval: every 10 minutes
 - Weather downloads require Wi-Fi and a saved location, independently of usable clock time or network-time synchronization. Failed weather downloads retry after 20 seconds. Network-time startup failures also retry after 20 seconds without preventing weather downloads; successful startup leaves synchronization and its transport retries running in the background.
-- Until live weather data arrives, render unavailable measurements (`--`) and loading labels; do not present preview sample values as actual weather.
+- Until live weather data arrives, use the approved waiting presentation, with `--` for any visible unavailable measurements; do not present fallback pictures or preview sample values as actual weather on the clock or Forecast screens.
 - If live weather fails:
   - continue serving the last known good payload when available
   - show `Weather updated <age>` or `Weather data stale`
+- On Forecast and Conditions, a failed refresh with retained weather shows `Weather data stale`; a failed request before the first payload shows `Weather update failed.` Preserve their existing Night hiding, automatic retries and separate setup/network progress notices. This presentation does not add an elapsed-age calculation or change storm warnings.
 - Current condition rendering includes:
   - current temperature
   - high/low temperatures
@@ -171,7 +182,7 @@ These rules define the ESP32-P4 user-visible behavior for turning a text locatio
 
 Start with no saved weather location or coordinates. During first-time setup, use the existing Weather Location editor with an empty location field. The user must select and successfully save a valid location before setup can finish. Location lookup supplies the coordinates and timezone; do not supply a default location.
 
-Reuse the existing editor and its validation/error handling. Do not add “Not configured” menu labels or missing-location presentations across the normal clock and weather screens. The mockup work is limited to the existing editor's empty first-use state and its place in setup; it has not yet been implemented.
+Reuse the existing editor and its validation/error handling. Do not add “Not configured” menu labels or missing-location presentations across the normal clock and weather screens. The separate first-use mockup is unfinished; use the editor's ordinary empty-field presentation and retain the required setup exit guard.
 
 ##### Preferred User Input
 
