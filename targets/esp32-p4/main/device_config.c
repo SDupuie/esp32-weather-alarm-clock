@@ -342,6 +342,7 @@ esp_err_t device_config_copy(device_config_t *config)
 
 typedef enum {
   SAVE_DEVICE,
+  SAVE_DISPLAY,
   SAVE_WEATHER,
   SAVE_ALARM,
   SAVE_ALARM_ENABLED,
@@ -376,14 +377,16 @@ static esp_err_t write_settings(settings_save_t group, const device_config_t *co
       if (strcmp(config->message_sharing, "shared") == 0) {
         SAVE_STRING("msg_share", message_sharing)
       }
-      SAVE_STRING("clock_face", default_clock_face)
-      SAVE_STRING("time_fmt", time_format)
       SAVE_STRING("night_st", night_shift_start)
       SAVE_STRING("night_end", night_shift_end)
-      SAVE_NUMBER(u8, "lead_zero", leading_zero_12h)
       SAVE_NUMBER(u8, "night_mode", night_shift_mode)
       SAVE_NUMBER(i16, "sunset_offset", night_sunset_offset_minutes)
       SAVE_NUMBER(i16, "sunrise_offset", night_sunrise_offset_minutes)
+      break;
+    case SAVE_DISPLAY:
+      SAVE_STRING("clock_face", default_clock_face)
+      SAVE_STRING("time_fmt", time_format)
+      SAVE_NUMBER(u8, "lead_zero", leading_zero_12h)
       SAVE_NUMBER(u8, "day_brightness", day_brightness)
       SAVE_NUMBER(u8, "night_bright", night_brightness)
       break;
@@ -463,17 +466,29 @@ esp_err_t device_config_save_device(const device_config_t *baseline, const devic
   MERGE_STRING(wifi_ssid)
   MERGE_STRING(wifi_password)
   MERGE_STRING(message_sharing)
-  MERGE_STRING(default_clock_face)
-  MERGE_STRING(time_format)
   MERGE_STRING(night_shift_start)
   MERGE_STRING(night_shift_end)
-  MERGE_NUMBER(leading_zero_12h)
   MERGE_NUMBER(night_shift_mode)
   MERGE_NUMBER(night_sunset_offset_minutes)
   MERGE_NUMBER(night_sunrise_offset_minutes)
+  return finish_save(&after, SAVE_DEVICE);
+}
+
+esp_err_t device_config_save_display(const device_config_t *baseline, const device_config_t *draft)
+{
+  if (!strings_terminated(baseline) || !strings_terminated(draft)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  device_config_t before;
+  esp_err_t err = begin_save(&before);
+  if (err != ESP_OK) { return err; }
+  device_config_t after = before;
+  MERGE_STRING(default_clock_face)
+  MERGE_STRING(time_format)
+  MERGE_NUMBER(leading_zero_12h)
   MERGE_NUMBER(day_brightness)
   MERGE_NUMBER(night_brightness)
-  return finish_save(&after, SAVE_DEVICE);
+  return finish_save(&after, SAVE_DISPLAY);
 }
 
 esp_err_t device_config_save_weather(const device_config_t *baseline, const device_config_t *draft)

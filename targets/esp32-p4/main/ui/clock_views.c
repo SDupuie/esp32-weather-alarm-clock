@@ -181,6 +181,29 @@ typedef struct {
   lv_obj_t *backup_detail;
   lv_obj_t *backup_dismiss;
   lv_obj_t *backup_error;
+  lv_obj_t *alarm_view;
+  lv_obj_t *alarm_stage;
+  lv_obj_t *alarm_day;
+  lv_obj_t *alarm_date;
+  lv_obj_t *alarm_time;
+  lv_obj_t *alarm_meridiem;
+  lv_obj_t *alarm_divider;
+  lv_obj_t *alarm_snooze;
+  lv_obj_t *alarm_snooze_title;
+  lv_obj_t *alarm_snooze_duration;
+  lv_obj_t *alarm_dismiss;
+  lv_obj_t *alarm_dismiss_title;
+  lv_obj_t *alarm_footer;
+  lv_obj_t *alarm_snoozed_title;
+  lv_obj_t *alarm_countdown;
+  lv_obj_t *alarm_deadline;
+  lv_obj_t *alarm_badge;
+  lv_obj_t *alarm_badge_icon;
+  lv_obj_t *alarm_badge_text;
+  lv_obj_t *alarm_badge_close;
+  lv_obj_t *unavailable_alarm_caption;
+  lv_obj_t *unavailable_alarm_button;
+  lv_obj_t *unavailable_alarm_button_text;
   lv_point_precise_t analog_tick_points[ANALOG_TICK_COUNT][2];
 } clock_view_objects_t;
 
@@ -1496,4 +1519,340 @@ void wac_clock_update_backup(bool home, bool analog, bool usable,
   wac_ui_set_label_text(s_clock.backup_error, error);
   if (error && error[0]) lv_obj_remove_flag(s_clock.backup_error, LV_OBJ_FLAG_HIDDEN);
   else lv_obj_add_flag(s_clock.backup_error, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void set_alarm_visible(lv_obj_t *obj, bool visible)
+{
+  if (visible) lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+static lv_obj_t *create_alarm_label(lv_obj_t *parent, const lv_font_t *font,
+  const char *text, int x, int y, int width)
+{
+  lv_obj_t *label = wac_ui_create_label(parent, font, wac_ui_color_text_primary(),
+    LV_TEXT_ALIGN_CENTER, text);
+  lv_obj_set_pos(label, x, y);
+  lv_obj_set_width(label, width);
+  return label;
+}
+
+static lv_obj_t *create_alarm_button(lv_obj_t *parent, int x, int y, int width,
+  int height, lv_event_cb_t callback, void *data)
+{
+  lv_obj_t *button = lv_button_create(parent);
+  wac_ui_clear_container_chrome(button);
+  lv_obj_remove_flag(button, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_pos(button, x, y);
+  lv_obj_set_size(button, width, height);
+  lv_obj_set_style_radius(button, 32, 0);
+  lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(button, 1, 0);
+  lv_obj_set_style_opa(button, LV_OPA_40, LV_STATE_DISABLED);
+  lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, data);
+  return button;
+}
+
+static void style_alarm_button(lv_obj_t *button, bool night, bool selected)
+{
+  lv_obj_set_style_bg_color(button, lv_color_hex(selected
+    ? (night ? 0x643437 : 0x245289) : (night ? 0x321c20 : 0x17263b)), 0);
+  lv_obj_set_style_border_color(button, lv_color_hex(selected
+    ? (night ? 0xe1b6b6 : 0x93d1ff) : (night ? 0x633737 : 0x253a57)), 0);
+}
+
+/* The owner supplies the intended schedule date/minute. Formatting that date
+ * must not replace it with the UTC instant's local date during a DST jump. */
+static bool alarm_date_calendar(int32_t date, struct tm *out)
+{
+  int month = (date / 100) % 100;
+  int day = date % 100;
+  if (date < 20000101 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  memset(out, 0, sizeof(*out));
+  out->tm_year = date / 10000 - 1900;
+  out->tm_mon = month - 1;
+  out->tm_mday = day;
+  out->tm_hour = 12;
+  out->tm_isdst = -1;
+  return mktime(out) != (time_t)-1;
+}
+
+static int32_t alarm_calendar_date(const struct tm *calendar)
+{
+  return (calendar->tm_year + 1900) * 10000 + (calendar->tm_mon + 1) * 100 + calendar->tm_mday;
+}
+
+static void format_alarm_time(char *text, size_t size, const device_config_t *config,
+  unsigned minute, bool include_period)
+{
+  unsigned hour = minute / 60;
+  if (wac_ui_strings_equal_ignore_case(config->time_format, "24")) {
+    snprintf(text, size, "%02u:%02u", hour, minute % 60);
+  } else {
+    unsigned display_hour = hour % 12 ? hour % 12 : 12;
+    snprintf(text, size, config->leading_zero_12h ? "%02u:%02u%s" : "%u:%02u%s",
+      display_hour, minute % 60, include_period ? (hour >= 12 ? " PM" : " AM") : "");
+  }
+}
+
+void wac_clock_build_alarm(lv_obj_t *parent, lv_event_cb_t action_cb,
+  lv_event_cb_t badge_cb, lv_event_cb_t open_alarm_cb)
+{
+  s_clock.alarm_view = lv_obj_create(parent);
+  wac_ui_clear_container_chrome(s_clock.alarm_view);
+  lv_obj_set_size(s_clock.alarm_view, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_style_bg_opa(s_clock.alarm_view, LV_OPA_COVER, 0);
+  lv_obj_remove_flag(s_clock.alarm_view, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(s_clock.alarm_view, LV_OBJ_FLAG_HIDDEN);
+  s_clock.alarm_stage = lv_image_create(s_clock.alarm_view);
+  lv_image_set_src(s_clock.alarm_stage, &digital_stage_day);
+  lv_obj_center(s_clock.alarm_stage);
+  s_clock.alarm_day = create_alarm_label(s_clock.alarm_view,
+    &lv_font_montserrat_32, "", 10, 90, 780);
+  lv_obj_set_style_text_letter_space(s_clock.alarm_day, 1, 0);
+  s_clock.alarm_date = create_alarm_label(s_clock.alarm_view,
+    &lv_font_montserrat_24, "", 10, 125, 780);
+  lv_obj_set_style_text_letter_space(s_clock.alarm_date, 2, 0);
+  /* The existing digit-only font has a tight line box. As on the normal Day
+   * clock, add 27px to the CSS wrapper top to preserve its baseline. */
+  s_clock.alarm_time = create_alarm_label(s_clock.alarm_view,
+    &lv_font_clock_time_144, "--:--", 90, 193, LV_SIZE_CONTENT);
+  lv_obj_set_style_text_letter_space(s_clock.alarm_time, -2, 0);
+  s_clock.alarm_meridiem = create_alarm_label(s_clock.alarm_view,
+    &lv_font_montserrat_24, "", 0, 273, LV_SIZE_CONTENT);
+  lv_obj_set_style_text_letter_space(s_clock.alarm_meridiem, 2, 0);
+  s_clock.alarm_divider = lv_obj_create(s_clock.alarm_view);
+  wac_ui_clear_container_chrome(s_clock.alarm_divider);
+  lv_obj_remove_flag(s_clock.alarm_divider, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_pos(s_clock.alarm_divider, 150, 310);
+  lv_obj_set_size(s_clock.alarm_divider, 500, 1);
+  lv_obj_set_style_bg_opa(s_clock.alarm_divider, 89, 0);
+
+  s_clock.alarm_snooze = create_alarm_button(s_clock.alarm_view, 130, 350, 540, 164,
+    action_cb, (void *)(intptr_t) APP_ALARM_SNOOZE);
+  lv_obj_set_layout(s_clock.alarm_snooze, LV_LAYOUT_FLEX);
+  lv_obj_set_flex_flow(s_clock.alarm_snooze, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(s_clock.alarm_snooze, LV_FLEX_ALIGN_CENTER,
+    LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(s_clock.alarm_snooze, 6, 0);
+  s_clock.alarm_snooze_title = create_alarm_label(s_clock.alarm_snooze,
+    &lv_font_montserrat_48, "SNOOZE", 0, 0, LV_SIZE_CONTENT);
+  s_clock.alarm_snooze_duration = create_alarm_label(s_clock.alarm_snooze,
+    &wac_font_settings_28, "", 0, 0, LV_SIZE_CONTENT);
+  s_clock.alarm_dismiss = create_alarm_button(s_clock.alarm_view, 225, 548, 350, 96,
+    action_cb, (void *)(intptr_t) APP_ALARM_DISMISS);
+  s_clock.alarm_dismiss_title = create_alarm_label(s_clock.alarm_dismiss,
+    &lv_font_montserrat_36, "DISMISS", 0, 0, LV_SIZE_CONTENT);
+  lv_obj_center(s_clock.alarm_dismiss_title);
+  s_clock.alarm_footer = create_alarm_label(s_clock.alarm_view,
+    &wac_font_settings_28, "", 200, 679, 400);
+  s_clock.alarm_snoozed_title = create_alarm_label(s_clock.alarm_view,
+    &lv_font_montserrat_32, "SNOOZED", 160, 350, 480);
+  lv_obj_set_style_text_letter_space(s_clock.alarm_snoozed_title, 1, 0);
+  s_clock.alarm_countdown = create_alarm_label(s_clock.alarm_view,
+    &wac_font_settings_96, "--:--", 140, 392, 520);
+  s_clock.alarm_deadline = create_alarm_label(s_clock.alarm_view,
+    &wac_font_settings_28, "", 150, 501, 500);
+
+  s_clock.alarm_badge = create_alarm_button(parent, 170, 642, 460, 80, badge_cb, NULL);
+  lv_obj_set_style_bg_opa(s_clock.alarm_badge, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(s_clock.alarm_badge, 0, 0);
+  lv_obj_set_layout(s_clock.alarm_badge, LV_LAYOUT_FLEX);
+  lv_obj_set_flex_flow(s_clock.alarm_badge, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(s_clock.alarm_badge, LV_FLEX_ALIGN_CENTER,
+    LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_left(s_clock.alarm_badge, 20, 0);
+  lv_obj_set_style_pad_right(s_clock.alarm_badge, 20, 0);
+  s_clock.alarm_badge_icon = lv_image_create(s_clock.alarm_badge);
+  s_clock.alarm_badge_text = create_alarm_label(s_clock.alarm_badge,
+    &wac_font_settings_28, "", 0, 0, LV_SIZE_CONTENT);
+  s_clock.alarm_badge_close = lv_image_create(s_clock.alarm_badge);
+  lv_image_set_src(s_clock.alarm_badge_close, &wac_icon_close);
+  lv_obj_add_flag(s_clock.alarm_badge, LV_OBJ_FLAG_HIDDEN);
+
+  s_clock.unavailable_alarm_caption = create_alarm_label(s_clock.unavailable_view,
+    &wac_font_settings_28, "", 155, 472, 490);
+  s_clock.unavailable_alarm_button = create_alarm_button(parent,
+    230, 574, 340, 104, open_alarm_cb, NULL);
+  lv_obj_set_style_radius(s_clock.unavailable_alarm_button, 24, 0);
+  s_clock.unavailable_alarm_button_text = create_alarm_label(s_clock.unavailable_alarm_button,
+    &wac_font_settings_28, "Alarm Settings", 0, 0, LV_SIZE_CONTENT);
+  lv_obj_center(s_clock.unavailable_alarm_button_text);
+}
+
+void wac_clock_update_alarm(const device_config_t *config,
+  const wac_time_snapshot_t *clock, const wac_alarm_snapshot_t *alarm,
+  wac_clock_alarm_surface_t surface, bool analog, bool night,
+  bool caption_blocked, bool pending, const char *error)
+{
+  if (!s_clock.alarm_view || !config || !clock || !alarm) return;
+  bool ringing = surface == WAC_CLOCK_ALARM_RINGING;
+  bool snoozed = surface == WAC_CLOCK_ALARM_SNOOZED;
+  bool home = surface == WAC_CLOCK_ALARM_HOME;
+  bool missed = alarm->missed.valid;
+  bool failed = error && error[0];
+  lv_color_t primary = night ? wac_ui_color_night_primary() : wac_ui_color_text_primary();
+  lv_color_t muted = night ? wac_ui_color_night_muted() : wac_ui_color_text_muted();
+  lv_color_t accent = lv_color_hex(night ? 0xe1b6b6 : 0x93d1ff);
+  set_alarm_visible(s_clock.alarm_view, ringing || snoozed);
+  set_alarm_visible(s_clock.alarm_snooze, ringing);
+  set_alarm_visible(s_clock.alarm_snoozed_title, snoozed);
+  set_alarm_visible(s_clock.alarm_countdown, snoozed);
+  set_alarm_visible(s_clock.alarm_deadline, snoozed);
+  set_alarm_visible(s_clock.alarm_badge, home && !caption_blocked && (clock->usable || missed));
+  set_alarm_visible(s_clock.unavailable_alarm_caption, home && !clock->usable);
+  set_alarm_visible(s_clock.unavailable_alarm_button, home && !clock->usable);
+  lv_obj_t *buttons[] = {s_clock.alarm_snooze, s_clock.alarm_dismiss,
+    s_clock.alarm_badge, s_clock.unavailable_alarm_button};
+  for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i) {
+    if (pending) lv_obj_add_state(buttons[i], LV_STATE_DISABLED);
+    else lv_obj_remove_state(buttons[i], LV_STATE_DISABLED);
+  }
+  style_alarm_button(s_clock.alarm_snooze, night, true);
+  style_alarm_button(s_clock.alarm_dismiss, night, false);
+  style_alarm_button(s_clock.unavailable_alarm_button, night, false);
+  lv_obj_set_style_text_color(s_clock.unavailable_alarm_button_text, primary, 0);
+  lv_obj_set_style_text_color(s_clock.unavailable_alarm_caption, muted, 0);
+  wac_ui_set_label_text(s_clock.unavailable_alarm_caption, failed ? error
+    : config->alarm_enabled ? "Alarm saved; will arm when time is available"
+    : "Alarm off; saved settings are kept");
+  lv_obj_set_pos(s_clock.unavailable_alarm_button, 230, missed ? 546 : 574);
+  lv_obj_set_height(s_clock.unavailable_alarm_button, missed ? 72 : 104);
+
+  if (ringing || snoozed) {
+    lv_obj_move_foreground(s_clock.alarm_view);
+    lv_obj_set_style_bg_color(s_clock.alarm_view, lv_color_hex(night ? 0x18090c : 0x07101c), 0);
+    lv_image_set_src(s_clock.alarm_stage, night ? &digital_stage_night : &digital_stage_day);
+    lv_obj_t *primary_labels[] = {s_clock.alarm_time, s_clock.alarm_countdown,
+      s_clock.alarm_snooze_title, s_clock.alarm_snooze_duration, s_clock.alarm_dismiss_title};
+    for (size_t i = 0; i < sizeof(primary_labels) / sizeof(primary_labels[0]); ++i)
+      lv_obj_set_style_text_color(primary_labels[i], primary, 0);
+    lv_obj_set_style_text_color(s_clock.alarm_day, night ? primary : accent, 0);
+    lv_obj_set_style_text_color(s_clock.alarm_date, night ? muted : lv_color_hex(0xbce4ff), 0);
+    lv_obj_set_style_text_color(s_clock.alarm_meridiem, night ? muted : color_accent(), 0);
+    lv_obj_set_style_text_color(s_clock.alarm_snoozed_title, accent, 0);
+    lv_obj_set_style_text_color(s_clock.alarm_deadline, muted, 0);
+    lv_obj_set_style_text_color(s_clock.alarm_footer, muted, 0);
+    lv_obj_set_style_bg_color(s_clock.alarm_divider, accent, 0);
+    struct tm scheduled;
+    if (alarm->current.valid && alarm_date_calendar(alarm->current.local_date, &scheduled)) {
+      char date[24];
+      snprintf(date, sizeof(date), "%s %d", MONTH_NAMES[scheduled.tm_mon], scheduled.tm_mday);
+      wac_ui_copy_uppercase_string(date, sizeof(date), date);
+      wac_ui_set_label_text(s_clock.alarm_day, WEEKDAY_NAMES_UPPER[scheduled.tm_wday]);
+      wac_ui_set_label_text(s_clock.alarm_date, date);
+    } else {
+      wac_ui_set_label_text(s_clock.alarm_day, "--");
+      wac_ui_set_label_text(s_clock.alarm_date, "--");
+    }
+    char time_text[24];
+    bool period = alarm->current.valid && !wac_ui_strings_equal_ignore_case(config->time_format, "24");
+    if (alarm->current.valid) format_alarm_time(time_text, sizeof(time_text), config, alarm->current.minute, false);
+    else snprintf(time_text, sizeof(time_text), "--:--");
+    wac_ui_set_label_text(s_clock.alarm_time, time_text);
+    wac_ui_set_label_text(s_clock.alarm_meridiem, alarm->current.minute >= 720 ? "PM" : "AM");
+    set_alarm_visible(s_clock.alarm_meridiem, period);
+    lv_obj_update_layout(s_clock.alarm_time);
+    lv_obj_update_layout(s_clock.alarm_meridiem);
+    int width = lv_obj_get_width(s_clock.alarm_time);
+    int group_width = width + (period ? 14 + lv_obj_get_width(s_clock.alarm_meridiem) : 0);
+    int left = 90 + (620 - group_width) / 2;
+    lv_obj_set_pos(s_clock.alarm_time, left, 193);
+    lv_obj_set_pos(s_clock.alarm_meridiem, left + width + 14, 273);
+    char duration[24];
+    snprintf(duration, sizeof(duration), "%u minutes", config->alarm_snooze_minutes);
+    wac_ui_set_label_text(s_clock.alarm_snooze_duration, duration);
+    char countdown[24] = "--:--";
+    if (clock->usable) {
+      int64_t seconds = alarm->snooze_deadline > clock->utc_now
+        ? (int64_t)difftime(alarm->snooze_deadline, clock->utc_now) : 0;
+      snprintf(countdown, sizeof(countdown), "%" PRId64 ":%02" PRId64, seconds / 60, seconds % 60);
+    }
+    wac_ui_set_label_text(s_clock.alarm_countdown, countdown);
+    struct tm deadline;
+    char again[64] = "Rings again when time is available";
+    if (alarm->snooze_deadline > 0 && localtime_r(&alarm->snooze_deadline, &deadline)) {
+      format_alarm_time(time_text, sizeof(time_text), config, deadline.tm_hour * 60 + deadline.tm_min, true);
+      snprintf(again, sizeof(again), "Rings again at %s", time_text);
+    }
+    wac_ui_set_label_text(s_clock.alarm_deadline, again);
+    lv_obj_set_pos(s_clock.alarm_footer, snoozed ? 150 : 200, 679);
+    lv_obj_set_width(s_clock.alarm_footer, snoozed ? 500 : 400);
+    wac_ui_set_label_text(s_clock.alarm_footer, failed ? error
+      : snoozed ? "Repeating alarm stays on" : "Alarm ringing");
+  }
+
+  if (home) {
+    struct tm now;
+    bool have_now = clock->usable && localtime_r(&clock->utc_now, &now);
+    char summary[96];
+    char time_text[24];
+    const wac_alarm_occurrence_t *occurrence = missed ? &alarm->missed : &alarm->next;
+    struct tm calendar;
+    bool have_date = occurrence->valid && alarm_date_calendar(occurrence->local_date, &calendar);
+    if (missed) {
+      format_alarm_time(time_text, sizeof(time_text), config, alarm->missed.minute, true);
+      if (have_date && (!have_now || occurrence->local_date < alarm_calendar_date(&now))) {
+        snprintf(summary, sizeof(summary), "Missed Alarm · %.3s · %s", WEEKDAY_NAMES[calendar.tm_wday], time_text);
+      } else snprintf(summary, sizeof(summary), "Missed Alarm · %s", time_text);
+    } else if (alarm->phase == WAC_ALARM_SNOOZED && alarm->snooze_deadline > 0
+        && localtime_r(&alarm->snooze_deadline, &calendar)) {
+      format_alarm_time(time_text, sizeof(time_text), config, calendar.tm_hour * 60 + calendar.tm_min, true);
+      snprintf(summary, sizeof(summary), "Snoozed · %s", time_text);
+    } else if (!config->alarm_enabled) snprintf(summary, sizeof(summary), "Alarm off");
+    else if (!have_now || !have_date) snprintf(summary, sizeof(summary), "Waiting for sync");
+    else {
+      const char *day = WEEKDAY_NAMES[calendar.tm_wday];
+      char weekday[4];
+      snprintf(weekday, sizeof(weekday), "%.3s", day);
+      day = weekday;
+      struct tm tomorrow = now;
+      tomorrow.tm_mday++;
+      tomorrow.tm_hour = 12;
+      tomorrow.tm_isdst = -1;
+      mktime(&tomorrow);
+      if (occurrence->local_date == alarm_calendar_date(&now)) day = "Today";
+      else if (occurrence->local_date == alarm_calendar_date(&tomorrow)) day = "Tomorrow";
+      format_alarm_time(time_text, sizeof(time_text), config, occurrence->minute, true);
+      snprintf(summary, sizeof(summary), "%s · %s", day, time_text);
+    }
+    wac_ui_set_label_text(s_clock.alarm_badge_text, failed && clock->usable ? error : summary);
+    bool analog_row = analog && clock->usable;
+    lv_obj_set_pos(s_clock.alarm_badge, missed ? 130 : analog_row ? 220 : 170,
+      analog_row ? 220 : 642);
+    lv_obj_set_size(s_clock.alarm_badge, missed ? 540 : analog_row ? 360 : 460,
+      analog_row ? 72 : 80);
+    int padding = analog_row && !missed ? 0 : 20;
+    lv_obj_set_style_pad_left(s_clock.alarm_badge, padding, 0);
+    lv_obj_set_style_pad_right(s_clock.alarm_badge, padding, 0);
+    lv_obj_set_style_pad_column(s_clock.alarm_badge, missed || analog_row ? 10 : 14, 0);
+    lv_obj_set_style_text_font(s_clock.alarm_badge_text,
+      missed ? &wac_font_settings_26 : &wac_font_settings_28, 0);
+    /* Use the normal analog row's full width to keep complete captions on one
+     * line at the approved font size. Longer error text can still wrap. */
+    lv_point_t text_size;
+    int gap = missed || analog_row ? 10 : 14;
+    int text_width = (missed ? 540 : analog_row ? 360 : 460) - 2 * padding
+      - (missed || analog_row ? 28 : 32) - gap - (missed ? 24 + gap : 0);
+    lv_text_get_size(&text_size, lv_label_get_text(s_clock.alarm_badge_text),
+      missed ? &wac_font_settings_26 : &wac_font_settings_28,
+      0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_obj_set_width(s_clock.alarm_badge_text, text_size.x > text_width ? text_width : LV_SIZE_CONTENT);
+    lv_obj_set_style_text_color(s_clock.alarm_badge_text, accent, 0);
+    bool small = missed || analog_row;
+    lv_image_set_src(s_clock.alarm_badge_icon, config->alarm_enabled || missed
+      ? (small ? &wac_icon_alarm_clock_small : &wac_icon_alarm_clock)
+      : (small ? &wac_icon_alarm_clock_off_small : &wac_icon_alarm_clock_off));
+    lv_obj_t *icons[] = {s_clock.alarm_badge_icon, s_clock.alarm_badge_close};
+    for (size_t i = 0; i < sizeof(icons) / sizeof(icons[0]); ++i) {
+      lv_obj_set_style_image_recolor(icons[i], accent, 0);
+      lv_obj_set_style_image_recolor_opa(icons[i], LV_OPA_COVER, 0);
+    }
+    set_alarm_visible(s_clock.alarm_badge_close, missed);
+    lv_obj_move_foreground(s_clock.alarm_badge);
+    if (!clock->usable) lv_obj_move_foreground(s_clock.unavailable_alarm_button);
+    /* Home captions remain below the existing modal, regardless of build order. */
+    if (s_clock.backup_overlay && !lv_obj_has_flag(s_clock.backup_overlay, LV_OBJ_FLAG_HIDDEN))
+      lv_obj_move_foreground(s_clock.backup_overlay);
+  }
 }

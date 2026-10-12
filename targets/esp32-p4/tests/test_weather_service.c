@@ -27,6 +27,36 @@ static const char provider_response[] =
   "\"2027-01-01T10:00\"],\"weathercode\":[2,2,2,45,45,45],"
   "\"cloud_cover\":[50,50,50,90,90,90]}}";
 
+/* Current-hour rows plus the original upcoming-day rows preserve the forecast
+ * checks while supplying a storm at 13:00 and peak gusts at 14:00. */
+static const char conditions_hourly[] =
+  "{\"time\":[\"2026-12-30T12:00\",\"2026-12-30T13:00\","
+  "\"2026-12-30T14:00\",\"2026-12-30T15:00\",\"2026-12-30T16:00\","
+  "\"2026-12-30T17:00\",\"2026-12-30T18:00\","
+  "\"2026-12-31T08:00\",\"2026-12-31T09:00\",\"2026-12-31T10:00\","
+  "\"2027-01-01T08:00\",\"2027-01-01T09:00\",\"2027-01-01T10:00\"],"
+  "\"weathercode\":[0,95,0,0,0,0,0,2,2,2,45,45,45],"
+  "\"cloud_cover\":[0,90,0,0,0,0,0,50,50,50,90,90,90],"
+  "\"wind_speed_10m\":[10,10,10,10,10,10,10],"
+  "\"wind_gusts_10m\":[10,20,80,20,10,10,10],"
+  "\"pressure_msl\":[1013.25,1013.25,1013.25,1013.25,1013.25,1013.25,1013.25],"
+  "\"temperature_2m\":[68,68,68,68,68,68,68],"
+  "\"precipitation\":[0,0,0,0,0,0,0],"
+  "\"precipitation_probability\":[0,0,0,0,0,0,0],"
+  "\"snowfall\":[0,0,0,0,0,0,0]}";
+
+static char *make_conditions_response(void)
+{
+  cJSON *root = cJSON_Parse(provider_response);
+  cJSON *hourly = cJSON_Parse(conditions_hourly);
+  assert(root && hourly);
+  assert(cJSON_ReplaceItemInObjectCaseSensitive(root, "hourly", hourly));
+  char *body = cJSON_PrintUnformatted(root);
+  assert(body);
+  cJSON_Delete(root);
+  return body;
+}
+
 static device_config_t applied_config;
 static const char *http_body;
 static esp_http_client_config_t http_config;
@@ -208,6 +238,9 @@ static void check_decoder(void)
   assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
   assert_forecast(&weather);
   assert(weather.updated_at == 0 && http_requests == 1 && http_cleanups == 1);
+  assert(!weather.has_conditions);
+  assert(weather.conditions_alternate_headline[0] == '\0');
+  assert(weather.conditions_alternate_detail[0] == '\0');
 
   const char *dates[] = { "", "bad", "2026-02-30", "2026-13-01", "2026-12-31-extra" };
   for (size_t i = 0; i < sizeof(dates) / sizeof(dates[0]); ++i) {
@@ -242,6 +275,90 @@ static void check_decoder(void)
   assert(weather.forecast[0].high == 71 && weather.forecast[4].low == 35);
   free(body);
   cJSON_Delete(root);
+}
+
+static void assert_timed_conditions(const app_weather_snapshot_t *weather, bool time_24h)
+{
+  assert_forecast(weather);
+  assert(weather->has_conditions && weather->conditions_time_24h == time_24h);
+  const storm_conditions_t *conditions = &weather->conditions;
+  assert(strcmp(conditions->headline, time_24h
+    ? "Thunderstorms likely by 13:00" : "Thunderstorms likely by 1 PM") == 0);
+  assert(conditions->has_detail);
+  assert(strcmp(conditions->detail, time_24h
+    ? "Gusts up to 50 mph by 14:00" : "Gusts up to 50 mph by 2 PM") == 0);
+  assert(strcmp(weather->conditions_alternate_headline, time_24h
+    ? "Thunderstorms likely by 1 PM" : "Thunderstorms likely by 13:00") == 0);
+  assert(strcmp(weather->conditions_alternate_detail, time_24h
+    ? "Gusts up to 50 mph by 2 PM" : "Gusts up to 50 mph by 14:00") == 0);
+  assert(conditions->has_speed && conditions->speed == 6);
+  assert(!conditions->has_gust && conditions->gust == 0); /* Gust equals live wind. */
+  assert(conditions->has_peak_gust && conditions->peak_gust == 50);
+  assert(conditions->has_direction && conditions->direction == 180);
+  assert(strcmp(conditions->cardinal, "S") == 0);
+  assert(conditions->has_pressure && conditions->pressure_value == 29.92);
+  assert(conditions->has_pressure_change && conditions->pressure_change == 0);
+  assert(strcmp(conditions->pressure_trend, "steady") == 0);
+  assert(conditions->has_precip_now && conditions->precip_now == 0);
+  assert(conditions->has_precip_outlook && conditions->precip_outlook == 0);
+  assert(conditions->alert && conditions->changing && conditions->alert_count == 2);
+  assert(conditions->alerts[0].kind == STORM_ALERT_THUNDER);
+  assert(strcmp(conditions->alerts[0].label, "Thunderstorms") == 0);
+  assert(conditions->alerts[1].kind == STORM_ALERT_GUSTS);
+  assert(strcmp(conditions->alerts[1].label, "Strong gusts") == 0);
+}
+
+static void check_conditions_decoder(void)
+{
+  for (int format = 0; format < 2; ++format) {
+    reset_platform();
+    bool time_24h = format != 0;
+    strcpy(applied_config.time_format, time_24h ? "24" : "12");
+    char *body = make_conditions_response();
+    http_body = body;
+    app_weather_snapshot_t weather;
+    memset(&weather, 0xa5, sizeof(weather));
+    assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
+    assert(http_requests == 1 && http_cleanups == 1);
+    assert_timed_conditions(&weather, time_24h);
+
+    /* Compare the entire normal output with the existing calculation once,
+     * in addition to the independent expected captions/values above. */
+    cJSON *root = cJSON_Parse(body);
+    assert(root);
+    storm_conditions_config_t config = {.metric = false, .time_24h = time_24h};
+    storm_conditions_t normal;
+    assert(storm_conditions_build(&config,
+      cJSON_GetObjectItemCaseSensitive(root, "current_weather"),
+      cJSON_GetObjectItemCaseSensitive(root, "hourly"),
+      cJSON_GetObjectItemCaseSensitive(root, "daily"), &normal));
+    assert(memcmp(&weather.conditions, &normal, sizeof(normal)) == 0);
+
+    /* Removing the gust alert leaves a timed headline with no detail. */
+    cJSON_DeleteItemFromObjectCaseSensitive(
+      cJSON_GetObjectItemCaseSensitive(root, "hourly"), "wind_gusts_10m");
+    char *single_alert_body = cJSON_PrintUnformatted(root);
+    assert(single_alert_body);
+    http_body = single_alert_body;
+    assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
+    assert(weather.has_conditions && !weather.conditions.has_detail);
+    assert(weather.conditions.detail[0] == '\0');
+    assert(weather.conditions_alternate_detail[0] == '\0');
+    assert(strcmp(weather.conditions_alternate_headline, time_24h
+      ? "Thunderstorms likely by 1 PM" : "Thunderstorms likely by 13:00") == 0);
+    free(single_alert_body);
+    cJSON_Delete(root);
+    free(body);
+
+    /* An unavailable current hour clears both previously populated forms. */
+    http_body = provider_response;
+    assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
+    assert(!weather.has_conditions);
+    assert(weather.conditions.headline[0] == '\0');
+    assert(weather.conditions_alternate_headline[0] == '\0');
+    assert(weather.conditions_alternate_detail[0] == '\0');
+    assert(http_requests == 3 && http_cleanups == 3);
+  }
 }
 
 static void run_worker(unsigned stop_after_delays)
@@ -339,6 +456,7 @@ static void observe_retention(void)
   if (delay_count == 1) {
     retained_weather = s_runtime_state.weather;
     assert_forecast(&retained_weather);
+    if (retained_weather.has_conditions) assert_timed_conditions(&retained_weather, false);
   } else if (delay_count == 2) {
     assert(s_runtime_state.weather.stale);
     app_weather_snapshot_t stale = s_runtime_state.weather;
@@ -359,11 +477,28 @@ static void check_retained_weather(void)
   assert(!s_runtime_state.weather.stale);
 }
 
+static void check_retained_conditions(void)
+{
+  reset_platform();
+  char *body = make_conditions_response();
+  http_body = body;
+  request_results[1] = ESP_ERR_TIMEOUT;
+  on_delay = observe_retention;
+  run_worker(2);
+  assert(http_requests == 2 && http_cleanups == 2);
+  assert(request_ticks[0] == 0 && request_ticks[1] == 600000);
+  assert(delays[0] == 600000 && delays[1] == 20000);
+  assert(s_runtime_state.weather.stale);
+  assert_timed_conditions(&s_runtime_state.weather, false);
+  free(body);
+}
+
 int main(void)
 {
   s_runtime_mutex = xSemaphoreCreateMutex();
   assert(s_runtime_mutex);
   check_decoder();
+  check_conditions_decoder();
   check_pending_time();
   check_time_start_failure();
   check_location_required();
@@ -371,6 +506,7 @@ int main(void)
   check_weather_failure();
   check_overlapping_failure_deadlines();
   check_retained_weather();
+  check_retained_conditions();
   assert(pthread_mutex_destroy(s_runtime_mutex) == 0);
   free(s_runtime_mutex);
   puts("PASS: actual weather decoding, provider date/value/icon pairing, invalid dates, independent network-time/weather retries, refresh intervals and retained payload.");

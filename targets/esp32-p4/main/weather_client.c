@@ -407,8 +407,23 @@ esp_err_t weather_client_fetch(
 
   storm_conditions_config_t conditions_config = {
     .metric = is_metric_units(config),
-    .time_24h = strings_equal_ignore_case(config->time_format, "24")
+    .time_24h = !strings_equal_ignore_case(config->time_format, "24")
   };
+  /* Keep only the alternate captions, reusing the snapshot's Conditions
+   * storage so the weather task does not need a second full result on its stack. */
+  if (storm_conditions_build(&conditions_config, current_weather, hourly,
+                             daily, &out_snapshot->conditions)) {
+    snprintf(out_snapshot->conditions_alternate_headline,
+             sizeof(out_snapshot->conditions_alternate_headline), "%s",
+             out_snapshot->conditions.headline);
+    if (out_snapshot->conditions.has_detail) {
+      snprintf(out_snapshot->conditions_alternate_detail,
+               sizeof(out_snapshot->conditions_alternate_detail), "%s",
+               out_snapshot->conditions.detail);
+    }
+  }
+  conditions_config.time_24h = !conditions_config.time_24h;
+  out_snapshot->conditions_time_24h = conditions_config.time_24h;
   out_snapshot->has_conditions = storm_conditions_build(
     &conditions_config,
     current_weather,

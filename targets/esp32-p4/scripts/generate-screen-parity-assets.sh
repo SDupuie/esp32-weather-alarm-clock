@@ -47,6 +47,9 @@ with tempfile.TemporaryDirectory(prefix="wac-settings-icons-") as temporary:
         ("wifi", "wifi_mark", 80), ("wifi_off", "wifi_off_mark", 80),
         ("circle_check", "circle_check_mark", 80),
         ("clock", "clock", 28),
+        ("alarm_clock", "alarm_clock", 32), ("alarm_clock_off", "alarm_clock_off", 32),
+        ("alarm_clock", "alarm_clock_small", 28), ("alarm_clock_off", "alarm_clock_off_small", 28),
+        ("close", "close", 24),
     ):
         symbol = "wac_icon_" + suffix
         png = Path(temporary) / (suffix + ".png")

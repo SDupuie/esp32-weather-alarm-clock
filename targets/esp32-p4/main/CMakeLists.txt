@@ -42,9 +42,14 @@ idf_component_register(
     "main.c"
     "ui/ui.c"
     "ui/clock_views.c"
+    "ui/weather_views.c"
     "ui/settings.c"
     "clock_time.c"
+    "alarm.c"
+    "alarm_schedule.c"
+    "audio.c"
     "night.c"
+    "solar_times.c"
     "ds3231.c"
     "connectivity.c"
     "device_config.c"
@@ -61,6 +66,7 @@ idf_component_register(
   EMBED_TXTFILES
     "web/messages.html"
   REQUIRES
+    espressif__esp_codec_dev
     espressif__esp_lcd_touch_gt911
     nvs_flash
     esp_event

@@ -140,7 +140,7 @@ static void startup_and_retention_checks(void)
   assert(wac_night_update(&config, NULL) == ESP_OK); assert(wac_night_active());
   config.night_shift_mode = DEVICE_CONFIG_NIGHT_SOLAR;
   assert(wac_night_update(&config, &clock_snapshot) == ESP_OK); assert(wac_night_active());
-  assert(at(12, 0)); /* Solar calculations are deferred; events stay unavailable. */
+  assert(at(12, 0)); /* An unset location keeps the retained appearance. */
   config.night_shift_mode = DEVICE_CONFIG_NIGHT_OFF;
   assert(wac_night_update(&config, NULL) == ESP_OK); assert(!wac_night_active());
   config.night_shift_mode = DEVICE_CONFIG_NIGHT_SOLAR;
@@ -280,11 +280,283 @@ static void published_read_checks(void)
   pthread_cond_broadcast(&bsp_condition); pthread_mutex_unlock(&bsp_lock);
   assert(pthread_join(thread, NULL) == 0); assert(writer_result == ESP_OK);
 }
+
+/* These policy checks use the real calculator's UTC events. The separate
+ * solar calculation checks establish astronomy accuracy against fixtures;
+ * here the observations are Night's boundaries, calendar selection and copy. */
+static void solar_location(const char *latitude, const char *longitude,
+                           const char *timezone, const char *rules)
+{
+  strcpy(config.latitude, latitude);
+  strcpy(config.longitude, longitude);
+  strcpy(config.timezone, timezone);
+  config.location_ready = true;
+  assert(setenv("TZ", rules, 1) == 0); tzset();
+}
+static time_t local_instant(int year, int month, int day, int hour, int minute)
+{
+  struct tm local = { .tm_year = year - 1900, .tm_mon = month - 1,
+    .tm_mday = day, .tm_hour = hour, .tm_min = minute, .tm_isdst = -1 };
+  time_t instant = mktime(&local);
+  assert(instant != (time_t)-1);
+  return instant;
+}
+static solar_times_t events_on(int year, int month, int day)
+{
+  solar_times_t events;
+  solar_times_calculate(local_instant(year, month, day, 12, 0),
+    strtod(config.latitude, NULL), strtod(config.longitude, NULL), &events);
+  return events;
+}
+static bool at_instant(time_t instant)
+{
+  clock_snapshot = (wac_time_snapshot_t){ .usable = true, .utc_now = instant };
+  assert(wac_night_update(&config, &clock_snapshot) == ESP_OK);
+  return wac_night_active();
+}
+static solar_times_t copied_solar(void)
+{
+  solar_times_t result = { .available = true, .sunrise = 1, .sunset = 1 };
+  wac_night_solar_times(&result);
+  return result;
+}
+static void check_raw_copy(solar_times_t today, solar_times_t tomorrow)
+{
+  solar_times_t result = copied_solar();
+  assert(result.available == (today.available && tomorrow.available));
+  if (result.available) {
+    assert(result.sunset == today.sunset && result.sunrise == tomorrow.sunrise);
+  } else {
+    assert(result.sunset == 0 && result.sunrise == 0);
+  }
+}
+static void check_solar_interval(int year, int month, int day)
+{
+  solar_times_t today = events_on(year, month, day);
+  solar_times_t tomorrow = events_on(year, month, day + 1);
+  assert(today.available && tomorrow.available);
+  time_t start = today.sunset + config.night_sunset_offset_minutes * 60;
+  time_t end = tomorrow.sunrise + config.night_sunrise_offset_minutes * 60;
+  assert(start < end);
+  assert(!at_instant(start - 1));
+  assert(at_instant(start)); assert(at_instant(end - 1));
+  assert(!at_instant(end));
+}
+static void solar_boundary_checks(void)
+{
+  reset();
+  solar_location("41.8781", "-87.6298", "America/Chicago", "CST6CDT,M3.2.0,M11.1.0");
+  config.night_shift_mode = DEVICE_CONFIG_NIGHT_SOLAR;
+  assert(wac_night_init(&config, NULL) == ESP_OK);
+  check_solar_interval(2026, 10, 11);
+  config.night_sunset_offset_minutes = -120;
+  config.night_sunrise_offset_minutes = 120;
+  check_solar_interval(2026, 10, 11);
+  config.night_sunset_offset_minutes = 120;
+  config.night_sunrise_offset_minutes = -120;
+  check_solar_interval(2026, 10, 11);
+  /* Stockholm's long summer evening puts the +120-minute sunset after
+   * midnight. Both ends must keep their date when the cache changes days. */
+  solar_location("59.3293", "18.0686", "Europe/Stockholm", "CET-1CEST,M3.5.0,M10.5.0/3");
+  solar_times_t today = events_on(2026, 6, 21), tomorrow = events_on(2026, 6, 22);
+  time_t start = today.sunset + 7200;
+  assert(start >= local_instant(2026, 6, 22, 0, 0));
+  check_solar_interval(2026, 6, 21);
+  assert(at_instant(start)); check_raw_copy(tomorrow, events_on(2026, 6, 23));
+  /* Japan's sunrise UTC date precedes its local calendar date; shifting it
+   * earlier still retains the correctly paired next local sunrise. */
+  solar_location("35.6762", "139.6503", "Asia/Tokyo", "JST-9");
+  check_solar_interval(2026, 10, 11);
+  /* The permitted offsets can remove a very short northern summer night.
+   * Its reversed endpoints represent no Night interval, not a 22-hour wrap. */
+  solar_location("65.0121", "25.4651", "Europe/Helsinki", "EET-2EEST,M3.5.0/3,M10.5.0/4");
+  today = events_on(2026, 6, 21); tomorrow = events_on(2026, 6, 22);
+  assert(today.available && tomorrow.available);
+  assert(today.sunset + 7200 >= tomorrow.sunrise - 7200);
+  assert(!at_instant(local_instant(2026, 6, 21, 12, 0)));
+  assert(!at_instant(local_instant(2026, 6, 22, 1, 0)));
+  assert(setenv("TZ", "UTC0", 1) == 0); tzset();
+}
+static void solar_calendar_and_copy_checks(void)
+{
+  reset();
+  solar_location("41.8781", "-87.6298", "America/Chicago", "CST6CDT,M3.2.0,M11.1.0");
+  config.night_shift_mode = DEVICE_CONFIG_NIGHT_OFF;
+  clock_snapshot = (wac_time_snapshot_t){ .usable = true,
+    .utc_now = local_instant(2026, 10, 11, 12, 0) };
+  assert(wac_night_init(&config, &clock_snapshot) == ESP_OK);
+  solar_times_t today = events_on(2026, 10, 11), tomorrow = events_on(2026, 10, 12);
+  check_raw_copy(today, tomorrow);
+  fake_nvs_clear_activity();
+  for (unsigned i = 0; i < 20; ++i) tick(250);
+  check_raw_copy(today, tomorrow); assert(fake_nvs_calls(FAKE_SET) == 0);
+  config.night_sunset_offset_minutes = 120;
+  config.night_sunrise_offset_minutes = -120;
+  tick(250); check_raw_copy(today, tomorrow); /* Raw copy excludes offsets. */
+  solar_times_t copy = copied_solar(); copy.sunset = 0;
+  assert(copied_solar().sunset != copy.sunset);
+  wac_night_solar_times(NULL); check_raw_copy(today, tomorrow);
+  assert(!at_instant(local_instant(2026, 10, 12, 0, 0)));
+  check_raw_copy(tomorrow, events_on(2026, 10, 13));
+  assert(!at_instant(local_instant(2026, 10, 11, 12, 0))); /* Backward correction. */
+  check_raw_copy(today, tomorrow);
+  strcpy(config.longitude, "-80.0000"); tick(250);
+  solar_times_t relocated = events_on(2026, 10, 11);
+  assert(relocated.sunset != today.sunset);
+  check_raw_copy(relocated, events_on(2026, 10, 12));
+  assert(fake_nvs_calls(FAKE_SET) == 0); /* Event refresh is not a settings save. */
+  strcpy(config.longitude, "-87.6298");
+  config.night_sunset_offset_minutes = config.night_sunrise_offset_minutes = 0;
+  config.night_shift_mode = DEVICE_CONFIG_NIGHT_SOLAR;
+  assert(local_instant(2026, 3, 8, 12, 0) - local_instant(2026, 3, 7, 12, 0) == 23 * 3600);
+  check_solar_interval(2026, 3, 7);
+  assert(local_instant(2026, 11, 1, 12, 0) - local_instant(2026, 10, 31, 12, 0) == 25 * 3600);
+  check_solar_interval(2026, 10, 31);
+  solar_location("1.8721", "-157.4278", "Pacific/Kiritimati", "LINT-14");
+  /* Kiritimati's civil day begins the previous UTC morning. */
+  time_t noon = local_instant(2026, 10, 11, 12, 0);
+  struct tm utc;
+  assert(gmtime_r(&noon, &utc) != NULL && utc.tm_mday == 10);
+  check_solar_interval(2026, 10, 11);
+  assert(!at_instant(local_instant(2026, 10, 12, 12, 0)));
+  today = events_on(2026, 10, 12); tomorrow = events_on(2026, 10, 13);
+  check_raw_copy(today, tomorrow);
+  struct tm day;
+  assert(localtime_r(&today.sunset, &day) != NULL && day.tm_mday == 12);
+  assert(localtime_r(&tomorrow.sunrise, &day) != NULL && day.tm_mday == 13);
+  assert(setenv("TZ", "UTC0", 1) == 0); tzset();
+}
+static void solar_unavailable_checks(void)
+{
+  for (unsigned saved = 0; saved <= 1; ++saved) {
+    reset(); seed(saved); config.night_shift_mode = DEVICE_CONFIG_NIGHT_SOLAR;
+    assert(wac_night_init(&config, NULL) == ESP_OK);
+    assert(wac_night_active() == (saved == 1));
+    assert(!copied_solar().available && fake_nvs_calls(FAKE_SET) == 0);
+    solar_location("90", "0", "Etc/UTC", "UTC0");
+    clock_snapshot = (wac_time_snapshot_t){ .usable = true,
+      .utc_now = local_instant(2026, 6, 21, 12, 0) };
+    assert(wac_night_init(&config, &clock_snapshot) == ESP_OK);
+    assert(wac_night_active() == (saved == 1));
+    check_raw_copy(events_on(2026, 6, 21), events_on(2026, 6, 22));
+    assert(fake_nvs_calls(FAKE_SET) == 0);
+  }
+  reset(); config.night_shift_mode = DEVICE_CONFIG_NIGHT_SOLAR;
+  solar_location("41.8781", "-87.6298", "America/Chicago", "CST6CDT,M3.2.0,M11.1.0");
+  assert(wac_night_init(&config, NULL) == ESP_OK);
+  solar_times_t today = events_on(2026, 10, 11);
+  assert(at_instant(today.sunset));
+  fake_nvs_clear_activity();
+  clock_snapshot.usable = false; tick(250);
+  assert(wac_night_active() && !copied_solar().available);
+  clock_snapshot.usable = true; tick(250); assert(copied_solar().available);
+  config.location_ready = false; tick(250);
+  assert(wac_night_active() && !copied_solar().available);
+  config.location_ready = true;
+  strcpy(config.timezone, ""); tick(250);
+  assert(wac_night_active() && !copied_solar().available);
+  strcpy(config.timezone, "America/Chicago");
+  const char *invalid[] = { "", "nan", "inf", "91", " 41", "41 ", "41x", "1e999" };
+  for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+    strcpy(config.latitude, invalid[i]); tick(250);
+    assert(wac_night_active() && !copied_solar().available);
+  }
+  memset(config.latitude, '1', sizeof(config.latitude)); tick(250);
+  assert(wac_night_active() && !copied_solar().available);
+  strcpy(config.latitude, "41.8781"); strcpy(config.longitude, "181"); tick(250);
+  assert(wac_night_active() && !copied_solar().available);
+  strcpy(config.longitude, "-87.6298"); tick(250); assert(copied_solar().available);
+  solar_location("90", "0", "Etc/UTC", "UTC0"); tick(250);
+  assert(wac_night_active() && !copied_solar().available);
+  assert(fake_nvs_calls(FAKE_SET) == 0);
+  config.night_shift_mode = DEVICE_CONFIG_NIGHT_OFF; tick(250);
+  assert(!wac_night_active());
+  config.night_shift_mode = DEVICE_CONFIG_NIGHT_SOLAR; tick(250);
+  assert(!wac_night_active());
+  /* Restoring the location and daytime overrides retained Night. */
+  seed(1);
+  solar_location("41.8781", "-87.6298", "America/Chicago", "CST6CDT,M3.2.0,M11.1.0");
+  clock_snapshot.utc_now = local_instant(2026, 10, 11, 12, 0);
+  assert(wac_night_init(&config, &clock_snapshot) == ESP_OK);
+  assert(!wac_night_active() && copied_solar().available);
+  assert(fake_nvs_calls(FAKE_SET) == 1);
+  assert(setenv("TZ", "UTC0", 1) == 0); tzset();
+}
+
+static void solar_polar_transition_checks(void)
+{
+  reset(); seed(1);
+  solar_location("69.6492", "18.9553", "Europe/Oslo", "CET-1CEST,M3.5.0,M10.5.0/3");
+  config.night_shift_mode = DEVICE_CONFIG_NIGHT_SOLAR;
+  /* Locate the first available pair after Tromso's polar summer using the
+   * real calculator, rather than injecting made-up event availability. */
+  int first = 0;
+  for (int day = 1; day <= 62; ++day) {
+    if (events_on(2026, 7, day).available && !events_on(2026, 7, day - 1).available) {
+      first = day; break;
+    }
+  }
+  assert(first != 0);
+  solar_times_t today = events_on(2026, 7, first), tomorrow = events_on(2026, 7, first + 1);
+  time_t noon = local_instant(2026, 7, first, 12, 0);
+  assert(tomorrow.available && today.sunrise < noon && today.sunset > noon);
+  clock_snapshot = (wac_time_snapshot_t){ .usable = true, .utc_now = noon };
+  assert(wac_night_init(&config, &clock_snapshot) == ESP_OK);
+  assert(!wac_night_active()); /* Known sunrise rules out yesterday's interval. */
+  check_raw_copy(today, tomorrow);
+  assert(at_instant(today.sunset)); /* Missing yesterday does not block this Night. */
+  int last = 0;
+  for (int day = 1; day <= 31; ++day) {
+    if (events_on(2026, 5, day).available && !events_on(2026, 5, day + 1).available) {
+      last = day; break;
+    }
+  }
+  assert(last != 0);
+  today = events_on(2026, 5, last);
+  clock_snapshot.utc_now = local_instant(2026, 5, last, 12, 0);
+  assert(wac_night_init(&config, &clock_snapshot) == ESP_OK);
+  assert(!wac_night_active());
+  assert(!at_instant(today.sunset)); /* Required next sunrise missing: retain Day. */
+  assert(!copied_solar().available);
+  assert(setenv("TZ", "UTC0", 1) == 0); tzset();
+}
+
+static void *solar_writer(void *unused)
+{
+  (void)unused; writer_result = wac_night_update(&config, &clock_snapshot); return NULL;
+}
+static void solar_copy_during_io_checks(void)
+{
+  reset();
+  solar_location("41.8781", "-87.6298", "America/Chicago", "CST6CDT,M3.2.0,M11.1.0");
+  config.night_shift_mode = DEVICE_CONFIG_NIGHT_SOLAR;
+  assert(wac_night_init(&config, NULL) == ESP_OK);
+  solar_times_t today = events_on(2026, 10, 11), tomorrow = events_on(2026, 10, 12);
+  clock_snapshot = (wac_time_snapshot_t){ .usable = true, .utc_now = today.sunset };
+  fake_nvs_block_next_set(); pthread_t thread;
+  assert(pthread_create(&thread, NULL, solar_writer, NULL) == 0);
+  assert(fake_nvs_wait_blocked()); assert(wac_night_active());
+  check_raw_copy(today, tomorrow);
+  fake_nvs_release_set(); assert(pthread_join(thread, NULL) == 0); assert(writer_result == ESP_OK);
+  wac_night_start_backlight(); tick(250); fake_clock_advance(250);
+  bsp_block = true;
+  assert(pthread_create(&thread, NULL, solar_writer, NULL) == 0);
+  pthread_mutex_lock(&bsp_lock);
+  while (!bsp_pending) pthread_cond_wait(&bsp_condition, &bsp_lock);
+  pthread_mutex_unlock(&bsp_lock);
+  check_raw_copy(today, tomorrow);
+  pthread_mutex_lock(&bsp_lock); bsp_release = true;
+  pthread_cond_broadcast(&bsp_condition); pthread_mutex_unlock(&bsp_lock);
+  assert(pthread_join(thread, NULL) == 0); assert(writer_result == ESP_OK);
+  assert(setenv("TZ", "UTC0", 1) == 0); tzset();
+}
 int main(void)
 {
   assert(setenv("TZ", "UTC0", 1) == 0); tzset();
   fixed_schedule_checks(); startup_and_retention_checks(); persistence_checks();
   brightness_checks(); startup_storage_no_memory_checks(); published_read_checks();
-  puts("Production Night Shift checks passed: fallback, fixed local-time boundaries, operating-record failures, gradual brightness, and reads during pending I/O.");
+  solar_boundary_checks(); solar_calendar_and_copy_checks(); solar_unavailable_checks();
+  solar_polar_transition_checks(); solar_copy_during_io_checks();
+  puts("Production Night Shift checks passed: fixed/solar boundaries, calendar changes, unavailable retention, raw solar copies, operating-record failures, gradual brightness, and reads during pending I/O.");
   return 0;
 }

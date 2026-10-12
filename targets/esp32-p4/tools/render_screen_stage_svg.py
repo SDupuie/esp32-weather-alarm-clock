@@ -207,6 +207,16 @@ def build_settings_icon(variant: str, size: int = 24) -> str:
         ),
         "circle_check": ("m9 12 2 2 4-4",),
         "clock": ("M12 6v6l4 2",),
+        "alarm_clock": (
+            "M12 9v4l2 2", "M5 3 2 6", "m22 6-3-3",
+            "M6.38 18.7 4 21", "M17.64 18.67 20 21",
+        ),
+        "alarm_clock_off": (
+            "M6.87 6.87a8 8 0 1 0 11.26 11.26",
+            "M19.9 14.25a8 8 0 0 0-9.15-9.15", "m22 6-3-3",
+            "M6.26 18.67 4 21", "m2 2 20 20", "M4 4 2 6",
+        ),
+        "close": ("M18 6 6 18", "m6 6 12 12"),
         "refresh": (
             "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8",
             "M21 3v5h-5", "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16",
@@ -216,6 +226,8 @@ def build_settings_icon(variant: str, size: int = 24) -> str:
     inner = "".join(f'<path d="{path}"/>' for path in paths[variant])
     if variant in ("circle_check", "clock"):
         inner = '<circle cx="12" cy="12" r="10"/>' + inner
+    elif variant == "alarm_clock":
+        inner = '<circle cx="12" cy="13" r="8"/>' + inner
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{inner}</svg>'
 
 

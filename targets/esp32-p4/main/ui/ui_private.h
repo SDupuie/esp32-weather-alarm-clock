@@ -2,6 +2,7 @@
 
 #include "device_config.h"
 #include "app_runtime.h"
+#include "app_ui.h"
 #include "lvgl.h"
 
 typedef enum {
@@ -20,11 +21,16 @@ typedef enum {
 void wac_ui_settings_navigate(wac_settings_view_t view);
 wac_settings_view_t wac_ui_settings_view(void);
 void wac_ui_settings_close(void);
+void wac_ui_apply_display(const device_config_t *config);
 void wac_settings_begin(lv_obj_t *parent, const device_config_t *config);
 void wac_settings_apply_night(bool active);
+void wac_settings_update_solar(const solar_times_t *events);
+void wac_settings_update_clock(const wac_time_snapshot_t *clock);
+void wac_settings_update_audio(const wac_audio_snapshot_t *audio);
 void wac_settings_start_weather(const device_config_t *config);
 void wac_settings_render(wac_settings_view_t view);
 void wac_settings_close(void);
+void wac_settings_set_visible(bool visible);
 void wac_settings_poll(void);
 
 /* Small, shared helpers already used by the shell and clock rendering. */
@@ -59,3 +65,37 @@ void wac_clock_update_status(const char *text, bool analog, bool waiting_for_syn
 void wac_clock_build_backup(lv_obj_t *parent, lv_event_cb_t open_cb, lv_event_cb_t dismiss_cb);
 void wac_clock_update_backup(bool home, bool analog, bool usable,
   wac_time_warning_t warning, bool open, bool dismiss_pending, const char *error, bool night);
+
+/* Navigation selects a surface; the clock renderer owns only its objects. */
+typedef enum {
+  WAC_CLOCK_ALARM_HIDDEN, WAC_CLOCK_ALARM_HOME,
+  WAC_CLOCK_ALARM_RINGING, WAC_CLOCK_ALARM_SNOOZED
+} wac_clock_alarm_surface_t;
+void wac_clock_build_alarm(lv_obj_t *parent, lv_event_cb_t action_cb,
+  lv_event_cb_t badge_cb, lv_event_cb_t open_alarm_cb);
+void wac_clock_update_alarm(const device_config_t *config,
+  const wac_time_snapshot_t *clock, const wac_alarm_snapshot_t *alarm,
+  wac_clock_alarm_surface_t surface, bool analog, bool night,
+  bool caption_blocked, bool pending, const char *error);
+
+/* Weather/message rendering consumes these inputs without retaining navigation
+ * or another service/configuration snapshot. Surface is a draw-time input. */
+typedef enum {
+  WAC_WEATHER_SURFACE_HOME, WAC_WEATHER_SURFACE_FORECAST,
+  WAC_WEATHER_SURFACE_CONDITIONS, WAC_WEATHER_SURFACE_MESSAGE,
+  WAC_WEATHER_SURFACE_UNAVAILABLE_HOME
+} wac_weather_surface_t;
+
+void wac_weather_reset(void);
+void wac_weather_build_forecast(lv_obj_t *parent);
+void wac_weather_build_conditions(lv_obj_t *parent);
+void wac_weather_build_message(lv_obj_t *parent);
+void wac_weather_build_status(lv_obj_t *parent);
+void wac_weather_set_visible(bool forecast, bool conditions, bool message);
+void wac_weather_apply_night(const app_weather_snapshot_t *weather, bool important, bool active);
+void wac_weather_update(const app_weather_snapshot_t *weather, const struct tm *local_calendar,
+  bool time_24h);
+void wac_weather_update_message(const app_message_snapshot_t *snapshot);
+void wac_weather_set_message_dismiss_text(const char *text);
+void wac_weather_update_status(const char *status_text, const app_weather_snapshot_t *weather,
+  bool night, wac_weather_surface_t surface);

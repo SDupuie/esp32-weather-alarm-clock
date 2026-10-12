@@ -1,6 +1,9 @@
 #include "night.h"
 
 #include <ctype.h>
+#include <errno.h>
+#include <math.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -23,6 +26,106 @@ static bool s_initialized;
 static bool s_fade_started;
 static int s_brightness;
 static int64_t s_fade_step_us;
+static solar_times_t s_published_solar;
+/* Private to the clock-control writer. Calendar noons, rather than 24-hour
+ * increments, keep the adjacent local dates correct across clock changes. */
+static bool s_solar_cached;
+static time_t s_solar_noon;
+static double s_solar_latitude, s_solar_longitude;
+static char s_solar_timezone[DEVICE_CONFIG_STR_LEN];
+static solar_times_t s_solar_days[3];
+
+static bool parse_coordinate(const char *text, size_t size, double limit, double *out)
+{
+  if (memchr(text, '\0', size) == NULL || *text == '\0'
+      || isspace((unsigned char)*text)) return false;
+  errno = 0;
+  char *end;
+  double value = strtod(text, &end);
+  if (end == text || *end != '\0' || errno == ERANGE
+      || !isfinite(value) || value < -limit || value > limit) return false;
+  *out = value;
+  return true;
+}
+
+static void publish_solar(const solar_times_t *events)
+{
+  portENTER_CRITICAL(&s_copy_lock);
+  s_published_solar = *events;
+  portEXIT_CRITICAL(&s_copy_lock);
+}
+
+static void update_solar(const device_config_t *config, const wac_time_snapshot_t *clock)
+{
+  double latitude, longitude;
+  struct tm local;
+  if (clock == NULL || !clock->usable || !config->location_ready
+      || memchr(config->timezone, '\0', sizeof(config->timezone)) == NULL
+      || config->timezone[0] == '\0'
+      || !parse_coordinate(config->latitude, sizeof(config->latitude), 90, &latitude)
+      || !parse_coordinate(config->longitude, sizeof(config->longitude), 180, &longitude)
+      || localtime_r(&clock->utc_now, &local) == NULL) {
+    s_solar_cached = false;
+    publish_solar(&(solar_times_t){0});
+    return;
+  }
+  local.tm_hour = 12;
+  local.tm_min = local.tm_sec = 0;
+  local.tm_isdst = -1;
+  time_t noon = mktime(&local);
+  if (noon == (time_t)-1) {
+    s_solar_cached = false;
+    publish_solar(&(solar_times_t){0});
+    return;
+  }
+  if (!s_solar_cached || noon != s_solar_noon || latitude != s_solar_latitude
+      || longitude != s_solar_longitude || strcmp(config->timezone, s_solar_timezone)) {
+    for (int i = 0; i < 3; ++i) {
+      struct tm day = local;
+      day.tm_mday += i - 1;
+      day.tm_isdst = -1;
+      time_t day_noon = mktime(&day);
+      s_solar_days[i] = (solar_times_t){0};
+      if (day_noon != (time_t)-1)
+        solar_times_calculate(day_noon, latitude, longitude, &s_solar_days[i]);
+    }
+    s_solar_noon = noon;
+    s_solar_latitude = latitude;
+    s_solar_longitude = longitude;
+    strcpy(s_solar_timezone, config->timezone);
+    s_solar_cached = true;
+  }
+  solar_times_t events = {0};
+  if (s_solar_days[1].available && s_solar_days[2].available) {
+    events.available = true;
+    events.sunset = s_solar_days[1].sunset;
+    events.sunrise = s_solar_days[2].sunrise;
+  }
+  publish_solar(&events);
+}
+
+static bool solar_appearance(const device_config_t *config,
+                             const wac_time_snapshot_t *clock, bool previous)
+{
+  if (!s_solar_cached) return previous;
+  bool missing = false;
+  for (int i = 0; i < 2; ++i) {
+    time_t start = s_solar_days[i].sunset + config->night_sunset_offset_minutes * 60;
+    time_t end = s_solar_days[i + 1].sunrise + config->night_sunrise_offset_minutes * 60;
+    /* Either known boundary can rule an interval out without needing the
+     * other event. This matters on the first/last day of a polar season. */
+    if ((s_solar_days[i].available && clock->utc_now < start)
+        || (s_solar_days[i + 1].available && clock->utc_now >= end)) continue;
+    if (!s_solar_days[i].available || !s_solar_days[i + 1].available) {
+      missing = true;
+      continue;
+    }
+    /* A short night can be removed by the offsets; it must not become a
+     * nearly full-day interval merely because the shifted endpoints cross. */
+    if (start < end && clock->utc_now >= start && clock->utc_now < end) return true;
+  }
+  return missing ? previous : false;
+}
 
 static int parse_hhmm_minutes(const char *value)
 {
@@ -41,10 +144,9 @@ static bool select_appearance(const device_config_t *config,
 {
   if (config->night_shift_mode == DEVICE_CONFIG_NIGHT_OFF) return false;
   if (config->night_shift_mode == DEVICE_CONFIG_NIGHT_ALWAYS_ON) return true;
-  /* Solar-event calculation is a later slice. Unavailable scheduled inputs
-   * retain the selected appearance, including the saved startup fallback. */
-  if (config->night_shift_mode == DEVICE_CONFIG_NIGHT_SOLAR
-      || clock == NULL || !clock->usable) return previous;
+  if (config->night_shift_mode == DEVICE_CONFIG_NIGHT_SOLAR)
+    return solar_appearance(config, clock, previous);
+  if (clock == NULL || !clock->usable) return previous;
 
   struct tm local_time = {0};
   if (localtime_r(&clock->utc_now, &local_time) == NULL) return previous;
@@ -79,6 +181,11 @@ esp_err_t wac_night_init(const device_config_t *config, const wac_time_snapshot_
 {
   if (config == NULL) return ESP_ERR_INVALID_ARG;
 
+  s_solar_cached = false;
+  memset(s_solar_days, 0, sizeof(s_solar_days));
+  publish_solar(&(solar_times_t){0});
+  update_solar(config, clock);
+
   bool saved_night = false;
   nvs_handle_t handle;
   esp_err_t err = nvs_open(NIGHT_NAMESPACE, NVS_READONLY, &handle);
@@ -111,6 +218,14 @@ bool wac_night_active(void)
   bool night = s_night;
   portEXIT_CRITICAL(&s_copy_lock);
   return night;
+}
+
+void wac_night_solar_times(solar_times_t *out)
+{
+  if (out == NULL) return;
+  portENTER_CRITICAL(&s_copy_lock);
+  *out = s_published_solar;
+  portEXIT_CRITICAL(&s_copy_lock);
 }
 
 void wac_night_start_backlight(void)
@@ -160,6 +275,7 @@ esp_err_t wac_night_update(const device_config_t *config, const wac_time_snapsho
 {
   if (config == NULL) return ESP_ERR_INVALID_ARG;
   if (!s_initialized) return ESP_ERR_INVALID_STATE;
+  update_solar(config, clock);
   bool previous = wac_night_active();
   bool selected = select_appearance(config, clock, previous);
   esp_err_t err = ESP_OK;

@@ -129,7 +129,7 @@ generate_font "wac_font_settings_34" 34 "0x2019,0x2026" "wac_fonts_34" "lv_font_
 generate_font "wac_font_settings_28" 28 "0xB7,0x2013,0x2026" "wac_fonts_28" "lv_font_montserrat_28" "$settings_tmp"
 # Time picker and unsigned solar-offset magnitude use their true pixel sizes.
 generate_font "wac_font_settings_104" 104 "0x30-0x39,0x3A" "wac_fonts_104" "" "$settings_tmp"
-generate_font "wac_font_settings_96" 96 "0x30-0x39" "wac_fonts_96" "" "$settings_tmp"
+generate_font "wac_font_settings_96" 96 "0x2D,0x30-0x39,0x3A" "wac_fonts_96" "" "$settings_tmp"
 generate_font "wac_font_weather_32" 32 "0x2026" "wac_fonts_32" "lv_font_montserrat_32" "$settings_tmp"
 python3 - "$settings_tmp" "$OUTPUT_DIR" <<'PYEOF'
 import pathlib

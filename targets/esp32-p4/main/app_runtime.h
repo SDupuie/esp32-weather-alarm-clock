@@ -5,6 +5,9 @@
 
 #include "storm_conditions.h"
 #include "clock_time.h"
+#include "alarm.h"
+#include "audio.h"
+#include "solar_times.h"
 
 #define APP_STATUS_TEXT_LEN 96
 #define APP_WEATHER_SUMMARY_LEN 32
@@ -39,6 +42,10 @@ typedef struct {
    * current hour couldn't be found in the hourly data. */
   bool has_conditions;
   storm_conditions_t conditions;
+  /* Captions in conditions use this format; alternate captions use the other. */
+  bool conditions_time_24h;
+  char conditions_alternate_headline[STORM_TEXT_LEN];
+  char conditions_alternate_detail[STORM_TEXT_LEN];
 } app_weather_snapshot_t;
 
 typedef struct {
@@ -50,7 +57,10 @@ typedef struct {
 
 typedef struct {
   wac_time_snapshot_t clock;
+  wac_alarm_snapshot_t alarm;
+  wac_audio_snapshot_t audio;
   bool night_active;
+  solar_times_t solar; /* Owner's raw sunset today and sunrise tomorrow. */
   uint32_t unread_message_count;
   bool has_important_message;
   char weather_status[APP_STATUS_TEXT_LEN];

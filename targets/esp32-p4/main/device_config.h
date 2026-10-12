@@ -15,7 +15,7 @@
 
 typedef enum {
   DEVICE_CONFIG_ALARM_CLASSIC_BEEP = 0,
-  DEVICE_CONFIG_ALARM_GENTLE_CHIME,
+  DEVICE_CONFIG_ALARM_CLASSIC_BELL,
   DEVICE_CONFIG_ALARM_RISING_TONES,
 } device_config_alarm_sound_t;
 
@@ -69,7 +69,7 @@ esp_err_t device_config_validate(const device_config_t *config);
  * Initializes missing keys; existing keys are not rewritten.
  * Stored brightness below the minimum is raised only in memory. An incomplete
  * location tuple from a partial save is retained with location_ready=false;
- * device/alarm saves can still apply while the location is being corrected.
+ * device/display/alarm saves can still apply while the location is being corrected.
  * A failed initialization does not publish its loaded/default values. */
 esp_err_t device_config_init(void);
 /* Copies applied settings under a short lock; performs no storage I/O. */
@@ -81,6 +81,9 @@ esp_err_t device_config_copy(device_config_t *config);
  * including unchanged values; the immediate toggle writes only alarm_enabled.
  * Failure leaves the applied running values intact.
  * Ordinary storage may already contain some changes after a failed save. */
+/* Display owns face, format, leading zero and both brightness values; Device
+ * owns the remaining Device Setup fields. */
+esp_err_t device_config_save_display(const device_config_t *baseline, const device_config_t *draft);
 esp_err_t device_config_save_device(const device_config_t *baseline, const device_config_t *draft);
 esp_err_t device_config_save_weather(const device_config_t *baseline, const device_config_t *draft);
 esp_err_t device_config_save_alarm(const device_config_t *baseline, const device_config_t *draft);

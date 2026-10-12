@@ -22,6 +22,7 @@
 
 #include "app_runtime.h"
 #include "app_ui.h"
+#include "alarm.h"
 #include "bsp_shims.h"
 #include "connectivity.h"
 #include "device_config.h"
@@ -42,6 +43,25 @@ static const uint32_t WEATHER_RETRY_INTERVAL_MS = 20000;
 static app_runtime_state_t s_runtime_state;
 static SemaphoreHandle_t s_runtime_mutex;
 static QueueHandle_t s_clock_commands;
+
+/* Clock queue payloads are copied; callbacks never retain a screen pointer. */
+typedef enum { CLOCK_COMMAND_WARNING, CLOCK_COMMAND_ALARM } clock_command_kind_t;
+typedef struct {
+  clock_command_kind_t kind;
+  wac_time_warning_t warning;
+  app_alarm_action_t action;
+  wac_alarm_occurrence_t occurrence;
+} clock_command_t;
+typedef struct {
+  bool ready;
+  app_alarm_action_t action;
+  wac_alarm_occurrence_t occurrence;
+  esp_err_t error;
+} clock_alarm_result_t;
+/* The UI permits one outstanding alarm action. Keep its completion until the
+ * heartbeat obtains the display lock; unrelated warning commands share queue. */
+static portMUX_TYPE s_alarm_result_lock = portMUX_INITIALIZER_UNLOCKED;
+static clock_alarm_result_t s_alarm_result;
 
 static esp_err_t read_touch(esp_lcd_touch_handle_t touch,
   esp_lcd_touch_point_data_t *points, uint8_t *point_count,
@@ -175,6 +195,9 @@ static void runtime_state_snapshot(app_runtime_state_t *out_runtime, const devic
     }
   }
   out_runtime->night_active = wac_night_active();
+  wac_night_solar_times(&out_runtime->solar);
+  wac_alarm_copy(&out_runtime->alarm);
+  wac_audio_copy(&out_runtime->audio);
 }
 
 static bool runtime_state_has_valid_weather(void)
@@ -199,22 +222,113 @@ static esp_err_t request_clock_warning_dismiss(wac_time_warning_t warning)
   if (warning != WAC_TIME_WARNING_LOST_TIME && warning != WAC_TIME_WARNING_CONNECTION)
     return ESP_ERR_INVALID_ARG;
   if (s_clock_commands == NULL) return ESP_ERR_INVALID_STATE;
-  return xQueueSend(s_clock_commands, &warning, 0) == pdTRUE
+  clock_command_t command = { .kind = CLOCK_COMMAND_WARNING, .warning = warning };
+  return xQueueSend(s_clock_commands, &command, 0) == pdTRUE
     ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+static bool alarm_occurrence_matches(const wac_alarm_occurrence_t *a,
+                                     const wac_alarm_occurrence_t *b)
+{
+  return a->valid && b->valid && a->utc == b->utc
+    && a->local_date == b->local_date && a->minute == b->minute;
+}
+
+static esp_err_t request_alarm_action(app_alarm_action_t action,
+                                      const wac_alarm_occurrence_t *occurrence)
+{
+  if ((unsigned)action > APP_ALARM_DISMISS_MISSED || !occurrence || !occurrence->valid)
+    return ESP_ERR_INVALID_ARG;
+  if (!s_clock_commands) return ESP_ERR_INVALID_STATE;
+  clock_command_t command = { .kind = CLOCK_COMMAND_ALARM,
+    .action = action, .occurrence = *occurrence };
+  return xQueueSend(s_clock_commands, &command, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t execute_alarm_action(const clock_command_t *command,
+  const device_config_t *config, const wac_time_snapshot_t *clock)
+{
+  if (!config || !clock) return ESP_ERR_INVALID_STATE;
+  wac_alarm_snapshot_t alarm;
+  wac_alarm_copy(&alarm);
+  const wac_alarm_occurrence_t *current = command->action == APP_ALARM_DISMISS_MISSED
+    ? &alarm.missed : &alarm.current;
+  /* A delayed tap belongs to the occurrence displayed when it was submitted. */
+  if (!alarm_occurrence_matches(current, &command->occurrence)) return ESP_ERR_INVALID_STATE;
+  switch (command->action) {
+    case APP_ALARM_SNOOZE: return wac_alarm_snooze(config, clock);
+    case APP_ALARM_DISMISS: return wac_alarm_dismiss();
+    case APP_ALARM_DISMISS_MISSED: return wac_alarm_dismiss_missed();
+    default: return ESP_ERR_INVALID_ARG;
+  }
+}
+
+static void publish_alarm_result(clock_alarm_result_t *result)
+{
+  portENTER_CRITICAL(&s_alarm_result_lock);
+  s_alarm_result = *result;
+  portEXIT_CRITICAL(&s_alarm_result_lock);
+}
+
+static bool take_alarm_result(clock_alarm_result_t *out)
+{
+  portENTER_CRITICAL(&s_alarm_result_lock);
+  bool ready = s_alarm_result.ready;
+  if (ready) {
+    *out = s_alarm_result;
+    s_alarm_result.ready = false;
+  }
+  portEXIT_CRITICAL(&s_alarm_result_lock);
+  return ready;
 }
 
 static void clock_control_task(void *arg)
 {
   (void) arg;
+  esp_err_t last_alarm_error = ESP_OK;
   esp_err_t last_rtc_error = ESP_OK;
   esp_err_t last_night_error = ESP_OK;
+  wac_alarm_phase_t last_alarm_phase = WAC_ALARM_IDLE;
+  time_t last_missed_alarm = 0;
   while (true) {
-    wac_time_warning_t warning;
-    while (xQueueReceive(s_clock_commands, &warning, 0) == pdTRUE) {
-      wac_time_dismiss_warning(warning);
-    }
-    wac_time_poll(connectivity_get_time_sync_generation());
+    device_config_t config;
+    bool have_config = device_config_copy(&config) == ESP_OK;
     wac_time_snapshot_t clock;
+    wac_time_snapshot(&clock);
+    clock_command_t command;
+    clock_alarm_result_t alarm_result = {0};
+    while (xQueueReceive(s_clock_commands, &command, 0) == pdTRUE) {
+      if (command.kind == CLOCK_COMMAND_WARNING) wac_time_dismiss_warning(command.warning);
+      else {
+        alarm_result.ready = true;
+        alarm_result.action = command.action;
+        alarm_result.occurrence = command.occurrence;
+        alarm_result.error = execute_alarm_action(&command, have_config ? &config : NULL, &clock);
+        if (alarm_result.error != ESP_OK)
+          ESP_LOGW(TAG, "Alarm action returned %s", esp_err_to_name(alarm_result.error));
+      }
+    }
+    /* Due alarms take priority over optional RTC correction and backlight work.
+     * Newly accepted network time is used on the next 250 ms iteration. */
+    if (have_config) {
+      esp_err_t error = wac_alarm_update(&config, &clock);
+      if (error != ESP_OK && error != last_alarm_error) {
+        ESP_LOGW(TAG, "Alarm operating-record save failed: %s", esp_err_to_name(error));
+      }
+      last_alarm_error = error;
+      wac_alarm_snapshot_t alarm;
+      wac_alarm_copy(&alarm);
+      time_t missed = alarm.missed.valid ? alarm.missed.utc : 0;
+      if (alarm.phase != last_alarm_phase || missed != last_missed_alarm) {
+        static const char *phases[] = { "idle", "ringing", "snoozed" };
+        ESP_LOGI(TAG, "Alarm state=%s, scheduled date=%ld, missed date=%ld",
+          phases[alarm.phase], (long)alarm.current.local_date, (long)alarm.missed.local_date);
+        last_alarm_phase = alarm.phase;
+        last_missed_alarm = missed;
+      }
+    }
+    if (alarm_result.ready) publish_alarm_result(&alarm_result);
+    wac_time_poll(connectivity_get_time_sync_generation());
     wac_time_snapshot(&clock);
     if (clock.rtc_error != last_rtc_error) {
       if (clock.rtc_error != ESP_OK) {
@@ -224,8 +338,7 @@ static void clock_control_task(void *arg)
       }
       last_rtc_error = clock.rtc_error;
     }
-    device_config_t config;
-    if (device_config_copy(&config) == ESP_OK) {
+    if (have_config) {
       esp_err_t error = wac_night_update(&config, &clock);
       if (error != ESP_OK && error != last_night_error) {
         ESP_LOGW(TAG, "Night Shift storage or backlight operation failed: %s", esp_err_to_name(error));
@@ -256,12 +369,21 @@ static void ui_heartbeat_task(void *arg)
     runtime_state_snapshot(&runtime_snapshot, &config);
 
     if (bsp_display_lock(UI_HEARTBEAT_LOCK_TIMEOUT_MS) == ESP_OK) {
+      clock_alarm_result_t alarm_result;
+      bool have_alarm_result = take_alarm_result(&alarm_result);
+      /* The earlier snapshot may precede this action or a resumed ring. This
+       * is a short copied read; no I/O or display wait runs in the owner. */
+      if (have_alarm_result) wac_alarm_copy(&runtime_snapshot.alarm);
       /* The message owner keeps completion until the UI can accept it. */
       esp_err_t message_result;
       if (message_service_take_acknowledgment_result(&message_result)) {
         app_ui_complete_message_acknowledgment(message_result);
       }
       app_ui_update_runtime(&config, &runtime_snapshot);
+      /* Navigation uses the owner's completed phase, including failed saves
+       * whose live Snooze/Dismiss action has already taken effect. */
+      if (have_alarm_result)
+        app_ui_complete_alarm_action(alarm_result.action, &alarm_result.occurrence, alarm_result.error);
       bsp_display_unlock();
     }
   }
@@ -452,6 +574,10 @@ void app_main(void)
   log_device_clock("Clock after boot timezone apply");
   wac_time_snapshot_t startup_clock;
   wac_time_snapshot(&startup_clock);
+  esp_err_t alarm_err = wac_alarm_init();
+  if (alarm_err != ESP_OK) {
+    ESP_LOGW(TAG, "Alarm operating-record startup returned %s", esp_err_to_name(alarm_err));
+  }
   esp_err_t night_err = wac_night_init(&config, &startup_clock);
   if (night_err != ESP_OK) {
     ESP_LOGW(TAG, "Night Shift startup returned %s", esp_err_to_name(night_err));
@@ -463,7 +589,7 @@ void app_main(void)
     return;
   }
   runtime_state_seed(&config);
-  s_clock_commands = xQueueCreate(2, sizeof(wac_time_warning_t));
+  s_clock_commands = xQueueCreate(2, sizeof(clock_command_t));
   if (s_clock_commands == NULL) {
     ESP_LOGE(TAG, "Failed to allocate clock command queue");
     return;
@@ -494,6 +620,12 @@ void app_main(void)
 
   bool touch_ready = (input != NULL);
 
+  /* Audio owns its worker and lazy speaker setup. Start after BSP bus/display
+   * initialization; an unavailable speaker must not stop the clock or UI. */
+  esp_err_t audio_err = wac_audio_init();
+  if (audio_err != ESP_OK)
+    ESP_LOGW(TAG, "Audio startup returned %s", esp_err_to_name(audio_err));
+
   /* Gather owner data before entering the display lock. */
   static app_runtime_state_t startup_runtime;
   runtime_state_snapshot(&startup_runtime, &config);
@@ -509,6 +641,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_lv_adapter_set_touch_callbacks(input, &callbacks));
   }
   app_ui_set_clock_warning_dismiss_handler(request_clock_warning_dismiss);
+  app_ui_set_alarm_action_handler(request_alarm_action);
   ESP_ERROR_CHECK(app_ui_show_boot_screen(&config, &startup_runtime, touch_ready));
   bsp_display_unlock();
 

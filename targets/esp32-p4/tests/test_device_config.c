@@ -42,16 +42,21 @@ static device_config_t device_edit(device_config_t value)
   strcpy(value.room_name, "Bedroom");
   strcpy(value.wifi_ssid, "Home network");
   strcpy(value.wifi_password, "example-password");
-  strcpy(value.default_clock_face, "analog");
-  strcpy(value.time_format, "24");
-  value.leading_zero_12h = true;
   value.night_shift_mode = DEVICE_CONFIG_NIGHT_SOLAR;
   strcpy(value.night_shift_start, "21:30");
   strcpy(value.night_shift_end, "07:30");
   value.night_sunset_offset_minutes = -30;
   value.night_sunrise_offset_minutes = 45;
+  return value;
+}
+
+static device_config_t display_edit(device_config_t value)
+{
+  strcpy(value.default_clock_face, "analog");
+  strcpy(value.time_format, "24");
+  value.leading_zero_12h = true;
   value.day_brightness = 90;
-  value.night_brightness = 30;
+  value.night_brightness = 40;
   return value;
 }
 
@@ -61,7 +66,7 @@ static device_config_t alarm_edit(device_config_t value)
   value.alarm_hour = 6;
   value.alarm_minute = 30;
   value.alarm_repeat_days = 0x7f;
-  value.alarm_sound = DEVICE_CONFIG_ALARM_GENTLE_CHIME;
+  value.alarm_sound = DEVICE_CONFIG_ALARM_CLASSIC_BELL;
   value.alarm_volume = 75;
   value.alarm_snooze_minutes = 15;
   return value;
@@ -182,12 +187,12 @@ static void test_editor_merges_and_readiness(void)
   assert(!strcmp(applied.location, weather.location) && !strcmp(applied.units, "metric"));
   assert(!strcmp(applied.room_name, "Bedroom") && applied.wifi_ready && applied.location_ready);
 
-  /* An older Device editor changes only its room name, after a newer Device
-   * editor has saved brightness. Its unchanged brightness must stay current. */
+  /* An older Device editor changes only its room name, after Display
+   * has saved brightness. Its unchanged brightness must stay current. */
   base = applied;
   device = base;
   device.day_brightness = 70;
-  assert(device_config_save_device(&base, &device) == ESP_OK);
+  assert(device_config_save_display(&base, &device) == ESP_OK);
   device = base;
   strcpy(device.room_name, "Guest room");
   device.alarm_hour = 23; /* Not part of this editor. */
@@ -198,7 +203,7 @@ static void test_editor_merges_and_readiness(void)
   assert(!strcmp(applied.units, "metric") && !strcmp(applied.room_name, "Guest room"));
   fake_nvs_clear_activity();
   assert(device_config_save_device(&base, &base) == ESP_OK);
-  assert(fake_nvs_calls(FAKE_SET) == 15 && fake_nvs_calls(FAKE_COMMIT) == 1);
+  assert(fake_nvs_calls(FAKE_SET) == 10 && fake_nvs_calls(FAKE_COMMIT) == 1);
   assert(device_config_set_alarm_enabled(false) == ESP_OK);
   applied = current();
   assert(!applied.alarm_enabled && applied.alarm_hour == 6 && applied.day_brightness == 70);
@@ -209,6 +214,105 @@ static void test_editor_merges_and_readiness(void)
   assert(fake_nvs_calls(FAKE_SET) == 0);
   assert(device_config_save_device(NULL, &base) == ESP_ERR_INVALID_ARG);
   assert(device_config_save_alarm(&base, NULL) == ESP_ERR_INVALID_ARG);
+}
+
+static void test_display_scope_and_latest_choices(void)
+{
+  device_config_t base = fresh(), device = device_edit(base);
+  device_config_t display = display_edit(base), alarm = alarm_edit(base);
+  device_config_t weather = resolved(base);
+  assert(device_config_save_device(&base, &device) == ESP_OK);
+  assert(device_config_save_alarm(&base, &alarm) == ESP_OK);
+  assert(device_config_save_weather(&base, &weather) == ESP_OK);
+  device_config_t before = current();
+  /* A real Display editor can coexist with incomplete Device edits. These
+   * deliberately invalid pending choices must remain unsubmitted. */
+  display.room_name[0] = display.device_id[0] = 0;
+  strcpy(display.message_sharing, "unknown");
+  strcpy(display.wifi_ssid, "Unsubmitted network");
+  strcpy(display.wifi_password, "Unsubmitted password");
+  display.night_shift_mode = (device_config_night_mode_t) 9;
+  display.alarm_hour = 24;
+  strcpy(display.timezone, "auto");
+  assert(device_config_validate(&display) == ESP_ERR_INVALID_ARG);
+  fake_nvs_clear_activity();
+  assert(device_config_save_display(&base, &display) == ESP_OK);
+  assert(fake_nvs_calls(FAKE_SET) == 5 && fake_nvs_calls(FAKE_COMMIT) == 1);
+  device_config_t applied = current(), expected = display_edit(before);
+  assert_same(&expected, &applied);
+  assert(applied.wifi_ready && applied.location_ready);
+  /* Unchanged fields in an older Display draft preserve newer Display choices. */
+  base = applied;
+  display = base;
+  display.day_brightness = 65;
+  assert(device_config_save_display(&base, &display) == ESP_OK);
+  display = base;
+  strcpy(display.time_format, "12");
+  assert(device_config_save_display(&base, &display) == ESP_OK);
+  applied = current();
+  assert(applied.day_brightness == 65 && !strcmp(applied.time_format, "12"));
+  /* Device Save cannot apply even valid Display changes from its shared draft. */
+  device = display_edit(applied);
+  device.day_brightness = 100;
+  strcpy(device.room_name, "Office");
+  assert(device_config_save_device(&applied, &device) == ESP_OK);
+  expected = applied;
+  strcpy(expected.room_name, "Office");
+  applied = current();
+  assert_same(&expected, &applied);
+  assert(device_config_save_display(NULL, &display) == ESP_ERR_INVALID_ARG);
+  assert(device_config_save_display(&base, NULL) == ESP_ERR_INVALID_ARG);
+}
+
+static void test_display_invalid_choices_and_retry(void)
+{
+  device_config_t base = fresh(), draft;
+  fake_nvs_clear_activity();
+#define REJECT_DISPLAY(change) do { \
+  draft = base; change; \
+  assert(device_config_save_display(&base, &draft) == ESP_ERR_INVALID_ARG); \
+} while (0)
+  REJECT_DISPLAY(strcpy(draft.default_clock_face, "calendar"));
+  REJECT_DISPLAY(strcpy(draft.time_format, "13"));
+  REJECT_DISPLAY(draft.day_brightness = 19);
+  REJECT_DISPLAY(draft.day_brightness = 101);
+  REJECT_DISPLAY(draft.night_brightness = 19);
+  REJECT_DISPLAY(draft.night_brightness = 101);
+#undef REJECT_DISPLAY
+  device_config_t applied = current();
+  assert_same(&base, &applied);
+  assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+  /* Every ordinary returned storage failure keeps the running settings.
+   * Retrying the retained draft rewrites all five keys and repairs partial
+   * storage; the fake store permits individual writes before commit. */
+  const fake_op_t failures[] = {FAKE_OPEN, FAKE_SET, FAKE_COMMIT};
+  for (unsigned kind = 0; kind < 3; ++kind) {
+    unsigned attempts = failures[kind] == FAKE_SET ? 5 : 1;
+    for (unsigned failure = 1; failure <= attempts; ++failure) {
+      base = fresh();
+      draft = display_edit(base);
+      fake_nvs_clear_activity();
+      fake_nvs_fail(failures[kind], failure);
+      assert(device_config_save_display(&base, &draft) == ESP_FAIL);
+      applied = current();
+      assert_same(&base, &applied);
+      /* An unrelated immediate toggle after failure must survive retry. */
+      fake_nvs_clear_activity();
+      assert(device_config_set_alarm_enabled(true) == ESP_OK);
+      fake_nvs_clear_activity();
+      assert(device_config_save_display(&base, &draft) == ESP_OK);
+      assert(fake_nvs_calls(FAKE_SET) == 5 && fake_nvs_calls(FAKE_COMMIT) == 1);
+      applied = current();
+      device_config_t expected = display_edit(base);
+      expected.alarm_enabled = true;
+      assert_same(&expected, &applied);
+      fake_nvs_clear_activity();
+      assert(device_config_init() == ESP_OK);
+      applied = current();
+      assert_same(&expected, &applied);
+      assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+    }
+  }
 }
 
 static void test_rejected_saves_keep_applied_choices(void)
@@ -264,7 +368,7 @@ static void test_save_failures(save_fn save, device_config_t (*edit)(device_conf
        * save while first-use setup is waiting for a corrected location. */
       draft = applied;
       draft.day_brightness = 75;
-      assert(device_config_save_device(&applied, &draft) == ESP_OK);
+      assert(device_config_save_display(&applied, &draft) == ESP_OK);
       device_config_t with_device = current();
       assert(!strcmp(with_device.location, applied.location));
       assert(!strcmp(with_device.latitude, applied.latitude));
@@ -436,10 +540,10 @@ static void test_brightness_save_limits(void)
   device_config_t base = fresh(), draft = base;
   fake_nvs_clear_activity();
   draft.day_brightness = 19;
-  assert(device_config_save_device(&base, &draft) == ESP_ERR_INVALID_ARG);
+  assert(device_config_save_display(&base, &draft) == ESP_ERR_INVALID_ARG);
   draft = base;
   draft.night_brightness = 19;
-  assert(device_config_save_device(&base, &draft) == ESP_ERR_INVALID_ARG);
+  assert(device_config_save_display(&base, &draft) == ESP_ERR_INVALID_ARG);
   device_config_t applied = current();
   assert_same(&base, &applied);
   assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
@@ -448,7 +552,7 @@ static void test_brightness_save_limits(void)
     base = current();
     draft = base;
     draft.day_brightness = draft.night_brightness = endpoints[i];
-    assert(device_config_save_device(&base, &draft) == ESP_OK);
+    assert(device_config_save_display(&base, &draft) == ESP_OK);
     assert(device_config_init() == ESP_OK);
     applied = current();
     assert(applied.day_brightness == endpoints[i]
@@ -493,17 +597,18 @@ static void test_shared_identity_partial_saves(void)
 static void test_unchanged_saves_write_only_selected_group(void)
 {
   const char *device_keys[] = {"msg_share", "device_id", "room_name", "wifi_ssid", "wifi_pass",
-    "clock_face", "time_fmt", "night_st", "night_end", "lead_zero", "night_mode",
-    "sunset_offset", "sunrise_offset", "day_brightness", "night_bright"};
+    "night_st", "night_end", "night_mode", "sunset_offset", "sunrise_offset"};
+  const char *display_keys[] = {"clock_face", "time_fmt", "lead_zero", "day_brightness", "night_bright"};
   const char *weather_keys[] = {"location", "timezone", "units", "lat", "lon"};
   const char *alarm_keys[] = {"alarm_enabled", "alarm_hour", "alarm_minute", "alarm_days",
     "alarm_sound", "alarm_volume", "alarm_snooze"};
   const char *toggle_keys[] = {"alarm_enabled"};
-  const char **groups[] = {device_keys, weather_keys, alarm_keys, toggle_keys};
+  const char **groups[] = {device_keys, display_keys, weather_keys, alarm_keys, toggle_keys};
   const unsigned counts[] = {sizeof(device_keys) / sizeof(device_keys[0]),
+    sizeof(display_keys) / sizeof(display_keys[0]),
     sizeof(weather_keys) / sizeof(weather_keys[0]), sizeof(alarm_keys) / sizeof(alarm_keys[0]), 1};
-  save_fn saves[] = {device_config_save_device, device_config_save_weather, device_config_save_alarm};
-  for (unsigned group = 0; group < 4; ++group) {
+  save_fn saves[] = {device_config_save_device, device_config_save_display, device_config_save_weather, device_config_save_alarm};
+  for (unsigned group = 0; group < 5; ++group) {
     device_config_t base = fresh(), weather = resolved(base);
     assert(device_config_save_weather(&base, &weather) == ESP_OK);
     base = current();
@@ -513,7 +618,7 @@ static void test_unchanged_saves_write_only_selected_group(void)
      * constructed isolation check, not a normal saved configuration. */
     for (unsigned i = 0; i < keys; ++i) fake_nvs_put_str(fake_nvs_key(i), "untouched marker");
     fake_nvs_clear_activity();
-    if (group < 3) assert(saves[group](&base, &base) == ESP_OK);
+    if (group < 4) assert(saves[group](&base, &base) == ESP_OK);
     else assert(device_config_set_alarm_enabled(base.alarm_enabled) == ESP_OK);
     assert(fake_nvs_calls(FAKE_SET) == counts[group]);
     assert(fake_nvs_calls(FAKE_COMMIT) == 1);
@@ -546,10 +651,10 @@ static void test_corrected_retry_repairs_partial_shared_mode(void)
   draft = base;
   strcpy(draft.device_id, "guest-clock");
   strcpy(draft.message_sharing, "shared");
-  strcpy(draft.default_clock_face, "analog");
+  strcpy(draft.night_shift_start, "21:30");
   fake_nvs_clear_activity();
-  /* Shared mode is the fifth write, after its valid custom ID. The face
-   * write then fails, leaving stored Shared mode but applied Single mode. */
+  /* Shared mode is the fifth write, after its valid custom ID. The night
+   * schedule write then fails, leaving stored Shared mode but applied Single mode. */
   fake_nvs_fail(FAKE_SET, 6);
   assert(device_config_save_device(&base, &draft) == ESP_FAIL);
   device_config_t applied = current();
@@ -570,7 +675,7 @@ static void test_corrected_retry_repairs_partial_shared_mode(void)
   applied = current();
   assert(!strcmp(applied.message_sharing, "single"));
   assert(!strcmp(applied.device_id, "clock-esp32-p4"));
-  assert(!strcmp(applied.default_clock_face, "analog"));
+  assert(!strcmp(applied.night_shift_start, "21:30"));
   fake_nvs_clear_activity();
   assert(device_config_init() == ESP_OK);
   device_config_t restarted = current();
@@ -635,6 +740,7 @@ static void test_immediate_alarm_toggle_failures(void)
 typedef struct {
   device_config_t baseline, draft, copied;
   bool copy, started, done;
+  save_fn save;
   esp_err_t result;
   pthread_mutex_t lock;
   pthread_cond_t condition;
@@ -648,7 +754,7 @@ static void *run_worker(void *arg)
   pthread_cond_broadcast(&work->condition);
   pthread_mutex_unlock(&work->lock);
   work->result = work->copy ? device_config_copy(&work->copied)
-    : device_config_save_device(&work->baseline, &work->draft);
+    : work->save(&work->baseline, &work->draft);
   pthread_mutex_lock(&work->lock);
   work->done = true;
   pthread_cond_broadcast(&work->condition);
@@ -674,38 +780,59 @@ static bool wait_worker(worker_t *work, bool done, long milliseconds)
 
 static void test_slow_save_readers_and_serialized_writers(void)
 {
-  device_config_t base = fresh();
-  worker_t first = {.baseline = base, .draft = base,
-    .lock = PTHREAD_MUTEX_INITIALIZER, .condition = PTHREAD_COND_INITIALIZER};
-  worker_t second = {.baseline = base, .draft = base,
-    .lock = PTHREAD_MUTEX_INITIALIZER, .condition = PTHREAD_COND_INITIALIZER};
-  worker_t reader = {.copy = true,
-    .lock = PTHREAD_MUTEX_INITIALIZER, .condition = PTHREAD_COND_INITIALIZER};
-  strcpy(first.draft.room_name, "Bedroom");
-  second.draft.day_brightness = 65;
-  pthread_t first_thread, second_thread, reader_thread;
-  fake_nvs_clear_activity();
-  fake_nvs_block_next_set();
-  assert(pthread_create(&first_thread, NULL, run_worker, &first) == 0);
-  assert(fake_nvs_wait_blocked());
-  assert(pthread_create(&reader_thread, NULL, run_worker, &reader) == 0);
-  assert(wait_worker(&reader, true, 500));
-  assert(reader.result == ESP_OK);
-  assert_same(&reader.copied, &base);
-  assert(pthread_create(&second_thread, NULL, run_worker, &second) == 0);
-  assert(wait_worker(&second, false, 500));
-  assert(!wait_worker(&second, true, 100));
-  assert(fake_nvs_calls(FAKE_OPEN) == 1);
-  fake_nvs_release_set();
-  assert(pthread_join(first_thread, NULL) == 0);
-  assert(pthread_join(second_thread, NULL) == 0);
-  assert(pthread_join(reader_thread, NULL) == 0);
-  assert(first.result == ESP_OK && second.result == ESP_OK);
-  device_config_t applied = current();
-  assert(!strcmp(applied.room_name, "Bedroom") && applied.day_brightness == 65);
-  pthread_mutex_destroy(&first.lock); pthread_cond_destroy(&first.condition);
-  pthread_mutex_destroy(&second.lock); pthread_cond_destroy(&second.condition);
-  pthread_mutex_destroy(&reader.lock); pthread_cond_destroy(&reader.condition);
+  for (unsigned pairing = 0; pairing < 3; ++pairing) {
+    device_config_t base = fresh();
+    worker_t first = {.baseline = base, .draft = base, .save = device_config_save_device,
+      .lock = PTHREAD_MUTEX_INITIALIZER, .condition = PTHREAD_COND_INITIALIZER};
+    worker_t second = {.baseline = base, .draft = base, .save = device_config_save_display,
+      .lock = PTHREAD_MUTEX_INITIALIZER, .condition = PTHREAD_COND_INITIALIZER};
+    worker_t reader = {.copy = true,
+      .lock = PTHREAD_MUTEX_INITIALIZER, .condition = PTHREAD_COND_INITIALIZER};
+    if (pairing == 0) {
+      strcpy(first.draft.room_name, "Bedroom");
+      second.draft.day_brightness = 65;
+    } else {
+      first.save = device_config_save_display;
+      first.draft.day_brightness = 65;
+      if (pairing == 1) {
+        second.save = device_config_save_alarm;
+        second.draft = alarm_edit(base);
+      } else {
+        /* Two Display editors based on the same applied copy can save separate
+         * controls without restoring the other's unchanged baseline fields. */
+        strcpy(second.draft.time_format, "24");
+      }
+    }
+    pthread_t first_thread, second_thread, reader_thread;
+    fake_nvs_clear_activity();
+    fake_nvs_block_next_set();
+    assert(pthread_create(&first_thread, NULL, run_worker, &first) == 0);
+    assert(fake_nvs_wait_blocked());
+    assert(pthread_create(&reader_thread, NULL, run_worker, &reader) == 0);
+    assert(wait_worker(&reader, true, 500));
+    assert(reader.result == ESP_OK);
+    assert_same(&reader.copied, &base);
+    assert(pthread_create(&second_thread, NULL, run_worker, &second) == 0);
+    assert(wait_worker(&second, false, 500));
+    assert(!wait_worker(&second, true, 100));
+    assert(fake_nvs_calls(FAKE_OPEN) == 1);
+    fake_nvs_release_set();
+    assert(pthread_join(first_thread, NULL) == 0);
+    assert(pthread_join(second_thread, NULL) == 0);
+    assert(pthread_join(reader_thread, NULL) == 0);
+    assert(first.result == ESP_OK && second.result == ESP_OK);
+    device_config_t applied = current();
+    assert(applied.day_brightness == 65);
+    if (pairing == 0) assert(!strcmp(applied.room_name, "Bedroom"));
+    else if (pairing == 1) assert(applied.alarm_enabled && applied.alarm_hour == 6
+      && applied.alarm_sound == DEVICE_CONFIG_ALARM_CLASSIC_BELL);
+    else assert(!strcmp(applied.time_format, "24"));
+    assert(fake_nvs_calls(FAKE_SET) == (pairing == 0 ? 15u : pairing == 1 ? 12u : 10u));
+    assert(fake_nvs_calls(FAKE_COMMIT) == 2);
+    pthread_mutex_destroy(&first.lock); pthread_cond_destroy(&first.condition);
+    pthread_mutex_destroy(&second.lock); pthread_cond_destroy(&second.condition);
+    pthread_mutex_destroy(&reader.lock); pthread_cond_destroy(&reader.condition);
+  }
 }
 
 int main(void)
@@ -714,11 +841,15 @@ int main(void)
   device_config_set_defaults(&not_started);
   assert(device_config_copy(&not_started) == ESP_ERR_INVALID_STATE);
   assert(device_config_set_alarm_enabled(true) == ESP_ERR_INVALID_STATE);
+  assert(device_config_save_display(&not_started, &not_started) == ESP_ERR_INVALID_STATE);
   test_defaults_and_read_only_copies();
   test_validation();
   test_editor_merges_and_readiness();
+  test_display_scope_and_latest_choices();
+  test_display_invalid_choices_and_retry();
   test_rejected_saves_keep_applied_choices();
   test_save_failures(device_config_save_device, device_edit);
+  test_save_failures(device_config_save_display, display_edit);
   test_save_failures(device_config_save_weather, resolved);
   test_save_failures(device_config_save_alarm, alarm_edit);
   test_startup_failures_and_missing_keys();

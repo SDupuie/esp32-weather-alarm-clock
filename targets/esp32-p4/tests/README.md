@@ -30,7 +30,7 @@ compiler for this run:
 CC=/Library/Developer/CommandLineTools/usr/bin/clang targets/esp32-p4/scripts/test-weather-parity.sh
 ```
 
-## Settings, time, backup clock, Night Shift, connectivity and UI controls
+## Settings, time, backup clock, alarms, Night Shift, connectivity and UI controls
 
 ```bash
 cmake -S targets/esp32-p4/tests -B /tmp/esp32-p4-native-tests
@@ -40,14 +40,17 @@ ctest --test-dir /tmp/esp32-p4-native-tests --output-on-failure
 
 Managed dependencies must already be available from a normal firmware build.
 The UI targets use the existing managed LVGL library with a native configuration.
-The CMake suite contains settings, time, Night Shift, settings-control, UI-shell,
+The CMake suite contains settings, time, alarm-calendar, alarm-recovery, alarm-command, audio, Night Shift, solar-event, settings-control, UI-shell,
 weather-service, connectivity and touchscreen-recovery targets.
 
 The settings tests compile `main/device_config.c` with typed NVS substitutes and
 ordinary thread locks. They cover defaults, validation, editor changes merged
 into current settings, full selected-group saves, failure/corrected-retry reads,
 missing keys, returned storage errors, accepted partial saves and readers during
-a blocked save. Brightness checks cover the 20–100% range, Day/Night defaults,
+a blocked save. Display writes its five existing entries; Device writes its ten
+remaining entries. Checks cover unchanged-group writes, invalid unrelated drafts,
+older drafts preserving newer unchanged fields, concurrent writers, every Display
+write failure, retained-draft retries and partial-store reloads. Brightness checks cover the 20–100% range, Day/Night defaults,
 rejected saves below the minimum, successful endpoint saves and reloads, and
 loading low stored values at 20% only in memory. They verify unchanged stored
 values and unrelated settings, no startup rewrite, and preserved read-error handling.
@@ -67,10 +70,114 @@ network-completion counts; they do not perform real network synchronization or
 change the development computer's clock. No user-settings writes occur in these
 checks.
 
-Night Shift checks compile production `main/night.c`. They cover
-Off/Always On/Fixed Schedule decisions, equal endpoints, ranges across midnight,
-local timezone rules, saved startup fallback and retention while time is
-unavailable. Typed storage substitutes check that only effective appearance
+Alarm-calendar checks compile production `main/alarm_schedule.c` and compare
+36 explicit UTC/date cases, including repeat masks, equality, date boundaries,
+spring/fall changes and a half-hour daylight-saving transition. Expectations
+are stated UTC times rather than a second copy of the production conversion.
+The calculator uses the timezone already applied by the time owner; it does
+not change timezone, settings or operating state.
+
+Alarm-recovery checks compile production `main/alarm.c` with that calculator
+and ordinary native NVS substitutes. They exercise the
+[approved alarm recovery rules](../../../docs/architecture.md#alarm-and-snooze):
+usable-time gating, catch-up endpoints, future/overdue snooze, repeated snooze
+and restart during resumed ringing, saved dismissal, backward suppression and
+one pending missed notice. Returned read/write/commit failures and blocked writes
+check error reporting and immediate copied in-memory action state without
+settings rewrites or tick-based storage retries. These are controlled test
+examples, not physical power-cut evidence. Off checks exercise cancellation of
+ringing and snooze, including a restored snooze without usable time, preserved
+configuration/missed notice, failed cancellation saves, restart suppression and
+copied canceled state while a save is blocked. Runtime-enable checks cover late
+and within-window enabling without a retroactive ring/notice, before-due and
+exact-due enabling, deferred usable time, backward suppression, preserved pending
+notices and no arming storage writes. Runtime schedule-edit checks cover hour,
+minute and repeat-day changes separately and together, future/recently-past
+occurrences, before/exact due time, deferred usable time, preserved captured
+ringing/snooze and missed notices, and unchanged/sound/volume/snooze-only updates.
+They reconstruct the reported false Saturday notice without claiming a new
+board observation. Separate already-On startup/restart cases retain the approved
+catch-up behavior after an edit.
+The clock-task connection is compiled by the firmware build and reviewed from
+source. Speaker output and physical alarm operation remain board checks; this
+suite does not establish them.
+
+Alarm-command checks reuse `test_alarm.c` with the actual private command/result
+helpers extracted from `main.c` at native configure time. A copied two-entry
+queue substitute checks submission without storage work, queue-full failure,
+warning compatibility, captured occurrence identity and rejection of stale taps.
+The real owner checks Snooze, Dismiss and missed-notice actions, including
+failed operating-record writes whose live action still applies. Completion is
+retained and consumed once; reading the owner's current state after delivery
+preserves a resumed or later alarm. The full clock task and heartbeat are not
+executed here; their delivery order and short copied read are source-reviewed
+and compiled in the firmware build.
+
+Audio checks execute the actual private worker and shared generator from
+`main/audio.c`, included by the approved `test_audio.c`, without firmware testing
+hooks. Queue/task, codec, configuration and alarm inputs are substituted. Nine
+fresh-process cases cover patterns, playback and queue/task/BSP/open/volume/write/
+close failures. Independent silence/cadence, spectral separation, PCM bounds,
+zero/arbitrary volume and ramp points supplement exact helper/envelope checks;
+those helper comparisons alone are not independent waveform proof. The optimized
+Classic Beep and Rising Tones generators are also compared against the original
+double equations across all five seconds, four volume values and three ringing
+ramp levels. Differences
+must stay within two PCM counts, apart from narrowly checked isolated square
+zero crossings. Matching phases remain sample-identical after hours/days of
+ringing, including chunks that cross a pattern boundary. Classic Bell checks
+independently cover its rapid attack, two inharmonic pitch groups, alternating
+21-strike-per-second cadence and overlapping decays. Actual chunks cover reset,
+continuity, large integer sample positions, output/volume/ramp bounds and fresh
+preview, sound-switch and resumed-ring state. These checks supplement listening
+and board timing; they do not establish them. A gated
+worker thread checks hardware operations outside caller/snapshot locks, lazy
+one-time BSP creation, retained handle reopening, copied latest commands,
+five seconds of PCM/time, Stop and ring priority during slow setup, cancellation
+between writes, and new/resumed-ring gain restart. A failed request does not
+repeatedly recreate the BSP or retry a still-ringing occurrence. The real alarm
+owner's separate blocked-save checks establish that its live canceled/snoozed
+phase is published before storage returns; audio tests consume controlled copies
+of that phase rather than executing actual NVS in their worker.
+
+Actual LVGL pointer checks cover copied unsaved sound/volume, Start/Stop,
+Day/Night geometry and icon/text alignment, completion/error/readiness updates
+in place, selection/navigation/close/hide cancellation, and draft preservation
+through ringing. A stale heartbeat does not prevent cancellation; a ring-masked
+inactive flag still causes a definite Stop on hide. Preview never saves settings
+or performs codec operations under the display lock. Audio failures use the
+existing ringing footer after action/storage errors.
+
+The native task substitute checks valid allocation arguments; it does not allocate or measure an ESP32-P4 task stack. Hardware stack results belong in the [work record](../../../docs/work.md).
+
+The final firmware build verifies the public codec integration and BSP returned-
+error configuration. These checks do not establish physical output, loudness,
+muting, clicks/reopen quality or every hidden register failure. The installed
+write API retains its fixed 1000ms wait; short chunks do not guarantee that all
+hardware faults cancel sooner. The generator uses single-precision calculations
+and integer pattern timing. Real synthesis time, continuity during weather/RTC
+work and stack headroom require board measurements; current results are recorded
+in the work record.
+
+Solar-event checks compile production `main/solar_times.c` without board facilities.
+Seven dated US Naval Observatory reference cases cover seasons, hemispheres,
+leap day, the date line and a year boundary, with a two-minute tolerance.
+The tests also check invalid coordinates, polar no-event results, complete UTC
+event dates and independence from the process timezone. Reference URLs are
+recorded beside the fixtures in `test_solar_times.c`; these are calculated
+reference comparisons, not observed sunrise/sunset measurements. High-latitude
+season transitions and unusual atmospheric or horizon conditions are not
+established by these fixtures.
+
+Night Shift checks compile production `main/night.c` with the real solar calculator.
+They cover Off/Always On/Fixed Schedule decisions, equal fixed endpoints, ranges
+across midnight, and Sunset to Sunrise's exact start/end boundaries. Solar cases
+cover signed offsets, shifted midnight boundaries, offsets that remove a short
+night, daylight-saving transitions, local-date/location/timezone changes and
+backward clock corrections. Missing time/location and unavailable required events
+exercise saved startup fallback and running appearance retention. Copied Settings
+events remain raw and independent of the selected mode and saved offsets.
+Typed storage substitutes check that only effective appearance
 changes write the separate operating record, including failures and restart
 outcomes; settings are not rewritten. Substitute brightness calls and elapsed
 time check startup readiness, intermediate fade steps, changed targets, bounded
@@ -78,8 +185,8 @@ steps after a delay and retries from the last successful level when the BSP
 reports failure. Readers are checked while storage or backlight work is pending.
 Invalid schedules and returned failures are controlled test examples. The clock
 task/startup integration is reviewed from source and compiled by the firmware
-build; these native checks do not execute the full startup or task. Solar
-calculations and physical brightness/fades remain unverified.
+build; these native checks do not execute the full startup or task. Physical
+solar transitions, brightness/fades and the populated Settings page remain unverified.
 
 Connectivity checks compile production `main/connectivity.c` with native network,
 Wi-Fi driver and task substitutes. They exercise initialization shared by connecting
@@ -111,8 +218,8 @@ objects and events. It checks nested Done/Cancel, shared Wi-Fi drafts, deferred
 Save, duplicate blocking, validation, save failure/retry, resolved-location retry
 without Wi-Fi, immediate enable, stale completion handling, and character entry
 and editing through actual keyboard events. Every settings view is checked for
-keyboard allocation: only Device, Weather Location and Wi-Fi Credentials editors
-allocate one. Real pointer taps check all five text fields and reopening after
+keyboard allocation: only Device, Weather and Wi-Fi Credentials editors
+allocate one. Real pointer taps check all six text fields and reopening after
 hiding the keyboard. The mockup's four maps, key widths, gaps, style and keyboard
 box are checked against actual LVGL objects. Resolved screen coordinates verify
 round-panel fit and the active field above the keyboard. Pointer presses/releases
@@ -130,6 +237,12 @@ colors and resolved touch bounds. Actual pointer taps near the top/bottom of the
 48px touch area and held-pointer dragging check selection and live percentage
 updates. Brightness checks retain both endpoints, clamping a below-minimum
 selection to 20%, nested draft values and Cancel without saving.
+They open the Display row with pointer input and check its edited summary,
+both Back/Done return destinations, the blank Night Shift fourth slot and
+retained slider objects/values through alarm interruption. Display Cancel/Back
+discards its separate draft; Save writes only its five choices without restarting.
+Device Save & Restart cannot apply unsaved Display choices. Weather Back/Cancel
+retains pending Device edits, while Weather Save applies only its own group.
 
 The Settings Entry, Device Setup and Display checks compare actual LVGL row,
 heading, footer, switch and chevron boxes, typography, border/radius and
@@ -140,8 +253,23 @@ the applied Wi-Fi network from a new draft; font checks verify middle dot/en das
 and ordinary-character fallback. Save/Cancel, nested Done and first-use exit
 checks remain. These object checks do not establish physical pixel parity.
 
-Device, Weather Location and Network Details checks compare normal fields,
+Shared-header checks use the reviewed lower Back/title coordinates in both
+appearances, including Weather's single-line title. Pointer navigation
+checks that Device Setup's Weather entry opens that existing editor and returns
+normally; its save scope and behavior remain the same.
+
+Messaging, Weather and Network Details checks compare normal fields,
 labels, notes and footer boxes, and the complete temporary typing composition.
+Messaging checks cover its one-line heading, two label-over-value rows, the
+House Messages row and plain distinct-ID guidance in the fourth-row space in
+both appearances, using its retained 26px guidance font. They check
+vertical centering in the unused fourth row, clearance from the third row and
+Done, guidance hiding/restoration during typing, and normal error replacement in
+the same space.
+Actual pointer taps on labels, values, chevrons and row padding
+open the existing text editor; keyboard Close/Done restores the rows and draft
+values. Shared-mode validation still rejects the default ID. These object and
+event checks do not establish physical panel rendering or touch compliance.
 Closing restores inactive controls and unsaved values without saving. Missing
 Room/ID/location/network-name errors focus the correct field; Device Setup still
 permits no Wi-Fi profile. Actual substituted lookup/storage failures check concise
@@ -152,12 +280,40 @@ Generated curved keyboard masks and punctuation coverage are checked; the exact
 SVG paths come from the mockup's pinned Lucide source through existing artwork
 tools. These checks do not establish physical raster or touch compliance.
 
+Weather checks compare its four standard rows, whole-row location/key input,
+shared raised typing geometry across all six fields and all keyboard pages,
+and the single-line automatic-timezone note between the input and keyboard.
+They measure the note and real error bands using existing fonts, including
+glyph coverage, single-line fit and clearance from the first row or keyboard.
+Open-Meteo's Not required key row cannot open a keyboard; Visual Crossing's
+masked key and provider remain unsaved UI drafts. Pointer Save checks prove
+that unsupported selection cannot start a lookup, write settings or restart.
+Returning to Open-Meteo preserves ordinary location/units saving without a key.
+Cancel/Back discard the temporary fields, retained Device edits stay isolated,
+and alarm hiding/resumption preserves the existing Weather editor and its draft.
+These checks do not establish physical Day/Night readability or provider traffic.
+
 Nearby-network checks exercise real LVGL pointer scrolling beyond the first three
 rows, actual Open/Secured and dBm captions, scan loading/empty/error states,
 Refresh/Manual/Back behavior and stale completion handling. Weather checks cover
 actual pending lookup, retained resolved values after failed storage, concise
 lookup errors and saved values. Separate fresh-process invocations check Weather
 and credentials restart compositions without adding a production reset hook.
+The `settings_display_save` invocation checks Display success without restart,
+followed by the retained Device/Wi-Fi restart. Closed/replaced-editor Device
+success runs confirm that its submitted Save still restarts after its editor is
+gone. The UI-shell checks
+use real pointer Weather Save, ringing, Dismiss and Alarm Settings actions, then
+a controlled delayed lookup completion. Success saves the new timezone and
+shows the generic restart notice without restoring the Weather editor; failure
+keeps the newer editor usable without stale error text or restarting. A separate
+hidden-editor run keeps ringing visible while the existing 900ms restart fires.
+Duplicate Save remains blocked. These checks establish substituted timing and
+UI behavior, not physical reboot or provider latency.
+Display shell checks exercise a saved home/format change and manual navigation
+afterward, success while ringing hides the editor, Snooze countdown preservation,
+and success after the old editor is replaced. Old completion cannot replace a
+newer destination or draft; errors retain the owning Display draft for retry.
 Device Setup captions consume a substituted connectivity-owner phase and reject
 claims that a different draft network is connected. Connectivity tests exercise
 the production phase publication, returned connect failures and overlapping
@@ -187,12 +343,18 @@ immediate enabled-only writes, failed Save/retry and pending controls. Volume
 checks open the real Sound editor, use Done and save unrelated alarm edits while
 preserving stored 0/7/37 values. Actual pointer and keyboard input then checks
 five-point steps, 10–100% selections and label updates without rebuilding it.
-Preview is disabled until audio is implemented. Solar uses the applied location,
-unavailable event times and truthful appearance-retention guidance; offsets
-remain draft-only. These checks do not establish playback, solar calculations,
-physical touch or complete raster equality with a browser-native range control.
+Preview is enabled when its audio worker accepts requests; hardware readiness
+and returned failures use the existing caption/button. Solar uses the applied location
+and the Night owner's copied events. Checks cover available/unavailable layouts,
+12/24-hour labels, both appearance palettes and in-place event refreshes. Offset
+edits preview the displayed times without changing applied preferences or writing
+storage; runtime refreshes preserve an open offset editor. The display tests use
+controlled illustrative times, separately from the astronomy reference tests.
+These checks do not establish playback, physical touch or complete raster equality
+with a browser-native range control.
 
-The shell target compiles production `main/ui/ui.c`, `main/ui/clock_views.c` and
+The shell target compiles production `main/ui/ui.c`, `main/ui/clock_views.c`,
+`main/ui/weather_views.c` and
 the settings editor with real LVGL objects and events. It checks authoritative usable/unavailable time,
 backup-clock notice wording, layout and fonts, failed dismissal submission,
 duplicate blocking, owner acknowledgment and a different warning arriving while
@@ -215,6 +377,23 @@ visual parity or physical touch behavior. The main task's command queue is
 reviewed from source and compiled by the firmware build; the actual network-time
 callback is exercised by the connectivity checks.
 
+Leading Zero checks cover both saved 12-hour preferences and both appearances.
+The real row shows On/disabled in 24-hour mode, rejects pointer and directly
+delivered taps, and restores the current 12-hour draft when switching back.
+Cancel/Back discard changes; Save and ordinary configuration reload preserve
+the 12-hour preference under saved 24-hour mode. Existing geometry, palettes,
+five-entry Display saves and no-restart behavior remain checked. These checks
+establish LVGL controls and settings behavior, not physical touch or pixels.
+
+Conditions time-format checks use a provider payload with a matching current
+hour, so the actual decoder produces time-bearing captions. They verify both
+12/24-hour versions from one request and unchanged weather decisions. UI checks
+retain that weather across Display draft/Cancel, successful saves in both
+directions, stale/failed-refresh states and a download using the earlier format.
+Rendering selects the applied preference without another request or restart.
+These are controlled decoder and LVGL checks, not physical provider or board
+observations.
+
 Clock checks cover both configured faces, analog hand rotation, midnight/noon,
 12/24-hour and leading-zero formats, and recovery through unavailable Day/Night
 surfaces. Night digit size remains fixed across minute and AM/PM changes, with
@@ -224,7 +403,36 @@ face; returning to Day restores native font size and position. The existing
 controlled stalled-minute snapshots. Pointer gestures and one visible pair of
 message/weather edges are checked through unavailable time and recovery. These
 object checks do not establish the quality of the scaled raster font or physical
-rendering. The unavailable screen omits the still-unimplemented alarm controls.
+rendering. The unavailable screen includes the saved-alarm caption and the
+Alarm Settings shortcut, checked with actual pointer input.
+
+Alarm presentation checks compare Ringing and Snoozed objects against the
+approved Day/Night geometry, colors and typography, with real pointer presses
+on Snooze, Dismiss, missed notices and Alarm Settings. Captured schedule dates
+and times, countdown/deadline formatting, midnight, 12/24-hour and unavailable
+time, next/off/missed rows, warning priority and generated countdown glyphs are
+checked. Queue-full retry, duplicate blocking, mismatched completion, returned
+storage errors, configured-home return and stale completion after navigation
+or a new ring use fabricated owner publications. An unsaved active keyboard
+survives preemption and resumes; hidden lookup failure and explicit Alarm Save
+success cannot hide the ringing page or save an unsubmitted draft. Settings
+swipe resume and explicit Alarm-shortcut cancellation of an unrelated draft
+are checked separately. These tests establish LVGL object/event behavior,
+not actual alarm/task timing, hardware pixels, physical touch or audio. The
+Alarm editor previews its unsaved schedule through the real pure calendar calculator.
+Fifteen explicit dated cases check before/equal/after, repeat days, midnight/year
+boundaries, 12/24-hour formatting and the intended date/minute through spring/fall
+changes. Actual controls check draft time/day edits, Cancel without writes, Off,
+unavailable/usable RTC time, in-place heartbeat refresh without rebuilding an
+editor, and Save/progress/error priority. Alarm text keeps its existing unpadded
+12-hour formatter independently of the normal-clock Leading Zero choice.
+
+Normal clock alarm-notice checks include the reported `Tomorrow · 7:00 AM`
+caption and longer 12-hour, leading-zero and 24-hour captions in both appearances.
+They verify complete single-line text, icon/text containment and centering,
+unchanged fonts and touch areas, opening Alarm Settings, and retained missed-row
+padding. Actual fonts and LVGL layout are used; physical rendering remains a
+board check.
 
 Digital Night sizing additionally checks all 4,320 hour/minute/format combinations
 using actual LVGL objects. It verifies the selected nominal 250px formats and

@@ -7,13 +7,14 @@
 #include <string.h>
 #include <time.h>
 
-typedef enum { STRING, U8, I16 } value_type_t;
+typedef enum { STRING, U8, I16, BLOB } value_type_t;
 typedef struct {
   char namespace[16];
   char key[16];
   value_type_t type;
   char string[256];
   int number;
+  size_t blob_size;
 } entry_t;
 
 static entry_t entries[64];
@@ -198,6 +199,31 @@ esp_err_t nvs_set_str(nvs_handle_t handle, const char *key, const char *value)
   }
 NUMBER_ACCESSORS(u8, uint8_t, U8)
 NUMBER_ACCESSORS(i16, int16_t, I16)
+
+esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *value, size_t *size)
+{
+  assert(key && size);
+  esp_err_t error = operation(FAKE_READ);
+  if (error != ESP_OK) return error;
+  entry_t *entry = find(namespace_for(handle), key);
+  if (!entry) return ESP_ERR_NVS_NOT_FOUND;
+  if (entry->type != BLOB) return ESP_ERR_NVS_TYPE_MISMATCH;
+  size_t needed = entry->blob_size;
+  if (value && *size < needed) { *size = needed; return ESP_ERR_NVS_INVALID_LENGTH; }
+  *size = needed;
+  if (value) memcpy(value, entry->string, needed);
+  return ESP_OK;
+}
+esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value, size_t size)
+{
+  assert(key && value && size <= sizeof(entries[0].string));
+  esp_err_t error = operation(FAKE_SET);
+  if (error != ESP_OK) return error;
+  entry_t *entry = put(namespace_for(handle), key, BLOB);
+  memcpy(entry->string, value, size);
+  entry->blob_size = size;
+  return ESP_OK;
+}
 
 SemaphoreHandle_t xSemaphoreCreateMutex(void)
 {

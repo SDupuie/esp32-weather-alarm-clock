@@ -2,13 +2,7 @@
 
 This target is the native firmware path for the Waveshare `ESP32-P4-WIFI6-Touch-LCD-3.4C` board family.
 
-The [architecture and product specification](../../docs/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. See the root [implementation status](../../README.md) for implemented and unfinished features, and [current development work](../../docs/work.md) for completed slices and exact verification limits.
-
-The loaded firmware includes the eleven approved screen-walkthrough changes. All 17 native checks and the ESP-IDF 5.5.5 build pass, with 24% application partition free; all three written images are verified and the running identity matches. A 35-second startup capture shows display/touch initialization and live-weather retrieval without a panic or touch-read failure. The earlier settings-menu basic board pass remains closed. The user confirms Digital Day label fit/readability and Digital/Conditions divider visibility/readability. Exact physical screen appearance, exceptional states and broader persistence/hardware verification remain pending; see the current work record for the limits.
-
-The subsequent Digital Night size build passes all 17 native checks and the ESP-IDF 5.5.5 build, retaining 24% application partition free. It is now loaded with all three written images verified and its running identity matched. A 35-second restarted capture shows display/touch initialization and live-weather retrieval without a panic or touch-read failure. The user subsequently confirms both selected Night formats fit and remain readable. These prompted checks do not establish every displayed time, exact mockup appearance or long-term stability. See [current development work](../../docs/work.md) for the follow-up and brightness-recovery status.
-
-The later Forecast centering follow-up passes all 17 native checks and the firmware build, with 24% application partition free. It is now loaded, with all three written images verified and the running identity matched. A 35-second restarted capture shows display/touch initialization and live-weather retrieval without a panic or touch-read failure. The user confirms the four daily columns look centered and unclipped; exact pixels, both appearances and longer operation remain unverified. See [current development work](../../docs/work.md) for the physical-check limits.
+The [architecture and product specification](../../docs/architecture.md) defines approved behavior, defaults, the visual reference and source ownership. The root [README](../../README.md) covers hardware, setup and using the clock. Development status, completed work, test and flash records, and remaining verification are kept in [docs/work.md](../../docs/work.md).
 
 ## Prepare the environment (no board needed)
 
@@ -28,6 +22,8 @@ Run from the repository root after activation:
 ```bash
 targets/esp32-p4/scripts/build.sh
 ```
+
+The checked-in configuration uses the BSP's returned-error option so speaker setup failures can be reported without its optional whole-device abort. This also affects checked display/touch/bus/backlight failures; it is not a promise that every board failure is recoverable. Healthy paths and the standard touch/display setup are preserved.
 
 The checked-in configuration selects ESP32-P4. Use `scripts/set-target.sh` only when intentionally resetting the target configuration. See [test instructions](tests/README.md) for native checks.
 
@@ -90,16 +86,24 @@ One `main` component holds the application, grouped by function. UI files use `m
   Public UI interface, retained clock/weather/message rendering and settings draft editors
 - `main/ui/clock_views.c`
   Private clock, unavailable-time, status and backup-notice drawing objects; `ui.c` retains navigation and notice actions
+- `main/ui/weather_views.c`
+  Private Forecast, Conditions, message and weather-status drawing objects; `ui.c` retains navigation, display snapshots and message-dismissal decisions
 - `main/connectivity.*`
   WiFi station connect, scanning, and time sync
 - `main/device_config.*`
   Applied settings, validation and typed NVS saves
 - `main/clock_time.*`
   Time source/trust, system timezone application, RTC correction and in-memory warnings
+- `main/alarm.*`
+  Live alarm decisions, snooze/dismissal/missed-notice recovery and the separate operating record
+- `main/alarm_schedule.*`
+  Stateless recurring-occurrence and daylight-saving calculations using the applied system timezone
 - `main/ds3231.*`
   DS3231 register access using the existing board I2C bus; UTC dates from 2000 through 2099
 - `main/night.*`
-  Off/Always On/Fixed Schedule appearance, remembered startup fallback and gradual configured backlight changes; solar calculations remain pending
+  Off/Always On/Fixed Schedule/Sunset to Sunrise appearance, private adjacent-day solar cache, copied Settings times, remembered startup fallback and gradual configured backlight changes
+- `main/solar_times.*`
+  Pure local sunrise/sunset calculation returning complete UTC event dates or unavailable results
 - `main/location_lookup.*`
   On-device Open-Meteo geocoding for the setup UI
 - `main/message_service.*`

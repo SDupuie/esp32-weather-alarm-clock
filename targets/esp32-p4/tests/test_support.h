@@ -30,8 +30,11 @@ esp_err_t nvs_get_u8(nvs_handle_t, const char *, uint8_t *);
 esp_err_t nvs_set_u8(nvs_handle_t, const char *, uint8_t);
 esp_err_t nvs_get_i16(nvs_handle_t, const char *, int16_t *);
 esp_err_t nvs_set_i16(nvs_handle_t, const char *, int16_t);
+esp_err_t nvs_get_blob(nvs_handle_t, const char *, void *, size_t *);
+esp_err_t nvs_set_blob(nvs_handle_t, const char *, const void *, size_t);
 
 typedef int BaseType_t;
+typedef unsigned UBaseType_t;
 typedef unsigned TickType_t;
 typedef pthread_mutex_t *SemaphoreHandle_t;
 typedef pthread_mutex_t StaticSemaphore_t;
@@ -50,12 +53,34 @@ typedef pthread_mutex_t portMUX_TYPE;
 #define portMUX_INITIALIZER_UNLOCKED PTHREAD_MUTEX_INITIALIZER
 #define portENTER_CRITICAL(lock) pthread_mutex_lock(lock)
 #define portEXIT_CRITICAL(lock) pthread_mutex_unlock(lock)
+/* Queue substitutions are supplied by the checks that use them. */
+typedef struct fake_queue *QueueHandle_t;
+QueueHandle_t xQueueCreate(UBaseType_t, UBaseType_t);
+void vQueueDelete(QueueHandle_t);
+BaseType_t xQueueOverwrite(QueueHandle_t, const void *);
+BaseType_t xQueuePeek(QueueHandle_t, void *, TickType_t);
+BaseType_t xQueueSend(QueueHandle_t, const void *, TickType_t);
+BaseType_t xQueueReceive(QueueHandle_t, void *, TickType_t);
+
 typedef void *TaskHandle_t;
-typedef unsigned UBaseType_t;
 BaseType_t xTaskCreate(void (*)(void *), const char *, uint32_t, void *, UBaseType_t, TaskHandle_t *);
 void vTaskDelete(TaskHandle_t);
 void esp_restart(void);
 const char *esp_err_to_name(esp_err_t);
+
+/* Public BSP/codec substitutions are implemented only in the audio check. */
+typedef void *esp_codec_dev_handle_t;
+typedef struct {
+  uint8_t bits_per_sample, channel;
+  uint16_t channel_mask;
+  uint32_t sample_rate;
+  int mclk_multiple;
+} esp_codec_dev_sample_info_t;
+esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void);
+int esp_codec_dev_open(esp_codec_dev_handle_t, esp_codec_dev_sample_info_t *);
+int esp_codec_dev_set_out_vol(esp_codec_dev_handle_t, int);
+int esp_codec_dev_write(esp_codec_dev_handle_t, void *, int);
+int esp_codec_dev_close(esp_codec_dev_handle_t);
 
 typedef enum { FAKE_OPEN, FAKE_READ, FAKE_SET, FAKE_COMMIT, FAKE_OP_COUNT } fake_op_t;
 /* Successful sets become readable immediately. A later set/commit failure does

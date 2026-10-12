@@ -7,13 +7,13 @@ find_package(Threads REQUIRED)
 # are disposable native-build outputs, never added to firmware sources.
 set(platform_headers "${CMAKE_CURRENT_BINARY_DIR}/platform")
 file(MAKE_DIRECTORY "${platform_headers}/freertos" "${platform_headers}/driver" "${platform_headers}/bsp")
-foreach(header bsp/display.h esp_err.h esp_system.h esp_wifi.h esp_event.h esp_check.h esp_netif.h esp_netif_sntp.h esp_sntp.h esp_http_client.h esp_crt_bundle.h nvs.h freertos/FreeRTOS.h freertos/semphr.h freertos/task.h freertos/event_groups.h driver/i2c_master.h driver/gpio.h esp_lcd_panel_io.h bsp/esp32_p4_wifi6_touch_lcd_xc.h)
+foreach(header bsp/display.h bsp/esp-bsp.h esp_codec_dev.h esp_err.h esp_system.h esp_wifi.h esp_event.h esp_check.h esp_netif.h esp_netif_sntp.h esp_sntp.h esp_http_client.h esp_crt_bundle.h nvs.h freertos/FreeRTOS.h freertos/semphr.h freertos/task.h freertos/queue.h freertos/event_groups.h driver/i2c_master.h driver/gpio.h esp_lcd_panel_io.h bsp/esp32_p4_wifi6_touch_lcd_xc.h)
   file(WRITE "${platform_headers}/${header}" "#include \"test_support.h\"\n")
 endforeach()
 
 file(WRITE "${platform_headers}/sdkconfig.h" "#pragma once\n")
 file(WRITE "${platform_headers}/esp_timer.h" "#include \"test_support.h\"\n")
-file(WRITE "${platform_headers}/esp_log.h" "#include <stdio.h>\n#define ESP_LOGI(tag,...) do { (void)(tag); if (0) printf(__VA_ARGS__); } while (0)\n#define ESP_LOGW ESP_LOGI\n")
+file(WRITE "${platform_headers}/esp_log.h" "#include <stdio.h>\n#define ESP_LOGI(tag,...) do { (void)(tag); if (0) printf(__VA_ARGS__); } while (0)\n#define ESP_LOGW ESP_LOGI\n#define ESP_LOGE ESP_LOGI\n")
 
 add_executable(test_device_config
   test_device_config.c test_support.c
@@ -36,14 +36,53 @@ target_link_libraries(test_time PRIVATE Threads::Threads m)
 add_test(NAME time_timezone COMMAND test_time)
 set_tests_properties(time_timezone PROPERTIES TIMEOUT 15)
 
-add_executable(test_night test_night.c test_support.c ../main/night.c)
+add_executable(test_alarm_schedule test_alarm_schedule.c ../main/alarm_schedule.c)
+target_include_directories(test_alarm_schedule PRIVATE
+  "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)
+target_compile_features(test_alarm_schedule PRIVATE c_std_11)
+target_compile_options(test_alarm_schedule PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(test_alarm_schedule PRIVATE Threads::Threads)
+add_test(NAME alarm_schedule COMMAND test_alarm_schedule)
+set_tests_properties(alarm_schedule PROPERTIES TIMEOUT 15)
+
+add_executable(test_alarm test_alarm.c test_support.c ../main/alarm.c ../main/alarm_schedule.c)
+target_include_directories(test_alarm PRIVATE
+  "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)
+target_compile_features(test_alarm PRIVATE c_std_11)
+target_compile_options(test_alarm PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(test_alarm PRIVATE Threads::Threads)
+add_test(NAME alarm_recovery COMMAND test_alarm)
+set_tests_properties(alarm_recovery PROPERTIES TIMEOUT 15)
+
+# Use the actual audio owner included by the approved test source; only board,
+# queue/task and copied-owner inputs are substituted in each fresh process.
+add_executable(test_audio test_audio.c)
+target_include_directories(test_audio PRIVATE
+  "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)
+target_compile_features(test_audio PRIVATE c_std_11)
+target_compile_options(test_audio PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(test_audio PRIVATE Threads::Threads m)
+foreach(scenario generator playback queuefail taskfail bspfail openfail volumefail writefail closefail)
+  add_test(NAME audio_${scenario} COMMAND test_audio ${scenario})
+  set_tests_properties(audio_${scenario} PROPERTIES TIMEOUT 15)
+endforeach()
+
+add_executable(test_night test_night.c test_support.c ../main/night.c ../main/solar_times.c)
 target_include_directories(test_night PRIVATE
   "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)
 target_compile_features(test_night PRIVATE c_std_11)
 target_compile_options(test_night PRIVATE -Wall -Wextra -Werror -UNDEBUG)
-target_link_libraries(test_night PRIVATE Threads::Threads)
+target_link_libraries(test_night PRIVATE Threads::Threads m)
 add_test(NAME night_policy COMMAND test_night)
 set_tests_properties(night_policy PROPERTIES TIMEOUT 15)
+
+add_executable(test_solar_times test_solar_times.c ../main/solar_times.c)
+target_include_directories(test_solar_times PRIVATE ../main)
+target_compile_features(test_solar_times PRIVATE c_std_11)
+target_compile_options(test_solar_times PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(test_solar_times PRIVATE m)
+add_test(NAME solar_times COMMAND test_solar_times)
+set_tests_properties(solar_times PROPERTIES TIMEOUT 15)
 
 add_executable(test_connectivity test_connectivity.c test_support.c ../main/connectivity.c)
 target_include_directories(test_connectivity PRIVATE
@@ -76,7 +115,7 @@ find_path(CJSON_INCLUDE_DIR cJSON.h
         "$ENV{HOME}/.espressif/v5.5.5/esp-idf/components/json/cJSON"
   REQUIRED)
 add_executable(test_ui test_ui.c test_support.c
-  ../main/ui/settings.c ../main/device_config.c ../main/timezone_table.c
+  ../main/ui/settings.c ../main/device_config.c ../main/timezone_table.c ../main/alarm_schedule.c
   ../main/assets/lv_font_clock_time_144.c ../main/assets/wac_fonts.c ../main/assets/wac_icons.c)
 target_include_directories(test_ui PRIVATE
   "${CJSON_INCLUDE_DIR}" "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)
@@ -87,7 +126,9 @@ add_test(NAME settings_ui COMMAND test_ui)
 # Successful restart phases need separate runs: esp_restart never returns on hardware.
 add_test(NAME settings_wifi_restart COMMAND test_ui wifi_restart)
 add_test(NAME settings_weather_saved COMMAND test_ui weather_saved)
-set_tests_properties(settings_wifi_restart settings_weather_saved PROPERTIES TIMEOUT 15)
+add_test(NAME settings_display_save COMMAND test_ui display_save)
+add_test(NAME settings_closed_restart COMMAND test_ui closed_restart)
+set_tests_properties(settings_wifi_restart settings_weather_saved settings_display_save settings_closed_restart PROPERTIES TIMEOUT 15)
 set_tests_properties(settings_ui PROPERTIES TIMEOUT 15)
 
 # Exercise the existing private worker and its publication helpers without a
@@ -133,8 +174,8 @@ add_test(NAME weather_service COMMAND test_weather_service)
 set_tests_properties(weather_service PROPERTIES TIMEOUT 15)
 
 add_executable(test_ui_shell test_ui.c test_support.c
-  ../main/ui/ui.c ../main/ui/clock_views.c ../main/ui/settings.c
-  ../main/device_config.c ../main/timezone_table.c ../main/weather_icon_names.c
+  ../main/ui/ui.c ../main/ui/clock_views.c ../main/ui/weather_views.c ../main/ui/settings.c
+  ../main/device_config.c ../main/timezone_table.c ../main/weather_icon_names.c ../main/alarm_schedule.c
   ../main/assets/lv_font_clock_time_144.c ../main/assets/lv_font_temp_102.c
   ../main/assets/lv_font_temp_105.c ../main/assets/lv_font_wind_speed_70.c ../main/assets/wac_fonts.c ../main/assets/wac_icons.c)
 target_compile_definitions(test_ui_shell PRIVATE WAC_UI_SHELL_TEST=1)
@@ -144,7 +185,8 @@ target_compile_features(test_ui_shell PRIVATE c_std_11)
 target_compile_options(test_ui_shell PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(test_ui_shell PRIVATE lvgl::lvgl Threads::Threads m)
 add_test(NAME ui_shell COMMAND test_ui_shell)
-set_tests_properties(ui_shell PROPERTIES TIMEOUT 15)
+add_test(NAME settings_weather_hidden_restart COMMAND test_ui_shell weather_hidden_restart)
+set_tests_properties(ui_shell settings_weather_hidden_restart PROPERTIES TIMEOUT 15)
 
 # Execute the actual private touch callback with real LVGL input handling;
 # hardware reads alone are substituted. Firmware and hardware checks cover BSP
@@ -174,3 +216,39 @@ target_compile_options(test_touch PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(test_touch PRIVATE lvgl::lvgl Threads::Threads m)
 add_test(NAME touch_recovery COMMAND test_touch)
 set_tests_properties(touch_recovery PROPERTIES TIMEOUT 15)
+
+# Reuse the actual private clock-command helpers, without firmware test hooks.
+set(alarm_commands "static QueueHandle_t s_clock_commands;\n")
+string(FIND "${weather_main_source}" "typedef enum { CLOCK_COMMAND_WARNING" begin)
+string(FIND "${weather_main_source}" "static clock_alarm_result_t s_alarm_result;" end)
+if(begin LESS 0 OR end LESS begin)
+  message(FATAL_ERROR "Clock command declarations missing")
+endif()
+string(LENGTH "static clock_alarm_result_t s_alarm_result;" tail_length)
+math(EXPR length "${end} - ${begin} + ${tail_length}")
+string(SUBSTRING "${weather_main_source}" ${begin} ${length} declarations)
+string(APPEND alarm_commands "${declarations}\n")
+foreach(signature "static esp_err_t request_clock_warning_dismiss(" "static bool alarm_occurrence_matches(" "static esp_err_t request_alarm_action(" "static esp_err_t execute_alarm_action(" "static void publish_alarm_result(" "static bool take_alarm_result(")
+  string(FIND "${weather_main_source}" "${signature}" begin)
+  if(begin LESS 0)
+    message(FATAL_ERROR "Clock command function ${signature} missing")
+  endif()
+  string(SUBSTRING "${weather_main_source}" ${begin} -1 remainder)
+  string(FIND "${remainder}" "\n}" end)
+  if(end LESS 0)
+    message(FATAL_ERROR "Clock command function ${signature} incomplete")
+  endif()
+  math(EXPR length "${end} + 2")
+  string(SUBSTRING "${remainder}" 0 ${length} function_source)
+  string(APPEND alarm_commands "${function_source}\n")
+endforeach()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/alarm_commands.inc" "${alarm_commands}")
+add_executable(test_alarm_commands test_alarm.c test_support.c ../main/alarm.c ../main/alarm_schedule.c)
+target_compile_definitions(test_alarm_commands PRIVATE WAC_ALARM_COMMAND_TEST=1)
+target_include_directories(test_alarm_commands PRIVATE
+  "${CJSON_INCLUDE_DIR}" "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}" ../main)
+target_compile_features(test_alarm_commands PRIVATE c_std_11)
+target_compile_options(test_alarm_commands PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(test_alarm_commands PRIVATE Threads::Threads)
+add_test(NAME alarm_commands COMMAND test_alarm_commands)
+set_tests_properties(alarm_commands PROPERTIES TIMEOUT 15)

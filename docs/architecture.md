@@ -1,12 +1,12 @@
 # Weather alarm clock architecture and product specification
 
-Revised October 11, 2026. This is the single authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. It is not an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
+Revised October 12, 2026. This is the single authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. It is not an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
 
 Build the weather alarm clock for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C using the existing ESP-IDF application. Only ESP32-P4 is supported. There is no requirement to maintain Raspberry Pi behavior, another firmware implementation, or backward compatibility with their settings or interfaces.
 
 Keep the existing weather, storm, location selection, Wi-Fi and House Messages capabilities, including the browser messaging page. No multiple-alarm feature, ambient-light sensor, battery-voltage monitor, outage log or separate diagnostics screen is introduced.
 
-[AGENTS.md](../AGENTS.md) defines working rules. [README.md](../README.md) provides the project overview, implementation status, hardware, setup and user guide. Detailed build and test instructions remain in [targets/esp32-p4/README.md](../targets/esp32-p4/README.md) and [targets/esp32-p4/tests/README.md](../targets/esp32-p4/tests/README.md).
+[AGENTS.md](../AGENTS.md) defines working rules. [README.md](../README.md) provides the user-facing project overview, features, hardware, setup and user guide. Development status and verification records belong in [docs/work.md](work.md). Detailed build and test instructions remain in [targets/esp32-p4/README.md](../targets/esp32-p4/README.md) and [targets/esp32-p4/tests/README.md](../targets/esp32-p4/tests/README.md).
 
 - [Product behavior and defaults](#product-behavior-and-defaults)
   - [Editing and saving user settings](#editing-and-saving-user-settings)
@@ -27,7 +27,13 @@ Keep the existing weather, storm, location selection, Wi-Fi and House Messages c
 
 Use ordinary saves with ESP-IDF storage.
 
-Cancel discards edits. Nested Done returns to the parent draft without saving. Alarm Save applies without restart; the Settings-entry alarm toggle applies immediately. Device Setup and Wi-Fi share pending edits for Save & Restart; Weather Location has its independent Save & Restart, including location, coordinates, timezone and units. Apply only changes made in that editor, preserving unrelated applied choices. Validation errors remain in the editor; save failure retains the draft and does not automatically restart.
+Cancel discards edits. Nested Done returns to the parent draft without saving. Display Settings has independent Cancel/Save controls. Save applies Home Screen, Time Format, Leading Zero and Day/Night brightness without restarting, then returns to Settings. Display Cancel and Back discard its edits and return to Settings. Apply the chosen Home Screen when returning to the clock, while preserving later manual clock-face navigation.
+
+Alarm Save applies without restart; the Settings-entry alarm toggle applies immediately. Device Setup and Wi-Fi share pending edits for Save & Restart. Weather retains its independent save and restart, including location, coordinates, timezone and units. Its Back and Cancel return to Device Setup without discarding pending device edits. A Weather Save must not apply those unsubmitted device edits.
+
+Apply only changes made in that editor, preserving unrelated applied choices. Display saves cover only its five existing fields; Device saves cover the remaining Device Setup choices. Keep the existing settings owner, stored keys and ordinary save facilities. Validation errors remain in the editor; save failure retains the draft and does not automatically restart.
+
+A submitted Save continues if its editor is hidden, closed or replaced. A successful Device or Weather Save still completes its required restart. Results specific to the old editor must not reopen it or change a newer editor; the general saved/restarting notice may appear on the current screen. Preserve the existing restart delay, including when ringing hides the editor. Failed saves never trigger that restart.
 
 - Validate settings, perform ordinary saves, and report returned errors.
 - Save user settings only when the user explicitly applies a change: for example, pressing Save or using a control intended to apply immediately, such as enabling an alarm.
@@ -45,7 +51,37 @@ One recurring alarm uses the saved local hour/minute and repeat days. For a skip
 
 Defaults: alarm Off, 07:00 Monday–Friday, Classic Beep at 50% volume and ten-minute snooze. Snooze choices are 5/10/15 minutes. Alarm operation continues while menus are open and slow network work is pending.
 
-Classic Beep, Gentle Chime and Rising Tones share sound definitions between preview and ringing. Ringing increases volume gradually. Preview stops after approximately five seconds or cancellation; ringing takes priority.
+Turning Alarm Off stops current ringing and cancels a pending snooze, including
+one restored before usable time is available. Preserve the saved hour/minute,
+repeat days and any pending missed-alarm notice. Remember the canceled occurrence
+using the ordinary dismissal record; returned storage failures follow the same
+in-memory action and restart limitations as Dismiss below.
+
+Switching Alarm from Off to On, or changing its hour/minute or repeat days while
+it remains On, arms the next scheduled occurrence while running. An already-past
+scheduled time does not cause retroactive ringing or a new missed notice. An
+occurrence due exactly when the change is observed may ring. If usable time is
+not yet available, make that arming decision when it becomes available. Preserve
+an existing captured ringing or snoozed alarm and pending missed notice. Changes
+only to sound, volume or snooze duration do not rearm the schedule. This runtime
+rule does not replace normal restart recovery below; no separate arming history
+is stored.
+
+Classic Beep, Classic Bell and Rising Tones share sound definitions between preview and ringing. Ringing increases volume gradually. Preview stops after approximately five seconds or cancellation; ringing takes priority.
+
+Classic Bell replaces Gentle Chime, rather than adding a fourth choice. The
+user selected the slower B bell demo on October 12, 2026: bright alternating
+metallic bells with light hammer clatter, about 21 strikes per second in total
+and a second bell pitched 6.1% higher. The selected listening reference is
+[slower B](../.reviews/alarm-sound-demos/analog-bell-demo-b-slow.wav); it is
+evaluation evidence, not an audio asset to embed or play in the application.
+Generate the sound live in the existing audio owner, using the same definition
+for preview and ringing. Preserve the other two sounds, the default Classic
+Beep choice, existing volume controls and ringing progression. Keep calculation
+bounded and efficient enough to feed the existing 20ms chunks without audible
+cutouts; establish this with board timing and listening under ordinary UI and
+weather activity. Do not add a playback worker, recording, sound framework or
+new settings/storage mechanism for this replacement.
 
 Use one fixed 30-minute catch-up window for ordinary alarms and snooze. Evaluate recovery once usable time is available from the RTC or network. An eligible unhandled alarm within the window rings; an older missed occurrence produces a missed notice.
 
@@ -70,19 +106,60 @@ Ringing preempts menus, notices and previews; preemption alone does not acknowle
 
 The single approved visual entry point is [mockups/alarm-design.html](../mockups/alarm-design.html). It contains the complete combined device preview and the House Messages browser preview, selected using the controls above the previews. Images, fonts and both previews are embedded in that file. It owns appearance and controls; this specification owns behavior, defaults and source placement. Preview selectors and sample values are not production features. The digital ringing layout is the chosen ringing presentation; carousel alternatives are not additional screens.
 
+Settings pages use the reviewed lower Back/title placement. Messaging's distinct
+Device ID guidance is vertically centered in the fourth-row space, with its
+three controls kept in their standard positions; normal messages replace that
+guidance in the same space. Guidance text sizes follow the approved visual reference.
+Device Setup's Weather entry opens the Weather editor with the common single-line
+heading placement. Its four rows are Weather Location, Provider, Units and API
+Key. Tapping the whole Weather Location row opens its usual input/keyboard;
+location, units, lookup and independent save/restart behavior remain.
+
+Open-Meteo is the working provider and its API Key row reads Not required.
+Until Visual Crossing downloads are implemented, selecting it changes only the
+unsaved Weather presentation and enables a masked API Key draft. Clearly show
+that Visual Crossing is not available yet and prevent Weather Save while it is
+selected. Do not make provider requests, store a credential or claim activation
+for that choice. Returning to Open-Meteo permits ordinary location/units Save
+without a key. Discard the temporary provider/key fields on leaving Weather,
+while preserving them when an alarm temporarily hides the editor.
+
 Use LVGL for the keyboard, matching the approved mockup’s lowercase, uppercase, numbers and symbols arrangements, size and position. The temporary typing layout hides inactive controls and shows the active input above the keyboard. Show the enlarged character while a key is pressed. This replaces the earlier retained-key-map and larger centered-keyboard choices; caret and colon remain available on the illustrated symbol layouts.
+
+Use the same raised active label/input placement for location, API key, room
+name, device ID, network name and password. While editing location, keep the
+exact muted note “Time zone is set automatically from this location.” between
+the input and keyboard. Keep real field errors above the active label, using
+the reference's single-line band; normal lookup notices use “Location not
+found.” and “Lookup unavailable.” without changing lookup or retry behavior.
 
 Alarm Time and Fixed Schedule start/end use the same time control. Each minute-arrow press adds or subtracts five minutes, advancing or reducing the hour when minutes cross an hour boundary. This also changes AM/PM across noon or midnight and wraps between 23:55 and 00:00. Opening or leaving a time editor does not round an existing saved minute value. These user-selected changes replace the reference’s previous one-minute step and independent minute wrapping; the separate hour and AM/PM buttons retain their behavior.
 
 Volume and Day/Night Brightness sliders use an 8px visible track and a 36px circular handle, centered in the existing 48px-high touch area. Retain their Day/Night colors, values, increments and draft/save behavior. This user-approved styling replaces the former browser-dependent slider painting and the firmware’s thick track; the illustrated control positions and surrounding layout remain.
 
+Open the existing Brightness editor from Display Settings. Its Back and Done return to Display Settings, retaining the Display draft. Menu placement does not change brightness ownership, defaults, limits or backlight behavior.
+
+Leading Zero controls the 12-hour preference. In 24-hour mode, hours always use
+two digits, and Display Settings shows Leading Zero On with its switch disabled.
+Returning to 12-hour mode enables the switch and restores the previous 12-hour
+choice, including when editing a draft. Saving 24-hour mode preserves that choice
+rather than forcing the stored preference On.
+
 Normal Digital Night time uses a 250px nominal display size in 24-hour mode and in 12-hour mode with Leading Zero Off. Keep the existing fitted size for 12-hour Leading Zero On. Each format's size stays steady as time advances; preserve proportional Montserrat Medium digits, the existing spacing, centering and AM/PM baseline and gap. Day and alarm-specific layouts retain their separate sizes.
+
+The normal analog clock's next-alarm caption shows its complete text on one line,
+including Today/Tomorrow and 12/24-hour times. Preserve its illustrated font,
+centered position, icon and touch area.
 
 After Save & Restart, retain normal startup navigation to the clock or required unfinished setup. Wi-Fi connection status belongs in Device Setup; the mockup's connection previews do not require a separate startup screen or a saved return-route flag.
 
 ### Night Shift
 
 Night Shift modes remain Off, Always On, Fixed Schedule and Sunset to Sunrise. Fixed equal endpoints mean Night all day; a range across midnight is supported. Solar events are calculated locally with saved offsets. While running, retain the current effective appearance when required inputs/events become unavailable. Apply gradual backlight transitions, including startup.
+
+Local solar calculation uses the saved coordinates and usable clock time, independently of weather downloads. Keep each event's full UTC date/time, using local calendar days rather than adding 24 hours across daylight-saving changes. Apply offsets as elapsed minutes to those events. Night begins at the shifted sunset and ends at the following shifted sunrise; if the offsets remove that interval by moving its start to or beyond its end, there is no Night interval for that pair. Missing required events use the existing appearance-retention/startup fallback rules.
+
+The Sunrise/Sunset Offsets page shows tonight's start and tomorrow's end from the Night owner's copied raw events, formatted with the selected 12/24-hour preference. Draft offsets preview those displayed times without changing the running appearance or writing storage. Refresh the times in place; retain the approved unavailable layout when they cannot be calculated.
 
 Defaults: Off, fixed endpoints 22:00/06:00, zero solar offsets and Day/Night brightness 80%/30%. Solar-offset choices are -120..+120 minutes in five-minute steps; brightness choices are 20..100%.
 
@@ -168,7 +245,11 @@ Retain the inherited `Clock paused` warning with its existing 135-second thresho
   pressure (`Dry for now` / `Falling pressure can mean rain later`), winds
   easing, then `Breezy and dry` / `Calm and dry`
 - `summary.changeLevel` is `changing`, `may-change` or `steady` (concrete forecast change, early hints, or no change); `summary.changing` is true only for `changing`
-- Times follow `timeFormat` (`6 PM` or `18:00`)
+- Times follow `timeFormat` (`6 PM` or `18:00`). After successful Display Save,
+  retained Conditions headline/detail use the applied format by the next ordinary
+  UI update, without another weather download or restart. Unsaved format edits do
+  not change those captions. Weather data, wording and warning decisions remain
+  unchanged.
 
 These warning limits are fixed, not editable settings. Imperial wind limits use
 the exact conversion of 1 mph to 1.609344 km/h; metric limits use the listed
@@ -180,7 +261,7 @@ These rules define the ESP32-P4 user-visible behavior for turning a text locatio
 
 ##### First-time weather location setup
 
-Start with no saved weather location or coordinates. During first-time setup, use the existing Weather Location editor with an empty location field. The user must select and successfully save a valid location before setup can finish. Location lookup supplies the coordinates and timezone; do not supply a default location.
+Start with no saved weather location or coordinates. During first-time setup, use the existing Weather editor with an empty location field. The user must select and successfully save a valid location before setup can finish. Location lookup supplies the coordinates and timezone; do not supply a default location.
 
 Reuse the existing editor and its validation/error handling. Do not add “Not configured” menu labels or missing-location presentations across the normal clock and weather screens. The separate first-use mockup is unfinished; use the editor's ordinary empty-field presentation and retain the required setup exit guard.
 
@@ -342,24 +423,62 @@ UI screen assignments follow the [approved visual reference](#ui-and-visual-refe
 | `alarm.c/.h` | Live alarm state, snooze, dismissal, missed notice and their operating-record storage. Occurrence calculations belong to `alarm_schedule`. |
 | `alarm_schedule.c/.h` | Recurring-occurrence and DST calculations; no live alarm state, storage or execution task. |
 | `audio.c/.h` | Sound definitions, speaker/codec access, playback, volume progression, preview lifetime and ring/preview priority. Alarm owns whether ringing is required. |
-| `night.c/.h` | Effective appearance, its remembered value and backlight transitions. Saved preferences belong to `device_config`; solar calculations belong to `solar_times`. |
+| `night.c/.h` | Effective appearance, its remembered value and backlight transitions. Owns the private adjacent-day solar cache and publishes raw events for Settings. Saved preferences belong to `device_config`; solar calculations belong to `solar_times`. |
 | `solar_times.c/.h` | Solar-event calculations and unavailable-event results. `night` decides their effect on appearance. |
 | `ui/ui.c` | UI lifetime, active view and navigation, including return destinations, gestures and first-use entry; overlays, alarm preemption, input routing and presentation selection. Touch actions go to the correct feature owner; feature decisions remain with those owners. |
 | `ui/clock_views.c` | Rendering and object handles for analog/digital faces, unavailable time, ringing/snoozed clock surfaces, next alarm, missed alarm, clock status and backup-clock indicator/notice. Active-view and navigation state belong to `ui.c`. |
-| `ui/weather_views.c` | Rendering and object handles for forecast, conditions and storm treatment; messages and empty/unread/important states; weather warnings and clock-edge indicators supplied to clock views. Weather/message state belongs to the service owners; navigation belongs to `ui.c`. |
-| `ui/settings.c` | Rendering and controls for Settings entry; Device Setup; Display and Device settings; Weather Location; Wi-Fi list, credentials and progress; Alarm, Time, Repeat, Sound and Snooze editors; Night Shift mode, fixed/solar schedule, offsets and brightness. Owns drafts, nested editing, validation/save/lookup presentation and submission of user changes. Applied settings belong to `device_config`. |
+| `ui/weather_views.c` | Rendering and private object handles for forecast, conditions and storm treatment; messages and empty/important styling; weather status and warnings. Consumes supplied snapshots and presentation inputs without retaining another weather/message model or active-view state. Navigation, retained display snapshots, displayed-message identity and dismissal completion decisions belong to `ui.c`; message operations belong to `message_service`. Clock-edge objects remain with `clock_views.c`. |
+| `ui/settings.c` | Rendering and controls for Settings entry; Device Setup; Display settings and Messaging; Weather; Wi-Fi list, credentials and progress; Alarm, Time, Repeat, Sound and Snooze editors; Night Shift mode, fixed/solar schedule, offsets and brightness. Owns drafts, nested editing, validation/save/lookup presentation and submission of user changes. Applied settings belong to `device_config`. |
 | `ui/controls.c` | Shared LVGL rows/buttons, styling, time input and keyboard helpers; no saved settings, active-view state, feature decisions/state or navigation authority. |
 
-A copied value is a snapshot for a consumer, not another authority. Runtime fields about time and appearance come from their owners. Screens do not calculate alarm eligibility, infer RTC health, or drive the backlight. Feature-owner headers declare their own data; `app_runtime.h` holds data used for display, including values required by the approved weather age/stale presentation. Intermediate forecast calculations stay with `weather_client`; the display consumes the selected icon. There is no general `wac_types.h` container. DS3231 access reuses the board bus and existing driver facilities without creating a second bus or an application fork of downloaded drivers.
+A copied value is a snapshot for a consumer, not another authority. Runtime fields about time and appearance come from their owners. Screens do not calculate alarm eligibility, infer RTC health, or drive the backlight. Feature-owner headers declare their own data; `app_runtime.h` holds data used for display, including values required by the approved weather age/stale presentation. Intermediate forecast calculations stay with `weather_client`; the display consumes the selected icon. The weather snapshot retains both time-format versions of the visible Conditions captions, produced from the same downloaded data by the existing calculation. The view selects the applied format; it does not retain another weather model or recalculate weather decisions. There is no general `wac_types.h` container. DS3231 access reuses the board bus and existing driver facilities without creating a second bus or an application fork of downloaded drivers.
 
-Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. Clock object handles remain private to `clock_views.c`; its private interface receives display inputs and callbacks from `ui.c` without exporting the shell's state or retaining another service/configuration model. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
+Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. Clock object handles remain private to `clock_views.c`; its private interface receives display inputs and callbacks from `ui.c` without exporting the shell's state or retaining another service/configuration model. Forecast, Conditions, message and weather-status object handles remain private to `weather_views.c`; the shell supplies current drawing inputs and visibility, without directly manipulating those objects. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
 
 ### Execution
 
 Retain the existing network/message workers, LVGL task, and UI heartbeat. Add two long-lived tasks:
 
 - A clock-control task, started by `main.c`, runs time maintenance, alarm evaluation, and Night Shift updates by ordinary calls to their owners. It never waits for the display lock, network requests, or audio streaming. Evaluate due alarms before other optional work. RTC calls use finite timeouts; brightness fades advance in steps, not a sleep loop.
-- The audio worker performs playback. Alarm requests take priority over preview requests, and stop/snooze remains responsive during playback.
+- The audio worker performs playback with a 6 KB task stack for codec setup, logging and generation. Alarm requests take priority over preview requests, and stop/snooze remains responsive during playback.
+
+Start audio after ordinary BSP display/bus initialization. Its worker reads the
+alarm owner's copied phase and applied sound/volume between short PCM writes;
+it does not wait for an alarm operating-record save or keep a second ringing
+decision. One overwritten preview-command entry carries the latest copied
+Start or Stop. Cancel replaces an older Start, including while speaker setup
+is pending; ringing discards previews. UI reads a short completion/error copy.
+Readiness means requests can be submitted, not that the speaker has been tested.
+
+The existing public BSP owns speaker/codec wiring and the shared I2C bus. The
+audio worker alone attempts lazy speaker creation once per run, retains the
+handle and opens/closes playback sessions. A failed creation remains unavailable
+until restart; returned open/write failures end that attempt without repeated
+retry during the same ringing occurrence. A later explicit preview or new or
+resumed ring can open a retained handle again. Do not add another bus, copied
+codec setup, driver fork, reset service or playback persistence.
+
+One generator supplies the three approved tone patterns for preview and ringing.
+Use single-precision tone/envelope arithmetic and integer sample positions within
+each pattern. This avoids software double arithmetic on the P4 and preserves
+note boundaries during long ringing; it does not change the sound definitions.
+Classic Bell keeps fixed worker-owned damped-oscillator state so strikes and
+chunks retain earlier tails. Prepare its coefficients outside the sample loop;
+reset its state for fresh playback and when switching to it from another sound.
+Its internal normalization preserves the shared gain below and the other sounds.
+Preview uses copied draft sound/volume and ends after approximately five seconds
+of playback or cancellation. Ringing uses applied values and raises PCM gain
+from 10% of the selected level to that level over 30 seconds; a new or resumed
+ring starts that progression again. Preserve valid saved volume values, including
+zero. Short 20ms PCM chunks permit checks between writes. The volume percentage
+uses a squared fraction as a simple perceptual approximation: 50% produces
+one-quarter of maximum signal amplitude and 0% is silent. The common 0.82 PCM
+gain brings the loudest pattern to approximately full scale after the existing
+codec's configured gain at 100% volume; lower percentages remain available.
+The codec output control stays fixed at 100. Actual loudness and speaker
+distortion require listening on the board. The installed public codec's fixed
+write wait can still delay cancellation during a hardware fault;
+normal sound, stopping latency, synthesis time and stack use require board checks.
 
 Initialize Night Shift's appearance before starting the clock task. Time maintenance can start before the display; signal backlight readiness only after board display initialization and the initial draw. The clock task then advances the configured brightness transition. The UI reads the owner's copied appearance without running its policy or touching the backlight.
 
@@ -367,9 +486,30 @@ Settings saves, Wi-Fi scans, and location lookup use short-lived background work
 
 UI callbacks submit commands and render results; they do not perform network requests, flash writes, or RTC access. A small fixed command queue delivers alarm/notice actions to the clock task; audio has its own playback commands. Commands carry copied values with explicit lifetimes. A full queue returns failure rather than silently losing a Dismiss or Snooze. These queues are for those actual task boundaries, not an event bus.
 
+Alarm actions reuse the clock task's two-entry notice queue. Each request copies
+the displayed occurrence so a delayed tap cannot dismiss a different alarm.
+The UI keeps one action pending across navigation; its completion remains with
+`main.c` until the heartbeat obtains the display lock. Refresh the displayed
+alarm state before handling that completion. The clock owner decides the action
+and its storage result; `ui.c` decides whether returning to home or the snoozed
+page still belongs to the user's current view. Errors reuse the current alarm
+row, page footer or unavailable-time caption.
+
+The Alarm editor previews its draft's next scheduled time through the existing
+pure `alarm_schedule` calculation using supplied usable clock time. This is
+display-only: it does not handle, arm or save an occurrence. Live recovery,
+handled occurrences and snooze remain with `alarm`; the editor retains its
+existing alarm-time formatter and caption layout.
+
+Ringing hides the existing Settings root without closing it; the draft, active
+input and keyboard retain their single owner. A later Settings swipe resumes
+that editor. The explicit Alarm Settings shortcut resumes a held Alarm editor;
+otherwise it closes any unrelated held editor without saving and starts the
+Alarm editor. No second draft or saved return route is created.
+
 For House Messages dismissal, UI submits copied displayed-message and device IDs to the existing message worker. `message_service` performs local acknowledgment or the shared-hub request and returns completion data. UI waits for successful acknowledgment before returning to the prior home view; failure retains the message and is reported. Completion must not override alarm preemption or navigate a view the user has already left. `ui.c` owns this navigation; `message_service` owns the acknowledgment and updated message snapshot. Disable duplicate dismissal while pending and report submission failure. No additional permanent worker or general job system is needed.
 
-The existing UI heartbeat gathers owner snapshots before taking the display lock. It consumes a pending message-dismissal result only after acquiring that lock, so the message owner retains the result while the display is busy. Only UI code under the display lock changes LVGL objects. Keep state-copy locks short; never hold them during I/O. Hardware reads and small operating-record writes can take time; this design does not promise uninterrupted real-time execution during flash operations. Measure interaction and alarm latency during implementation rather than adding speculative workers now.
+The existing UI heartbeat gathers owner snapshots before taking the display lock. It consumes a pending message-dismissal result only after acquiring that lock, so the message owner retains the result while the display is busy. On consuming an alarm completion, refresh only its short copied owner state under that lock so an earlier frame or result cannot replace a newly resumed ring. That read performs no I/O. Only UI code under the display lock changes LVGL objects. Keep state-copy locks short; never hold them during I/O. Hardware reads and small operating-record writes can take time; this design does not promise uninterrupted real-time execution during flash operations. Measure interaction and alarm latency during implementation rather than adding speculative workers now.
 
 ### Configuration and storage integration
 
@@ -377,7 +517,7 @@ Use the existing NVS partition and ordinary typed NVS operations. Settings stay 
 
 Extend the existing configuration structure for the approved settings. Use one Night Shift mode value, not both a mode and an independent enable flag. Derive readiness from the settings needed by the feature without a separate setup-version gate or location-confirmed flag. `device_config` validates saved location values against the [location output rules](#output-rules) and Shared-mode identity against the [message contract](#message-contract); the settings UI enforces the [first-time setup decision](#first-time-weather-location-setup) using the existing editor. Initialize application settings according to the compatibility scope in AGENTS.md; no migration from other firmware is required.
 
-Use explicit update operations for the actual Save actions. The settings UI owns its current draft and the values with which editing began; nested editors share that draft. `device_config` applies only the submitted changes to its latest configuration. Comparing the known fields is sufficient for applying edits; no reusable session manager, revision system, or public generic patch format is required. Each explicit Device, Weather or Alarm Save then writes all entries belonging to that group, including unchanged values, using ordinary individual writes. The immediate alarm toggle writes only the enabled entry. Do not compare against running settings to skip storage writes. This accepts extra writes on infrequent explicit saves and keeps retries straightforward; it does not rewrite other groups or add background saving. Alarm preemption does not make a draft authoritative. Closing/canceling an editor must not publish it.
+Use explicit update operations for the actual Save actions. The settings UI owns its current draft and the values with which editing began; nested editors share that draft. `device_config` applies only the submitted changes to its latest configuration. Comparing the known fields is sufficient for applying edits; no reusable session manager, revision system, or public generic patch format is required. Each explicit Display, Device, Weather or Alarm Save then writes all entries belonging to that group, including unchanged values, using ordinary individual writes. The immediate alarm toggle writes only the enabled entry. Do not compare against running settings to skip storage writes. This accepts extra writes on infrequent explicit saves and keeps retries straightforward; it does not rewrite other groups or add background saving. Alarm preemption does not make a draft authoritative. Closing/canceling an editor must not publish it.
 
 Serialize settings writers. Validate before writing, check NVS return values, and publish a new in-memory configuration after a successful save. Use a short lock for copying the published configuration, distinct from the slow save operation. On failure, follow the [editing and saving rules](#editing-and-saving-user-settings) and keep the previously applied running configuration; do not report rollback. Some stored keys may already have changed and will be read on the next normal startup, as allowed under [Editing and saving user settings](#editing-and-saving-user-settings).
 
@@ -398,6 +538,7 @@ Apply configured Wi-Fi credentials through RAM driver storage in common preparat
 - `device_config.c/.h`: extend the single model and ordinary save operations. Do not carry over original setup migration or compatibility gates. During configuration implementation, remove the persistent diagnostic boot counter, its storage operations and startup-log field. No approved product behavior requires it.
 - `main/CMakeLists.txt`: list actual application sources directly, including UI files and generated artwork/font sources. It is the sole firmware source list; generators update asset contents without maintaining another manifest or relying on a directory-scan fallback. Add or remove filenames here when the asset set changes.
 - Existing asset/font scripts and `main/assets/`: reuse their conversion approach and existing assets. Keep the existing PNG decoder in `tools/generate_lvgl_image.py`. Add only artwork or glyphs required by the approved UI, not a new asset pipeline.
+- `sdkconfig.defaults`: disable the BSP's optional abort-on-error setting so speaker-creation failure can return to the audio owner without resetting the clock. This global BSP option also makes its checked display/touch, bus and backlight failures return to their existing callers; healthy paths and transfer waits remain unchanged. It does not remove unconditional assertions or every board-library error check, and returned codec status does not verify every underlying register operation.
 
 During UI integration, remove the old benchmark/parity renderers, their alternate startup paths, and files, assets and build options used only by those modes. Measure the actual application with existing ESP-IDF/LVGL timing and memory facilities when needed; do not retain separate experimental UIs. This retires the old layer-by-layer and alternative-renderer experiments without changing approved product behavior. Existing messaging, including its browser page and message storage, retains its own owner; no broad storage cleanup is implied.
 
@@ -473,4 +614,4 @@ During implementation, use focused tests for settings validation/save errors, DS
 
 Build with the preserved ESP-IDF 5.5.5 environment. Hardware is required to establish touch behavior, rendering, RTC operation, audible sound, brightness and physical power-cut results. Task timing, stack/memory use and asset sizes are implementation checks, not claims established by this document.
 
-Current implementation status is reported in [README.md](../README.md). This specification is not evidence of passing firmware tests.
+Current implementation status and verification records are reported in [docs/work.md](work.md). This specification is not evidence of passing firmware tests.

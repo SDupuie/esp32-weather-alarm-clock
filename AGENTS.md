@@ -21,7 +21,7 @@ Test affected behavior and compile firmware after source changes; distinguish th
 - [AGENTS.md](AGENTS.md): agent workflow and this authority map.
 - [docs/architecture.md](docs/architecture.md): approved behavior, defaults, accepted tradeoffs, service rules, implementation ownership and source structure; links to the approved visual reference.
 - [docs/work.md](docs/work.md): current development tasks, completed slices and the next slice; does not define product or architecture requirements.
-- [README.md](README.md): project overview, implementation status, hardware, setup and user guide; links to detailed development instructions.
+- [README.md](README.md): user-facing project overview, features, hardware, setup and user guide; links to detailed development instructions.
 - [targets/esp32-p4/README.md](targets/esp32-p4/README.md): ESP32-P4 environment preparation, build and flash commands.
 - [targets/esp32-p4/tests/README.md](targets/esp32-p4/tests/README.md): runnable test instructions and verification limits.
 
@@ -31,7 +31,7 @@ Keep product and architecture requirements in [docs/architecture.md](docs/archit
 
 Work in this project folder on `main`. Integrate useful upstream changes deliberately into this application; do not automatically update or replace the whole project from upstream. Setup scripts must not update the checkout automatically. Preserve unrelated work.
 
-Startup and inherited-screen cleanup is the current development priority. Carry it through bounded, tested slices rather than deferring it to an unspecified future sprint. Read the cleanup scope in the architecture and [docs/work.md](docs/work.md) when resuming work. Update completed and remaining items in docs/work.md before ending a development slice or a review that changes the work list; distinguish unimplemented recommendations from approved work. File moves or lower line counts alone do not establish completion. Keep README.md's implementation-status summary current, without putting a task list there.
+Startup and inherited-screen cleanup is the current development priority. Carry it through bounded, tested slices rather than deferring it to an unspecified future sprint. Read the cleanup scope in the architecture and [docs/work.md](docs/work.md) when resuming work. Update completed and remaining items in docs/work.md before ending a development slice or a review that changes the work list; distinguish unimplemented recommendations from approved work. File moves or lower line counts alone do not establish completion. Keep README.md user-facing. Record development status, completed work, test and flash evidence, and pending work in docs/work.md; link to that record from the READMEs rather than duplicating it.
 
 Remove superseded plans, obsolete implementations, unused experiments and backup copies when they no longer serve a current purpose within the work being performed. Do not create backup or archive copies of material being retired. Retain material only for an identified current application, development, verification or evaluation need.
 

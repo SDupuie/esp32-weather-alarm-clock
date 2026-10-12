@@ -20,3 +20,8 @@ extern const lv_image_dsc_t wac_icon_wifi_mark;
 extern const lv_image_dsc_t wac_icon_wifi_off_mark;
 extern const lv_image_dsc_t wac_icon_circle_check_mark;
 extern const lv_image_dsc_t wac_icon_clock;
+extern const lv_image_dsc_t wac_icon_alarm_clock;
+extern const lv_image_dsc_t wac_icon_alarm_clock_off;
+extern const lv_image_dsc_t wac_icon_alarm_clock_small;
+extern const lv_image_dsc_t wac_icon_alarm_clock_off_small;
+extern const lv_image_dsc_t wac_icon_close;
