@@ -130,6 +130,10 @@ add_test(NAME settings_display_save COMMAND test_ui display_save)
 add_test(NAME settings_closed_restart COMMAND test_ui closed_restart)
 set_tests_properties(settings_wifi_restart settings_weather_saved settings_display_save settings_closed_restart PROPERTIES TIMEOUT 15)
 set_tests_properties(settings_ui PROPERTIES TIMEOUT 15)
+foreach(scenario day night location clear key)
+  add_test(NAME settings_visual_crossing_${scenario} COMMAND test_ui vc_${scenario})
+  set_tests_properties(settings_visual_crossing_${scenario} PROPERTIES TIMEOUT 15)
+endforeach()
 
 # Exercise the existing private worker and its publication helpers without a
 # firmware test interface or a second implementation in the maintained test.
@@ -160,13 +164,14 @@ foreach(signature "static void copy_text(" "static void runtime_state_update(" "
 endforeach()
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/weather_service_task.inc" "${weather_worker}")
 add_executable(test_weather_service test_weather_service.c test_support.c
-  ../main/weather_client.c ../main/forecast_representative.c
+  ../main/forecast_representative.c
   ../main/storm_conditions.c ../main/weather_icon_names.c
   "${CJSON_INCLUDE_DIR}/cJSON.c")
 target_include_directories(test_weather_service PRIVATE
   "${CJSON_INCLUDE_DIR}" "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_BINARY_DIR}" ../main)
-target_compile_definitions(test_weather_service PRIVATE time=wac_test_time)
+target_compile_definitions(test_weather_service PRIVATE time=wac_test_time
+  WAC_WEATHER_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/test-data")
 target_compile_features(test_weather_service PRIVATE c_std_11)
 target_compile_options(test_weather_service PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(test_weather_service PRIVATE Threads::Threads m)
@@ -176,6 +181,7 @@ set_tests_properties(weather_service PROPERTIES TIMEOUT 15)
 add_executable(test_ui_shell test_ui.c test_support.c
   ../main/ui/ui.c ../main/ui/clock_views.c ../main/ui/weather_views.c ../main/ui/settings.c
   ../main/device_config.c ../main/timezone_table.c ../main/weather_icon_names.c ../main/alarm_schedule.c
+  "${CJSON_INCLUDE_DIR}/cJSON.c"
   ../main/assets/lv_font_clock_time_144.c ../main/assets/lv_font_temp_102.c
   ../main/assets/lv_font_temp_105.c ../main/assets/lv_font_wind_speed_70.c ../main/assets/wac_fonts.c ../main/assets/wac_icons.c)
 target_compile_definitions(test_ui_shell PRIVATE WAC_UI_SHELL_TEST=1)

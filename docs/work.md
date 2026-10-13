@@ -1,5 +1,670 @@
 # ESP32 Weather Alarm Clock development work
 
+## Sprint: Visual Crossing and approved weather mappings — authorized October 13, 2026
+
+Status: implemented and verified for this bounded sprint. Native checks, firmware
+build, verified flash, Visual Crossing activation/units and final physical
+navigation pass. The supplied key is preloaded in board settings and verified.
+Addressing, weather-memory and UI-task corrections have the evidence below.
+Long-duration stability, rare live conditions and real quota exhaustion remain
+unverified; the complete call chain behind the earlier UI crash was not captured.
+Checkpoint review: the October 13 adversarial review completed all four
+Optimizer/Skeptic passes with no new confirmed actionable finding or required
+simplification. Fresh firmware, all 38 native tests, fixture/message checks and
+offline actual-response decoding pass. The earlier Shared Device ID issue stays
+deferred; the stated hardware/provider limits remain. Local reports are retained
+under `.reviews/main/adversarial-visual-crossing-2026-10-13/`. The user authorized
+a local checkpoint commit containing reviewed firmware/settings changes and
+approved documentation, mockups and prepared assets. Radar/Sound Machine
+firmware remains pending. No push or new flash is part of this checkpoint.
+
+Started by Development Orchestration
+following the user's Weather Provider Accuracy request. Implementation, sparing
+live checks, flashing and bounded board tests are authorized. The reviewed instant-save Alarm change and
+unrelated Radar/Sound Machine work are preserved. Product decisions remain in
+[architecture](architecture.md#weather) and [weather mappings](weather.md);
+this work record tracks delivery and evidence.
+
+1. Shared facts, mappings and daily selection. Permitted files: existing
+   `main/weather_icon_names.*`, `forecast_representative.*`, `storm_conditions.*`,
+   their existing native tests and affected fixture data. Check all provider
+   families/compound facts, current-only exclusions, the approved daily gates,
+   duplicates, missing data and unchanged warning limits. Disclosed existing
+   behavior changes: corrected pictures/captions and Unknown/no-picture fallback;
+   paired 50%/1.5 mm Rain/Showers selection; two distinct Hail reports; strict
+   mixed majority. Other family checks and approved cold guesses remain.
+2. Requests and decoding. Permitted files: existing `main/weather_client.*`,
+   `main/app_runtime.h`, `tests/test_weather_service.c`, existing support/build
+   files when needed. Check downloaded real snapshots before live calls, units,
+   fractional values, observation/epoch order, usable daily pairs, optional data,
+   sanitized errors, serialized requests and key-specific quota admission/recovery.
+   Confirmed daily exhaustion is the approved exception to normal retry timing;
+   generic 429 responses retain ordinary retry behavior.
+3. Settings and worker integration. Permitted files: existing
+   `main/device_config.*`, `main/ui/settings.c`, `main/main.c`, affected existing
+   tests and UI rendering/assets/build files. Persist provider/key in ordinary
+   Weather saves, mask/retain/explicitly clear keys, validate selected credentials
+   before publication, preserve independent drafts/restarts and wire the current
+   Weather controls. New provider behavior expands the available choice; no menu
+   redesign, provider framework, permanent worker, queue or extra store is planned.
+4. Closure and board pass. Independently review correctness and necessity,
+   run affected checks plus the regression suite, compile ESP-IDF5.5.5, inspect
+   payload/heap/stack/asset sizes, then flash and verify images/boot. Check real
+   provider/key switching, units and weather rendering with bounded user
+   observations. Restore temporary choices, keep normal firmware operating and
+   record genuine limits. Existing Alarm/Bell/Radar deferrals remain separate.
+
+Original live-call plan: six authenticated Visual Crossing and two Open-Meteo
+requests for deliberate schema/activation/board verification, including test
+restarts and periodic requests during that bounded window. Start from the two
+provided real snapshots; distinguish them from constructed error/rare-condition
+cases. Track counts and queryCost when returned. Do not deliberately exhaust
+quota. No key, key-bearing URL or credential-bearing payload enters reports or
+repository fixtures. The protected temporary handoff will be removed when no
+longer needed. Local evidence: `.reviews/main/visual-crossing-sprint-2026-10-13/`.
+
+Delivered in the existing owners: shared provider facts/current captions,
+approved daily selection, normalized requests/measurements, key-specific RAM
+quota admission, seven-entry ordinary Weather saves and activation checks in
+the existing save task. No provider framework, worker, queue, new store or
+maintained source path was added. Fog updates the existing canonical asset;
+Rain & Snow reuses the existing image; five new pictures add 940,000 image
+bytes in the existing `wac_icons` file. Its previous UI image content is preserved.
+The official Weather prototype now illustrates saved/changed masked keys,
+explicit Clear, retained keys and validation without making real requests.
+
+Independent review found and closed a credible future-hour conversion error:
+the real Visual Crossing response omits per-day/hour UTC offsets, so applying
+today's root offset across a DST change shifts future local samples. Decoding
+now preserves provider local date/time and keeps epochs separately. Spring/fall
+window and repeated-hour tests cover this correction. A duplicate Fog image was
+also removed in favor of updating its existing asset. Current snow classification
+uses reported evidence; the approved daily cold guesses remain as a preservation
+tradeoff, not a demonstrated accuracy improvement.
+
+Parent checks: all 38 native cases passed across the full run and isolated UI
+rerun; forecast 53/53, Conditions 40/40, location 3/3 and the existing messaging
+checks passed. The first full run's UI shell reached its 15-second limit during
+concurrent firmware compilation; alone it passed in 11.91 seconds and under
+the unchanged CTest limit in 11.11 seconds. No source or timeout change was needed.
+All 14 embedded mockup scripts parse. ESP-IDF 5.5.5 firmware builds successfully:
+17,089,376 bytes before the addressing correction, with 19% of the application partition free. Added/renamed source
+path check and `git diff --check` pass. No commit or remote action was performed.
+
+One deliberate live Visual Crossing US request returned HTTP 200 and queryCost 1;
+its sanitized 46,205-byte full response was then decoded by the actual C source
+without another request. Current observation, five provider dates/highs/lows,
+all 168 local hours and fractional values pass. The decoder cap is 192 KiB.
+Constructed rare IDs, errors, quota timing and DST cases remain distinct from
+this ordinary live capture. Physical activation, unit changes,
+navigation and decode-time heap/stack results are recorded below; real daily-quota
+response/reset metadata and rare live IDs remain unverified.
+
+Board load follow-up: all three images passed esptool write verification, but
+normal boot rejected an application segment beyond 16 MiB. Its reported bytes
+exactly match the same address wrapped into the first 16 MiB; the local image
+checksum/validation hash is valid. The application never starts, so no additional
+provider requests occur. The GD flash reports manufacturer `c8`, device `4019`,
+32 MB; the P4 is revision 1.3. Enable ESP-IDF's existing extended cache-address
+option and its experimental-feature gate in `sdkconfig.defaults`, preserving
+assets, DIO, flash size and partitions. Rebuild and verify real boot before
+proceeding. The experimental label concerns varying chip support, so the build
+alone is insufficient. The requested key has not yet been written. Disposable
+debugger/capture processes were stopped; the board remains in the USB loader
+during this correction. No settings partition was erased or replaced.
+The corrected matching build is 17,089,056 application bytes (still 19% free),
+with a 23,488-byte bootloader. Reconfiguration/build succeeds. An independent
+SDK/default review found no unrelated feature enabled; a complete earlier
+ignored configuration was not retained, so no exhaustive old/new generated
+configuration comparison is claimed. DIO/80MHz flash and HEX/200MHz PSRAM remain.
+The supplied key is absent from the firmware image, sprint source, fixtures and
+local reports. Actual extended-address boot and provisioning verification are
+still pending.
+
+The extended-address correction then passed real boot, including valid segment
+loads above 16 MiB and entry into `app_main`. At the storage-ready breakpoint,
+ordinary NVS calls wrote only `weather_key`, committed it and privately matched
+readback. A subsequent normal initialization reloaded the supplied key; provider
+remained Open-Meteo and every recorded nonsecret preference matched. Scratch RAM
+was zeroed/freed. No provisioning firmware or settings-partition replacement was
+used; the key is absent from application/source/report files.
+
+Normal decoding revealed a second required hardware correction: the weather task
+had only 636 bytes minimum stack headroom and overflowed during formatting;
+internal RAM was nearly exhausted while more than 12 MB PSRAM remained free.
+Target compiler frames explain the overlap: worker 1,952 bytes, request 3,152,
+decode 528 and Conditions 1,440 before nested library calls. Release transport
+scratch before decoding, retain the existing task size pending measurements, and
+set cJSON's existing PSRAM allocator hooks once in startup for all application
+JSON users. No new memory owner, worker or retry policy is introduced.
+Five automatic Open-Meteo attempts occurred in the panic/restart loop, exceeding
+the original two-call plan; they are recorded in the local budget. Visual Crossing
+still has only the one host request. The board is held in the USB loader and the
+saved key/preferences are preserved while this correction is tested.
+The memory correction's compiled request frame falls from 3,152 to 400 bytes;
+the transport helper uses 1,408 bytes and returns before decoding. The known
+Conditions chain drops from 7,120 to 4,368 bytes before deeper library calls.
+No stack-size change is made. Fresh native weather/maximum-key bounds checks,
+offline actual-response decoding and firmware build pass; independent source
+review found no remaining defect before the next board run. JSON hooks are set
+once in startup, with SDK-compatible freeing and existing checked allocation
+failure cleanup. The rebuilt application is 17,089,440 bytes, still 19% free.
+One controlled Open-Meteo startup and one eventual restoration are the remaining
+planned Open-Meteo checks after this incident; do not repeat failed live attempts.
+
+Corrected board run: matching images passed write verification, normal boot reads
+above 16 MiB and Open-Meteo returns HTTP 200 with an 11,090-byte payload. At decode,
+minimum free stack is 1,980 bytes, internal free RAM 88,855 bytes, largest internal
+block 31,744 bytes, and PSRAM free 12,542,560 bytes. Cleanup minimum stack is
+1,772 bytes and internal free RAM 106,491 bytes. The twenty-second post-success
+capture contains no panic/restart. These are one observed worker request, not
+worst-case timing or every fault; Settings activation memory and physical
+touch/appearance remain pending. The user's existing choices remain recorded
+privately for restoration, and the requested saved key survives initialization
+with Open-Meteo still selected. No key is embedded in any flashed image.
+The Weather test prompt now asks the user to choose Visual Crossing, verify
+Configured, Save once, and inspect restart/touch/current/Forecast/Conditions.
+API quota/reset and rare provider conditions remain controlled/native evidence.
+
+Visual Crossing activation passes on the board: the user confirms Configured,
+successful Save/restart, working clock/touch and weather on Clock, Forecast and
+Conditions, with Visual Crossing/Configured retained. Actual validation and
+startup requests both return HTTP 200, 46,224 bytes, queryCost 1 and result 0.
+The Settings save task's minimum free stack is 3,484 bytes and internal RAM stays
+above 83,903 bytes; the weather task's minimum is 1,724 bytes and internal RAM
+above 106,047 bytes. This activation phase used two requests, plus the single
+earlier host query. The final prompt changes units to Metric then back
+to Imperial using the same saved key, leaving Visual Crossing selected.
+This tests unchanged-key saves without extra activation calls and both real unit
+responses; confirmation and request counts remain pending. No alarm tests are
+reopened. The protected temporary credential/snapshot handoff has been removed.
+
+The user confirms Metric and restored Imperial/Configured fit and work. Serial
+capture nevertheless found two stack-protection panics in `rwd_ui_heartbeat`
+between these otherwise successful checks. The board was held in the USB loader
+to stop further requests. Weather and Settings memory remain healthy; the second
+fault crosses the UI task's stack bound while formatting text. This locates the
+failure but does not establish the complete triggering call chain. Target frames show heartbeat 688 bytes,
+copied config 624 bytes and newlib formatted output 1,152 bytes plus wrappers;
+one fault enters a 48-byte formatter frame just below its stack bound. Increase
+only the existing heartbeat to 6 KiB and record its minimum headroom after valid
+weather updates, logging only when that minimum falls. This uses 2 KiB of measured available internal RAM,
+preserving its local config copy and rendering, with no new state owner/task.
+Making config static was considered but not implemented; it would remove the
+local copy rather than establish the complete crash cause. The correction keeps
+the existing local-copy ownership and gives the task more working space.
+The six planned Visual Crossing requests are used, including the unexpected
+restart requests. One controlled startup after the correction is now necessary;
+record it as a seventh request rather than hiding it or repeating a crash loop.
+Do not repeat the completed unit saves or broaden Alarm/Bell tests.
+The final heartbeat patch and firmware build pass; the application is
+17,089,488 bytes with 19% partition free. It preserves the local configuration
+copy and all screen/Save code. The watermark is sampled after rendering outside
+the display lock, with only a task-local previously reported minimum. Source
+review and the final authorized board load pass. Matching images were verified;
+normal startup returned Visual Crossing HTTP 200, 46,083 bytes, queryCost 1 and
+result 0. Weather minimum free stack is 1,724 bytes and internal free RAM is
+105,099 bytes after cleanup. UI minimum free stack reached 3,120 bytes in the
+bounded capture, with no panic or unexpected restart. The subsequent user check
+confirms the clock keeps advancing, Forecast/Conditions/Weather navigation and
+touch work, and no unexpected restart occurs. This short observation is not a
+worst-case stack bound or an overnight stability test.
+The completed run totals seven Visual Crossing and six Open-Meteo requests,
+including unexpected restart attempts. The serial capture ended normally.
+
+The target compiler verifies that adding provider/key fields enlarged
+`device_config_t` from 488 to 624 bytes. The otherwise unchanged heartbeat keeps
+that whole copy locally, so its memory demand rose by 136 bytes. That is a
+measured contributor, not proof that those bytes alone caused the overflow.
+The missing full backtrace and limited observed stack paths remain explicit
+limits on the causal explanation. No further source change is made for this
+explanation. The board is left with Visual Crossing, Imperial and the configured
+key; no additional unit/provider saves or Alarm/Bell tests are requested.
+
+Closure: final physical navigation passed on October 13. Source/native/build/
+flash and the scoped board acceptance checks are complete; no additional required
+implementation item was found in the independent correctness/necessity review.
+The key exists in board NVS only. Temporary credential handoff, serial/debugger
+processes and the task-owned native build directory are cleaned up; useful logs,
+fixtures and review evidence remain local. No commit, push or PR comment was made.
+Retain the stated limits on crash causation, long-duration operation, rare live
+weather pictures and actual provider quota/reset responses. The earlier deferred
+Shared Device ID issue and separate Radar/Sound Machine work are unchanged.
+
+## Radar source and palette decision — October 13, 2026
+
+Recorded the user's RainViewer and green/yellow/red choice in the
+[radar specification](architecture.md#radar-source-and-palette), including the
+exact gradient stops from the selected comparison. Retained that comparison
+as local visual evidence. Provider documentation and the recorded palette
+were checked; firmware, the official mockup and application assets were not
+changed. No software tests, firmware build or board checks were run for this
+documentation decision.
+
+Radar is not implemented. Its remaining design and implementation work is
+listed under [current work](#current-work--reconciled-october-13-2026).
+
+Follow-up: created a proposed round-screen radar preview with the selected
+palette, a background map and enlarged town labels. The
+[screen image](../.reviews/radar-screen-mockup-2026-10-13.png) uses the actual
+northern Colorado sample from October 13 at 8:20 AM MDT, not current conditions.
+The user clarified that radar is a peer of Forecast and Conditions. Revised
+the preview to use a main weather screen with a curved heading and removed the
+menu-style header and return arrow. The architecture records the navigation
+choice; the exact screen order and layout remain unapproved.
+The user then requested a darker map that blends into the clock background.
+Revised the proposed preview with a charcoal basemap, a soft edge and muted,
+legible labels. Rebuilt the same recorded radar frame as a separate layer,
+using the approved color mapping and display opacity; all 34,691 visible source
+pixels matched the provider's color table and retained their original alpha
+before display opacity was applied. Background styling does not recolor radar.
+Browser inspection at 736px and 320px confirmed readable labels, timestamp,
+legend and credits. The preview script parses; the radar uses the same frame,
+extent and palette as the selected comparison. This layout is a proposal and has not been approved or
+added to the official mockup or firmware. No firmware or board checks were run.
+
+Edge-blending follow-up: the user requested a more gradual transition into the
+clock background. Updated the proposed preview to use one wider, eased opacity
+fade for both basemap and radar, removing the radar layer's hard circular crop.
+Town labels remain outside the fade. The default transition spans 120 pixels on
+the 800-pixel clock, compared with the earlier background-only 64-pixel fade;
+its exact width is still a mockup choice. Embedded map/radar image bytes, frame,
+geographic extent and palette are unchanged. Safari inspection at 736px and
+320px confirmed the softer perimeter and legible labels, heading, timestamp,
+legend and credits. Script syntax passes. The host's optional fade-width control
+was not exercised in the standalone inspection wrapper. Updated the existing
+preview image; no official mockup, firmware source, build or board check changed.
+
+Map-definition follow-up: the user found that fade too soft and the background
+geometry too muted. Narrowed the proposed transition to 88 pixels and increased
+only the basemap's brightness and contrast, making roads and terrain clearer.
+The radar frame, palette and embedded source images are unchanged. Safari
+inspection at 736px and 320px confirmed the clearer map, gradual perimeter and
+readable labels. Script syntax passes. Updated the existing preview image;
+the exact styling remains proposed, with no firmware or board checks.
+
+Design selection and mockup promotion: the user approved trying this refined
+design for the clock's radar screen. Integrated it into the existing
+[official visual reference](../mockups/alarm-design.html), available through
+the Radar preview beside Forecast and Conditions. The selected map, radar,
+palette, fade, town labels, heading, timestamp, legend and credits are preserved;
+the preview uses the clock mockup's embedded font and Day/Night appearance.
+The toolbar's selector order does not settle the device's eventual swipe order.
+The existing clock, settings, Sound Machine and House Messages content is
+preserved. No new source file or firmware feature was added.
+
+Safari checks passed for the Radar selector, Day/Night appearance, 736px and
+320px layouts, and navigation to Forecast, Conditions, Sound Machine and the
+House Messages browser preview. All eleven inline scripts parse across the
+outer document and both previews. The embedded map and radar image data match
+the selected design; reversing the six scoped integration edits reproduces all
+previous device-preview content. No browser script error was observed; the
+wrapper's favicon is blocked by its existing content security policy. Checks
+and screenshots are local under `.reviews/radar-design-promotion-2026-10-13*`.
+No firmware build, flash or hardware check was run: this slice only promotes
+the selected design. Live radar implementation remains in the current work list.
+
+## Radar and Sound Machine memory estimate — October 13, 2026
+
+Read-only feasibility check: budget **2–4 MiB of additional RAM for radar**,
+assuming the proposed roughly 534×534 map, one displayed frame and one
+replacement, with large image buffers in PSRAM. One RGB565 map is 570,312
+bytes; a cached background plus two completed maps is 1,710,936 bytes before
+decoding and network scratch space. Budget **100–250 KiB for one streaming MP3
+playback path**, including decoding, buffers and stack. The three live noise
+generators need little state beyond playback buffers. These are planning
+estimates, not measured allocations or approved implementation requirements.
+
+The [October 12 boot capture](../.reviews/main/classic-bell-2026-10-12/measure2-startup.log)
+reports 32 MB flash/PSRAM and a main 17,024 KiB PSRAM heap pool after code and
+read-only data mapping, before application allocations. The current display
+configuration uses three 800×800 RGB565 panel buffers (3,840,000 bytes in PSRAM)
+and an 80,000-byte internal draw buffer. These are existing allocations, not
+additional radar costs. No retained measurement establishes free RAM in the
+running clock. Internal-memory headroom and uninterrupted sound during radar
+downloads/decoding still require a board check. Espressif's
+[MP3 decoder benchmark](https://components.espressif.com/components/espressif/esp_audio_codec/versions/2.6.2/readme?language=en)
+reports 28 KB heap use at 44.1 kHz stereo, excluding stack, on ESP32-S3; it is
+not a measurement of this ESP32-P4 application.
+
+The nine original recordings total 8,336,084 bytes (7.950 MiB). A host-side
+check using Espressif's existing SPIFFS image generator and the current firmware
+settings successfully packed all nine originals into the 11 MiB file partition.
+Blocks containing files occupy 9,146,368 bytes (8.723 MiB), including filesystem
+overhead, leaving 2,387,968 bytes (2.277 MiB) in empty blocks. The generated image
+was checked for the exact partition size and then removed; original file hashes
+remained unchanged. This confirms image capacity, not a mounted filesystem or
+board playback test.
+
+[SPIFFS's approximately 75% utilization guidance](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32p4/api-reference/storage/spiffs.html)
+is a reliability guideline, not a hard image-size limit. The original audio
+payload is close to that guideline, so frequent file additions or replacements
+would merit more headroom. Re-encoding is not required to pack this fixed sound
+collection. Keeping radar caches in RAM avoids competing with recordings for
+this file space.
+
+All original recordings are stereo; eight use variable bit rates and Thunder is fixed
+at 256 kbps. Their measured average rates and original file hashes are retained
+in the [local analysis](../.reviews/radar-and-sound-memory-2026-10-13.json).
+Estimated collection sizes are 5.30 MiB at 128 kbps, 4.08 MiB at 96 kbps and
+2.82 MiB at 64 kbps, retaining any file already below the chosen target.
+Lower bit rates are optional storage headroom, rather than a demonstrated
+requirement for this collection. A listening comparison would be appropriate
+before choosing compression; keep the already smaller singing-bowl file
+unchanged. No re-encoding was performed during this feasibility check; the later
+approved preparation is recorded below. The RAM budget
+changes little because playback streams short chunks rather than loading entire
+files.
+
+Reading the Sound Machine Sounds chat confirmed the nine-recording/three-noise
+design remains proposed. During this feasibility check no firmware source,
+storage layout or audio file was changed; no build, flash, live heap measurement
+or hardware check was run.
+
+## Original firmware reference checkout removed — October 13, 2026
+
+At the user's request, removed the unused `ESP32 Weather Alarm Clock Original`
+checkout from Projects by moving it to macOS Trash. The active repository still
+preserves `baseline-original-2026-10-07-d9d621a` at commit
+`d9d621ac8e96e907bf962dfb8a31631ca4dba4e9`. The separate checkout was clean and
+at that same commit before removal. No active build reference to the directory
+was found. Its earlier build/comparison reports remain historical evidence.
+
+After removal, verified the tag and all 18 MP3 hashes in the active project's
+`shared/assets/sounds/originals/` and `shared/assets/sounds/clock/`. Those two
+sets remain unchanged. No active firmware source, Git tag, build, flash or board
+state was changed.
+
+## Sound Machine recording conversion — October 13, 2026
+
+Completed the approved recording preparation under the
+[recording and loop decisions](architecture.md#sound-machine-recording-decisions).
+The two retained audio sets are now inside the project:
+
+- [Original recordings](../shared/assets/sounds/originals/): nine untouched MP3s
+  for later re-encoding or reverting, totaling 8,336,084 bytes (7.950 MiB).
+- [Clock recordings](../shared/assets/sounds/clock/): the nine final crossfaded
+  MP3s for playback, totaling 5,653,510 bytes (5.392 MiB), 32.18% smaller.
+
+All nine clock files were prepared directly from the original recordings, mixed
+into mono and given the selected two-second constant-power tail/head blend.
+Each was encoded once from temporary float PCM using LAME 4.0's 160 kbps average
+preset and highest algorithm-quality setting, `-q 0`. Original sample rates
+were retained: 24 kHz for Singing Bowl/Forest/Night and 44.1 kHz for the other
+six. The preset's 0.95 gain reduction was compensated; there was no loudness
+normalization. No earlier converted version was used as an encoding source.
+
+All nine outputs decode fully to their original playable sample count minus
+two seconds, in mono, with valid LAME delay/end-padding metadata and no
+full-scale clipping. Independent macOS metadata checks agree with the playable
+counts and padding values; read-only review confirmed the cyclic assembly and
+frame/tag accounting. Repeat intervals are about 33 seconds for Campfire/Stream,
+38 for Forest/Night/Rain/Wind, 43 for Ocean/Thunder and 47 for Singing Bowl.
+The current 11 MiB SPIFFS image packs successfully with 5.082 MiB in empty
+blocks after overhead. This is host verification, not board playback.
+
+The user preferred the rain crossfade demonstration and said the finished
+recording previews sound good. After comparing Singing Bowl with its original,
+the user confirmed its natural strike-and-decay pattern and explicitly chose
+to keep the crossfaded version unchanged. These listening decisions do not
+verify the future ESP32 player's padding removal or buffering across repeats.
+Final hashes, measured bit rates, exact sample counts, fade/wrap checks and
+listening feedback remain in the [final validation record](../.reviews/sound-machine-crossfaded-2026-10-13.json).
+Playback uses the prepared files without adding another crossfade; its approved
+requirements belong in the linked architecture.
+
+Cleanup at the user's request: moved both sets out of Downloads into the project
+and verified all 18 original/final hashes after the move. Removed the 12 unused
+listening WAVs and seven obsolete preview/conversion metadata or log files,
+freeing 27.090 MiB. No alternate Sound Machine audio versions remain. The final
+validation record is retained for integration; unused preview links and the
+superseded conversion history have been removed from this work record. The
+Sound Machine Sounds chat was notified of the corrected project paths.
+No firmware source, maintained source path, build, flash or board playback was
+changed or run by this asset preparation and cleanup.
+
+## Daily Hail and Rain & Snow decision — October 13, 2026
+
+Recorded the user's approval of the [additional daily picture rules](weather.md#additional-daily-pictures)
+and current-only condition scope in the weather owner. The architecture points
+to that owner, and the earlier integration analysis now marks its selection
+proposal as superseded. Local links and preserved source files were checked.
+Implementation remains deferred. No firmware, official mockup or canonical
+artwork changes, software tests, builds, board work or weather API requests were
+made.
+
+## Visual Crossing sprint scope follow-up — October 13, 2026
+
+The user approved including mapping/artwork revisions in the next weather sprint,
+selected the simple quota behavior after restart, and deferred provider-credit
+placement. These decisions are recorded with their [service owner](architecture.md#weather)
+and [mapping owner](weather.md). At this checkpoint the extra daily picture rules
+were proposed; their subsequent approval is recorded above. No implementation sprint was
+started. Local documentation links and preserved source files were checked; no
+firmware, official mockup or canonical artwork changes, software tests, builds,
+board work or weather API requests were made.
+
+## Visual Crossing quota recovery decision — October 13, 2026
+
+Recorded the user's approved recovery policy in the
+[weather service rules](architecture.md#visual-crossing-quota-recovery), replacing
+the earlier proposed fallback. The weather mapping reference and local
+integration analysis now point to that owner. Implementation remains deferred;
+this decision does not authorize a new firmware sprint. Documentation links and
+preserved source files were checked. No firmware, mockup or artwork changes,
+software tests, builds, board checks or weather API requests were made.
+
+## Daily forecast picture decision — October 13, 2026
+
+The user approved reuse of the current daily forecast selection method for
+both providers with a focused ordinary Rain/Showers qualification change. The
+[selection policy](weather.md#five-day-forecasts) owns the approved details and
+supersedes the earlier dominant-duration proposal. Documentation is updated;
+implementation remains deferred. Local links and preserved source files were
+checked. Firmware, official mockups and artwork were not changed, and no
+additional provider requests, software tests or board checks were run for this
+update.
+
+## Documentation YAGNI and MECE audit — October 13, 2026
+
+Completed a full review of AGENTS, architecture, weather and this work record.
+Corrected the accepted Bell verification limit, separated complete weather
+mappings from selection recommendations, identified Wind's new forecast branch,
+retired completed sprint instructions and reconciled one [current work list](#current-work--reconciled-october-13-2026).
+The earlier weather icon block is absent from the local architecture; it remains
+in the last commit because the documentation changes are uncommitted.
+The [audit report](../.reviews/docs-yagni-mece-2026-10-13.md) records findings,
+ownership decisions and inspection limits. Firmware, official mockups and
+canonical artwork were not changed. No firmware or board checks were run.
+
+## Weather mapping reference — October 13, 2026
+
+Status: documentation completed in [weather.md](weather.md), with the complete
+provider mapping table, portable icon previews, source limitations and a separate
+record of the unchanged current firmware mapping. The architecture, document
+authority map and user guide link to that owner. Earlier local mapping reports
+remain research evidence and point to the maintained reference.
+
+Follow-up correction: removed misleading unresolved/pending mapping labels.
+Generic Ice uses the white snowflake; Sleet is explicitly unused by these
+providers. Shared pictures and complete compound/daily selection are defined
+in the mapping owner. The remaining thunder code list was moved out of the
+architecture, which now links to the weather classification. Independent
+read-only inspection checked this ownership correction.
+
+This is not a firmware implementation slice. Visual Crossing downloads,
+credential persistence and revised icon/forecast rules remain unimplemented.
+The new artwork is not integrated into canonical assets or official mockups.
+Documentation links and provider-code coverage were checked; no firmware build,
+software tests, authenticated provider request or hardware check was run for
+this documentation update.
+
+## Prepared Sound Machine sprint
+
+Prepared October 13, 2026. **Held at the user's request: not sent, not started.**
+The user will explicitly instruct when to send the sprint. This local preparation
+starts no implementation, automation, new chat, firmware build or board operation.
+The current authorized weather sprint and its remaining correction stay active.
+
+The [Sound Machine playback rules](architecture.md#sound-machine-playback),
+[controls](architecture.md#sound-machine-controls),
+[recording rules](architecture.md#sound-machine-recording-decisions) and
+[official visual reference](../mockups/alarm-design.html) own the requirements.
+The first-use volume is now 30%. All operating choices identified in the readiness
+review are approved; decoder selection and buffer sizing are engineering work,
+not further product decisions. This plan expands the existing audio and settings
+implementation to deliver that approved behavior.
+
+### Implementation slices
+
+1. **Preferences and command ownership.** Extend existing
+   `targets/esp32-p4/main/device_config.c/.h` for the three preferences and their
+   validation/defaults/ordinary saves; extend `audio.c/.h` for copied Sound Machine
+   commands and a small playback/status snapshot. Keep one audio worker and speaker
+   owner. Use existing save/completion paths, preserving unrelated preferences and
+   other pending editor drafts. Scope preview cancellation independently of
+   Sound Machine Stop. Verify defaults, preference reload, user-applied writes,
+   failed saves, pending Start/Stop and priority through existing
+   `tests/test_device_config.c`, `test_audio.c` and support files.
+2. **Recordings and generated sounds.** Use an appropriate managed MP3 decoder
+   through existing `main/idf_component.yml`/dependency lock and build facilities.
+   Verify its actual delay/padding behavior rather than assuming it trims files.
+   Package only `shared/assets/sounds/clock/` through the existing CMake/SPIFFS
+   facilities into the current 11 MiB storage partition; exclude originals and
+   retain the BSP's non-formatting mount-failure behavior. Extend `audio.c/.h`
+   for correctly rated mono recording playback, short buffered repeats and the
+   three live noise generators. Preserve the existing alarm generator and format.
+   Verify exact playable samples and repeats against the final manifest, output
+   levels/noise character, cancellation during setup/read/decode, malformed or
+   missing files, codec failures and release of decoder/buffer resources. Use
+   existing tests and disposable diagnostics; do not introduce an alternate UI,
+   a decoder service or a separate playback worker.
+3. **Timer, live changes and audio priority.** Implement the approved elapsed-time
+   and gain rules in the existing audio owner. Extend existing audio checks for
+   all timer choices, full-interval Play, Stop, live sound/volume/timer changes,
+   the end fade, Continuous, clock corrections, ringing/preview interruption and
+   no automatic resume. Keep playback/deadlines out of persistent storage. Preserve
+   alarm preview lifetime, ringing ramp, Snooze/Dismiss and lazy codec failure/retry
+   behavior; a failed codec must not publish false Playing status. Current native
+   codec substitutes assume 22.05 kHz/441-sample alarm writes: extend them for
+   recording formats while retaining their precise alarm assertions.
+4. **Production UI and clock shortcuts.** Reuse existing `ui/settings.c`,
+   `ui/controls.c`, `ui/ui.c`, `ui/clock_views.c`, `ui/ui_private.h`, and only needed
+   display/startup integration in `app_runtime.h`/`main.c`. Replace the redundant
+   Settings-entry Alarm switch, retain the immediate Alarm Settings switch, and
+   implement the approved screens/status/navigation. Render from owner copies;
+   keep no second countdown or audio state. Reuse existing grouped icon/font assets
+   and their tools for needed speaker artwork. Verify all choices, scrolling,
+   immediate controls, saved captions, Back continuation, error presentation,
+   both appearances, clock headers/indicators and the preserved alarm tap areas
+   in existing `tests/test_ui.c`. Keep current touch behavior; drag-outside tap
+   cancellation is outside this sprint.
+5. **Review and closure.** Independently review feature coverage, correctness and
+   necessity, then run affected checks and the full native suite and compile
+   ESP-IDF 5.5.5. Inspect firmware/recording image sizes, actual heap allocation and
+   decoder/worker stack needs before a separately authorized flash/board pass.
+   On hardware, check all twelve sounds, recording seams, noise character and
+   comfortable volume, timer expiration/fade, Stop/preemption response, restart
+   Stopped with remembered preferences, Day/Night controls and sustained playback
+   during representative normal weather/network/display/touch activity. Use current
+   applied preferences as the restoration baseline; restore any temporary changes.
+   Keep substituted software checks distinct from actual decoder/board evidence.
+   Record results and remaining limits here; update user-facing guides when the
+   firmware feature is delivered. Do not commit, push, merge or flash without
+   the applicable authorization.
+
+### Scope and readiness
+
+Existing approved source paths suffice for the planned work. Existing firmware
+and test CMake lists, dependency manifest/lock, BSP storage/audio facilities and
+configuration are the integration points; do not create an additional service,
+wrapper, maintained test file or tool unless a concrete need is established and
+any required exact-path permission is obtained. Runtime/resource measurements
+may justify an adjustment to the existing worker or buffers, not speculative
+extra machinery. Preserve unrelated ongoing weather work.
+
+The final recording image was host-packed successfully with 5.082 MiB of empty
+blocks after filesystem overhead; this does not establish mounted board playback.
+Current playback generates only alarm/preview PCM and has no application MP3
+path. Running free memory, decoder stack and uninterrupted loops remain firmware
+and board verification. No resource blocker has been demonstrated, and no
+partition expansion is planned.
+
+Preparation validation: checked authoritative decisions, file ownership,
+source-path permissions, existing audio/configuration/test/build facilities and
+recording capacity evidence. An independent read-only readiness check identified
+no remaining product choice. This entry is a prepared local plan, not dispatch
+or implementation evidence; no firmware tests, build or hardware checks were run
+for preparation.
+
+## Slice: Sound Machine mockup promotion — approved October 13, 2026
+
+Status: integrated into the existing official `mockups/alarm-design.html`.
+The [Sound Machine specification](architecture.md#sound-machine-controls) owns
+approved controls and the limits of this visual approval. No firmware, new source
+file, task, queue or storage mechanism is added by this slice.
+
+The approved changes replace the mockup's redundant Settings-entry Alarm switch
+with Sound Machine and chosen-sound subtext; add its controls, twelve-choice
+scrolling sound selector and five-choice Sleep Timer; and add playing/stopped
+speaker shortcuts to both clock faces. Both headers use title case and matching
+day/date spacing. The speaker and RTC tap areas follow the approved between-row
+placement while the existing alarm areas remain. Diagnostic outlines are not
+promoted to the device UI. Existing shared settings components own the style.
+
+Parent validation passed in the actual interactive mockup for both appearances:
+all twelve sound choices and five timers, list dragging, scrollbar-thumb dragging
+in both directions, scrollbar keyboard navigation, description fit, selected
+state, volume independent of alarm volume, Play/Stop, timed/continuous status,
+Back to the entry screen, clock shortcuts, RTC notice and the retained immediate
+Alarm Settings switch. Measurements confirm the approved clock geometry,
+unchanged alarm areas and four-pixel Analog gap; new settings controls fit the
+round display. All ten inline scripts parse, including the House Messages
+preview, and the live device preview has no browser script errors.
+
+Five existing settings screens were compared in both appearances. Their content
+is pixel-identical within the clock; the only Night screenshot differences are
+10–54 edge pixels where the circular clip meets the browser's dotted background.
+Independent read-only coverage review found no actionable issue. Screenshots and
+checks are local under `.reviews/main/sound-machine-promotion-2026-10-13/`.
+No firmware build, flash or hardware check was run for this mockup slice; it
+changes no firmware source or assets. No commit, push or merge was performed.
+
+## Slice: Immediate Alarm Settings On/Off — approved October 13, 2026
+
+Status: implemented and checked in development. Alarm Settings now reuses the
+existing immediate enabled-only save operation. Other alarm edits retain their
+draft and ordinary Save/Cancel behavior; a successful toggle updates only the
+enabled field in that editor's baseline and draft. The existing Settings-entry
+switch remains in firmware until Sound Machine menu integration is built.
+The Sound Machine promotion slice replaces that row in the visual reference.
+The [save rules](architecture.md#editing-and-saving-user-settings) own the behavior.
+
+The change was disclosed before implementation: the Alarm Settings switch
+previously stayed draft-only until Save; it now applies without requiring Save,
+and Cancel/Back cannot undo a successfully saved toggle. No other behavior,
+source path, task, queue or storage mechanism is added. The official mockup and
+user guide reflect this choice. Sound Machine controls were subsequently
+approved for the visual reference in the promotion slice; their firmware
+integration remains unimplemented.
+
+Parent validation: fresh native configure/build, focused Settings check and all
+33 native checks pass (full suite 15.30 seconds). Actual LVGL controls and
+production configuration code check enabled-only writes, preservation of all
+other draft fields, Cancel/Back, subsequent full Save, both appearances, hidden
+completion, duplicate taps, task-start/commit failures, retry, an unfinished
+zero-day draft and configuration reload. These use controlled save failures,
+not physical power-cut observations. ESP-IDF 5.5.5 build passes (image
+`0xf622c0`, 23% application partition free). All eleven embedded mockup scripts
+pass syntax checks; execution of its actual toggle/Cancel branches verifies
+draft preservation. Independent read-only review found no actionable issue.
+Evidence is local under `.reviews/main/alarm-immediate-toggle-2026-10-13/`.
+
+Remaining: authorized flash and physical check of the immediate switch from
+the main clock's Alarm shortcut, Cancel with other pending edits, and ordinary
+alarm operation. No flash, hardware test, commit, push or merge was performed
+for this slice. Existing board firmware and prior verification remain as recorded.
+
 Local commit checkpoint (October 12, 2026): the user authorizes committing the
 reviewed application and documentation changes through the Weather menu and
 Classic Bell work. This supersedes earlier slice-specific statements that no
@@ -43,11 +708,9 @@ alarm retesting. Both bounded sprints are complete at this accepted checkpoint.
 No further board test or capture is started; the normal firmware keeps running.
 Disposable native build directories and task-owned serial captures are cleaned
 up; useful logs remain local.
-The user authorizes firmware implementation, testing and flashing. This chat
-owns firmware and board access. Preserve the Classic Bell replacement, remove
-its remaining disposable timing counters before the final normal build, and
-retain the existing alarm evidence without adding replacement-sound retests.
-Local evidence is in
+The October 12 authorization covered implementation, testing and flashing
+for this completed sprint. Bell probes were removed before the normal build;
+the accepted alarm evidence was retained. Local evidence is in
 [the closure record](../.reviews/main/weather-menu-spacing-2026-10-12/closure.md).
 
 Implementation uses one temporary provider choice and a 128-character key draft
@@ -63,33 +726,10 @@ All six raised input/label layouts, keyboard pages, whole-row entry, disabled
 Open-Meteo key row, unsupported-provider Save blocking/reset, retained Device
 draft, alarm hiding/resumption and the existing save/failure/restart cases pass.
 
-Objective: implement the current official mockup's four-row Weather menu and
-shared raised typing layout. Permitted implementation files are existing
-`targets/esp32-p4/main/ui/settings.c` and, only if its existing navigation needs
-adjustment, `ui.c`/`ui_private.h`. Extend existing `tests/test_ui.c` checks;
-update this work record, architecture and relevant user/test guidance. Remove
-Bell probes only from existing `main/audio.c`. No new source path, provider
-adapter, task, queue or credential storage is planned.
-
-Disclosed temporary provider behavior: Open-Meteo remains the working provider.
-Selecting Visual Crossing changes only the Weather editor's unsaved presentation
-and enables its password-style API Key field. Show that Visual Crossing is not
-available yet and block Weather Save while selected. Provider/key drafts are
-discarded on leaving the Weather editor; neither becomes applied configuration
-or a stored credential. Switching back to Open-Meteo permits the existing
-location/units save without a key. Backend implementation is deferred.
-
-Acceptance: Day/Night Weather shows Location, Provider, Units and API Key in
-the reference's order and row/footer positions. The whole location row opens
-editing. All six text fields use the shared 12px-raised label/input placement;
-keyboard geometry/pages remain unchanged. Location's exact automatic-timezone
-note and real errors fit their reference bands. Verify unsupported-provider
-Save blocking, draft discard, existing lookup/timezone/units and Save isolation,
-Back/Done/Cancel and alarm interruption/resume. Run affected checks and the full
-native suite, compile firmware, independently review simplicity and ownership,
-then flash without erasing settings and match bounded startup evidence to the
-tested image. Physical confirmations cover only the new controls/spacing and
-remain open until observed. No commit, push or merge is authorized.
+The completed scope used the existing Settings renderer and checks. Weather
+interface behavior belongs to the [visual and editing contracts](architecture.md#ui-and-visual-reference);
+the temporary provider/key presentation is defined there. This sprint added
+no Visual Crossing backend, persistent key, provider adapter, task or queue.
 
 Keyboard spacing mockup follow-up (October 12, 2026): the shared active input
 and label move up 12px across all six text editors. Weather's timezone guidance
@@ -134,53 +774,21 @@ this sprint's work list at the user's request, not reported as having passed.
 Earlier Classic Beep ring/recovery results remain valid evidence for the
 unchanged alarm behavior; do not relabel them as Bell measurements.
 
-Behavior change: replace the existing Gentle Chime melody and its name with
-Classic Bell, using the user's latest selection, **slower B**. This changes the
-second sound choice; it does not add a choice or change the default sound.
-The approved sound and preserved playback behavior belong to
-[Alarm and snooze](architecture.md#alarm-and-snooze), and audio ownership remains
-under [Ownership](architecture.md#ownership). No unrelated
-behavior change is proposed; disclose any newly necessary change before coding.
-
-Work and ownership:
-
-1. In existing `main/audio.c`, replace the chime calculation with efficient live
-   bell generation. Use single-precision arithmetic and integer sample timing,
-   with bounded work and storage. Move repeated coefficient calculations outside
-   the sample loop where useful; choose further optimization from measurements.
-   Preserve overlapping bell tails across strikes/chunks and reset playback
-   state for a fresh preview or new/resumed ring. Normalize the bell internally
-   as needed for headroom, preserving the shared volume curve and other sounds.
-   Keep speaker access, commands, cancellation and errors with the existing worker.
-2. Update existing configuration identifiers, Settings labels/descriptions,
-   affected tests, the official mockup's sound choice/preview and user-facing
-   sound list. Remove the superseded chime definition and its obsolete waveform
-   expectations. Keep unrelated concurrent changes and historical evidence.
-3. Verify the sound and playback controls in existing tests, build with ESP-IDF
-   5.5.5, then flash and verify the resulting images and running identity. Preserve
-   NVS settings; record and restore any temporary alarm choices used for testing.
-4. Diagnostic measurements and their limits are recorded above. Disposable
-   counters/automatic previews are removed and the final normal image is verified.
-   The user accepts the sound after listening and declines further alarm retests.
-   Keep unmeasured normal-path timing as an evidence limit, not pending work.
-
-Acceptance: Classic Bell matches the selected character/cadence and appears in
-the second sound slot; Classic Beep and Rising Tones retain their waveforms.
-Check full-volume bounds, zero/arbitrary volume, five-second preview, cancellation,
-new/resumed-ring progression, priority and long-running sample timing. All
-affected checks and the normal native suite/build pass. The user's final listening
-acceptance closes this replacement; additional alarm retesting is declined.
-The diagnostic measurements retain their stated limits. This bounded session does not
-reopen the previously deferred wider outage or twelve-minute alarm tests.
-
-The YAGNI choice is replacement inside existing owners: it preserves the alarm
-feature set while changing the selected sound, and avoids an additional worker,
-queue, persistent field, recorded PCM asset or generic synthesis system. Sound
-requirements stay in the architecture, execution/evidence here, UI wording in
-the existing views and mockup, and generation/playback in `audio.c`. Use approved
-existing source paths only. No push, merge or unrelated cleanup is authorized.
+Completed scope: replaced Gentle Chime with the selected slower B Classic
+Bell in the existing audio owner and updated its name, description and preview.
+Classic Beep remains the default; the other sound and existing controls remain.
+No additional worker, stored recording, settings owner or source path was needed.
+The [sound definition](architecture.md#alarm-and-snooze) and
+[audio ownership](architecture.md#ownership) remain in the architecture.
+The performed checks, listening acceptance and accepted unmeasured limits are
+recorded above; this completed plan does not add future Bell testing work.
 
 ## Existing development and verification record
+
+These are dated checkpoint records. Retain their performed checks, observations
+and limitations as evidence; use the [current work list](#current-work--reconciled-october-13-2026)
+for ongoing actions rather than treating an older remaining-work statement as a
+new instruction.
 
 Weather provider mockup update (October 12, 2026): the official Weather screen
 under Device Setup now shows Weather Location, Provider, Units and API Key.
@@ -709,23 +1317,96 @@ Completed so far:
 
 The approved fixes from the YAGNI/MECE review are closed. F8's unnecessary browser-adaptation task was corrected earlier. Approved unfinished development and declined choices are listed below.
 
-Approved development still unfinished:
+## Current work — reconciled October 13, 2026
 
-- Backup-clock wiring guide: document the supported DS3231 module's connection to the Waveshare board, including the shared I2C bus and coin-cell placement. The root README retains hardware selection and user-facing battery limitations; writing and verifying the missing wiring instructions remain pending.
-- Settings navigation and Display Save board verification: implementation above was flashed October 12; visual/control checks are in progress. Check both appearances, Settings/Device row order, the four Display rows and three Night Shift rows, remaining Brightness Done/summary and visible 12-hour clock-padding checks, both brightness levels/appearances, Weather Back/Cancel retaining pending Device edits, and alarm restoration. The basic Brightness Back, Display Cancel/live Save and baseline restoration pass is closed above; do not repeat it merely to extend the checklist. The basic real time-bearing Conditions Save check is closed in the Leading Zero session above (`3 PM` ↔ `15:00`); do not repeat it routinely. Offline/stale operation, format Cancel and other physical captions remain unverified. The reported analog `Tomorrow · 7:00 AM` one-line notice and Alarm Settings tap are confirmed above; both appearances and other captions were not separately reported. Retained Device/Weather restart behavior also needs a board retest. Exact panel alignment and physical touch remain unverified.
-- Messaging board verification: the user confirms guidance readability, keyboard hide/restore and the later vertical-centering/Done-clearance adjustment. Whole-row access and House Messages controls passed earlier basic checks; do not repeat them just to extend the list. Separately stated Day/Night confirmation of the current placement and untested error states remain open.
-- Board retest: the controlled RTC-trigger investigation and bounded correction are complete above. The user reports that everything seems to be working after BSP startup restoration. Detailed swipes/Settings/keyboard checks and longer operation remain to be recorded; the general observation and unattended polling do not establish every physical interaction. External RTC operation, precise driver interrupt ordering, broader rendering, brightness transitions, network recovery and power cuts remain unverified. Blue flashes remain a separate unresolved observation. Retire retained original/reference/fallback evaluation material once it no longer serves the current physical comparison or recovery checkpoint.
-- Settings board comparison: the basic pass is closed. Prompted control/typing checks passed, including all four keyboard pages in the initial Device-field test, time stepping/hour wrapping, preference selections and sliders. Night checks passed for normal Alarm, Display, Device, Night Shift, offset and Wi-Fi pages, visible inputs and readable controls. The Wi-Fi question included scrolling when more than three networks appear; the reply did not separately state the row count. Device Setup Save & Restart passed, and the original Sunset to Sunrise mode and Day appearance are restored after the temporary Always On test. Remaining physical verification covers precise mockup positions/typography/colors, separately unreported noon/midnight AM/PM crossings, all Night keyboard pages, validation/error/scan-empty/pending states, actual connection-phase captions, the immediate Settings-entry Alarm save and broader feature-specific saving/persistence. Do not repeat successful basic checks merely to extend the test list. Keep existing discovery and settings-save ownership. See the [local closure evidence](../.reviews/main/settings-menu-2026-10-10/final.md) for exact prompted observations and limits.
+This is the current work list. Dated entries above retain the observations and
+limits at their own checkpoints; their old remaining-work statements do not
+reopen checks subsequently closed. Startup and inherited-screen cleanup remains
+the priority under [AGENTS.md](../AGENTS.md#current-checkout-and-retained-material).
+No new firmware or board work was performed during this documentation audit.
 
-- Night Shift board verification: local solar scheduling and calculated Settings times pass development checks above. The populated-page, unsaved preview/Cancel and Solar Save/restart checks are closed as reported, including the expected afternoon Day appearance and retained At offsets. Physical transitions, configured fades and offline operation remain pending; temporary 50% brightness levels must be restored to the user's recorded Day 100%/Night 25% after testing. Equal test levels do not verify a fade. Trustworthy offline startup still requires an attached backup clock. Earlier board diagnostics showing Solar retaining Day preceded this implementation; no lost-settings repair is implied.
-- Screens: settings presentation is implemented and checked in source; physical compliance remains pending. The Weather saved screen uses the real timezone identifier through the reference fallback rather than the browser’s friendly generic name. The approved thin slider proportions are now explicit in both mockup and firmware; the user confirms clear handles and normal interaction on the board, while exact browser/board pixel equality remains unverified. The eleven approved normal-clock, weather-waiting and Forecast/Conditions warning changes are implemented above; the disapproved visuals remain as selected. Clock drawing ownership is established, but precise physical compliance remains pending; the bounded weather/message drawing ownership cleanup is complete above. Alarm-related clock surfaces are implemented in the current development slice; physical verification remains pending. The matching browser appearance needs no replacement. Before calling a screen complete, compare the exact approved positions, controls, typography, colors and relevant states, and state physical verification limits.
-- Retirement: remove each superseded rendering path, unused asset and obsolete build option as its replacement is integrated and verified. File moves alone do not complete this work.
-- Alarm board verification: occurrence handling/recovery, presentation/actions, draft next-time preview, speaker playback and sound preview are complete in development above. Prompted previews, resumed ringing/Dismiss and short power-cut recovery checks have passed within the recorded limits. Prolonged ringing under load, precise timing, longer outage/fault behavior and attached-RTC operation remain pending; combine the remaining checks later as the user requested. F1/F2 corrections pass development checks and were included in the October 12 firmware load; their board retest remains pending.
+### Approved work still unfinished
 
-The requested optional cleanup items are closed, including the proxy-query simplification completed with the browser correction. The approved feature work above remains unfinished.
+- **Sound Machine:** mockup and playback decisions are approved. The
+  [implementation sprint](#prepared-sound-machine-sprint) is prepared locally and
+  held unsent at the user's request. Firmware controls, generated noise,
+  recording playback and timer integration remain unimplemented. Await explicit
+  instruction to send the sprint; the current weather implementation checkpoint
+  remains active. Requirements belong in the
+  [specification](architecture.md#sound-machine-playback).
+- **Radar:** RainViewer and the custom palette are selected under the
+  [radar specification](architecture.md#radar-source-and-palette). The refined
+  screen design is selected and integrated into the official mockup's Radar
+  preview. Define the remaining map coverage and service behavior before a
+  firmware implementation slice. No live radar firmware exists yet.
+- **Immediate Alarm Settings On/Off:** development checks and firmware build pass
+  in the October 13 slice above. It is included in the weather sprint's firmware
+  loads, with its physical check still unreported. Its remaining checkpoint is the physical check
+  of the shortcut, enabled-only save, Cancel with other draft edits and ordinary
+  alarm operation. Keep the existing board firmware and evidence distinct from
+  this development-only change.
+- **Backup-clock wiring guide:** document the supported DS3231 module's connection
+  to the Waveshare board, shared I2C bus and coin-cell placement. Hardware selection
+  and user-facing battery limits remain in the root README.
+- **Physical layout and settings behavior:** basic Day controls/typing, initial
+  keyboard pages, Night settings readability, Weather's new four rows and
+  Messaging guidance/Done clearance have passed within their recorded limits.
+  Remaining checks concern exact approved positions/typography/colors; separately
+  unreported appearances and all Night keyboard pages; noon/midnight AM/PM
+  crossings; validation/error/empty/pending and real connection-phase states;
+  Wi-Fi scrolling beyond three networks; Brightness Done/summary, visible
+  12-hour padding and both applied brightness levels; Weather Back/Cancel retaining
+  Device edits and independent restart; stale/offline Conditions format Cancel
+  and other captions; and alarm/editor restoration. Include the older Settings-entry
+  immediate Alarm save, whose physical check is still unreported. Preserve passed
+  Display Back/Cancel/live Save, analog caption/tap, Conditions `3 PM` / `15:00`
+  updates, new Weather checks and Messaging observations; do not repeat them just
+  to extend the list. Native checks do not establish exact panel pixels or touch.
+- **Night Shift:** the populated Solar page, draft preview/Cancel, zero-offset
+  Save/restart and sunset activation were observed. Remaining checks concern
+  sunrise, precise transition timing, nonzero saved offsets, configured fades
+  and offline operation. Day 100%/Night 25% was restored and subsequently confirmed;
+  there is no outstanding temporary-50% restoration task. Record and restore the
+  user's then-current preferences if later testing changes them. Equal brightness
+  levels cannot establish a fade; trustworthy offline startup needs an attached RTC.
+- **Alarm/recovery and audio:** prompted previews, resumed ringing/Dismiss, Off
+  canceling Snooze and short power-cut recovery passed. F1/F2 corrections were
+  included in the October 12 load but lack a separate board retest. Remaining
+  observations concern precise scheduled time, initial Snooze stopping/duration,
+  priority over previews/menus/messages and longer operation under weather/touch/RTC
+  activity. Keep the 12-minute ring and greater-than-30-minute outage/missed-notice
+  checks deferred as requested. The accepted Classic Bell listening result does
+  not establish measured normal-path timing and does not reopen declined Bell tests.
+- **Board reliability:** the controlled RTC-trigger correction and later overnight
+  operation passed their bounded checks. External RTC operation, extended stability,
+  network recovery, physical behavior during interrupted settings saves and other
+  untested faults remain unverified. Blue flashes remain a separate observation.
+  Successful short power-cut checks are recorded under Alarm above; they do not
+  establish every power-loss scenario. Retain original/comparison material only
+  while it serves an identified current evaluation or recovery need.
+
+### Deferred or unapproved work
+
+- Visual Crossing and mapping implementation is now authorized and underway in
+  the [current weather sprint](#sprint-visual-crossing-and-approved-weather-mappings--authorized-october-13-2026).
+  Provider-credit placement and real availability of rare provider IDs remain
+  separate unresolved/verification items; implementation does not settle them.
+- The accepted Shared Device ID query issue involving `&` remains deferred at
+  the user's request; no allowed-character restriction or fix is approved.
+- Raising the brightness minimum from 20% to 30% remains an unapproved proposal.
+  The current range is owned by the architecture; do not infer a changed minimum
+  from the earlier recovery observations.
+
+The current implementation checkpoint is the authorized weather sprint above.
+The reviewed immediate Alarm Settings switch remains preserved, with its board
+status recorded in its own section. The broader combined board pass remains
+deferred as recorded; the weather sprint does not reopen it. Completed cleanup
+tasks stay closed.
 
 PNG-decoder replacement was declined; retain the existing implementation under the [asset-tool decision](architecture.md#existing-code-changes-that-matter).
 
 Paused-clock warning removal was declined; retain the existing diagnostic under the [time decision](architecture.md#time-and-rtc). Broad removal of weather outputs used by tests is not recommended where those values serve approved behavior or useful calculation checks.
 
-The preceding freeze correction is committed and the user reports continued operation. The keyboard decision and settings-menu basic board pass are closed. The eleven approved screen changes are implemented, checked and loaded; Digital Day label fit/readability and Digital/Conditions divider visibility/readability are confirmed by the user. Continue the remaining physical checks without repeating those or the successful basic menu checks. Detailed visual/failure-state and physical alarm checks remain unfinished. The bounded weather/message ownership cleanup, local solar scheduling and alarm scheduling/recovery backend are complete in development. Alarm presentation/actions and the draft next-time preview are complete in development; speaker playback and sound preview are also complete. The next checkpoint is the deferred combined board verification. Keep service decisions with their current owners and navigation in `ui.c`. The audit's optional suggestions, reference ambiguities and unmeasured risks are not automatically approved changes.
+Current work and deferred checks are listed above. Service decisions remain
+with their architecture owners and navigation with `ui.c`; audit suggestions
+and unmeasured risks do not automatically become approved changes.

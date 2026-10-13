@@ -9,6 +9,7 @@ typedef int esp_err_t;
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define ESP_ERR_NO_MEM 0x101
+#define ESP_ERR_INVALID_SIZE 0x104
 #define ESP_ERR_INVALID_ARG 0x102
 #define ESP_ERR_INVALID_STATE 0x103
 #define ESP_ERR_NOT_FOUND 0x105
@@ -225,16 +226,22 @@ typedef struct {
 esp_err_t esp_netif_sntp_init(const esp_sntp_config_t *);
 
 /* HTTP substitutions are implemented only by the weather service check. */
+enum { HTTP_TRANSPORT_OVER_SSL };
 typedef void *esp_http_client_handle_t;
-typedef enum { HTTP_EVENT_ON_DATA } esp_http_client_event_id_t;
+typedef enum { HTTP_EVENT_ON_DATA, HTTP_EVENT_ON_HEADER } esp_http_client_event_id_t;
 typedef struct {
   esp_http_client_event_id_t event_id;
   void *data;
   int data_len;
   void *user_data;
+  char *header_key;
+  char *header_value;
 } esp_http_client_event_t;
 typedef struct {
   const char *url;
+  const char *host, *path, *query;
+  int transport_type;
+  bool disable_auto_redirect;
   esp_err_t (*event_handler)(esp_http_client_event_t *);
   void *user_data;
   int timeout_ms;

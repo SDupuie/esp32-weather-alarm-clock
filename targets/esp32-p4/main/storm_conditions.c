@@ -1,4 +1,5 @@
 #include "storm_conditions.h"
+#include "weather_icon_names.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -60,6 +61,8 @@ typedef struct {
 typedef struct {
   const cJSON *hourly;
   const thresholds_t *t;
+  uint32_t current_flags;
+  int now_index;
 } predicate_ctx_t;
 
 typedef bool (*hour_predicate_t)(const predicate_ctx_t *ctx, int i);
@@ -136,12 +139,19 @@ static opt_t sum_over(const cJSON *array, int from_i, int to_i)
   opt_t total = {false, 0.0};
   for (int i = from_i; i <= to_i; ++i) {
     opt_t value = number_at(array, i);
-    if (value.ok) {
-      total.ok = true;
-      total.value += value.value;
-    }
+    if (!value.ok) return (opt_t){false, 0.0};
+    total.ok = true;
+    total.value += value.value;
   }
   return total;
+}
+
+static bool all_numbers(const cJSON *array, int from_i, int to_i)
+{
+  for (int i = from_i; i <= to_i; ++i) {
+    if (!number_at(array, i).ok) return false;
+  }
+  return true;
 }
 
 static int count_where(const predicate_ctx_t *ctx, int from_i, int to_i, hour_predicate_t predicate)
@@ -179,11 +189,6 @@ static int first_index_where(const predicate_ctx_t *ctx, int from_i, int to_i, h
   return -1;
 }
 
-static bool is_thunder_code(opt_t code)
-{
-  return code.ok && (code.value == 95 || code.value == 96 || code.value == 99);
-}
-
 static double hourly_at(const predicate_ctx_t *ctx, const char *key, int i)
 {
   return or_zero(number_at(field(ctx->hourly, key), i));
@@ -191,7 +196,8 @@ static double hourly_at(const predicate_ctx_t *ctx, const char *key, int i)
 
 static bool pred_thunder(const predicate_ctx_t *ctx, int i)
 {
-  return is_thunder_code(number_at(field(ctx->hourly, "weathercode"), i));
+  return ((weather_hourly_flags_at(ctx->hourly, i)
+    | (i == ctx->now_index ? ctx->current_flags : 0)) & WEATHER_FACT_THUNDER) != 0;
 }
 
 static bool pred_wet(const predicate_ctx_t *ctx, int i)
@@ -333,7 +339,17 @@ bool storm_conditions_build(
   bool imperial = !config->metric;
   const cJSON *times = field(hourly, "time");
   const cJSON *now_time = field(current, "time");
-  int now_i = current_hour_index(times, cJSON_IsString(now_time) ? cJSON_GetStringValue(now_time) : NULL);
+  int now_i = -1;
+  const cJSON *current_epoch = field(current, "epoch");
+  if (cJSON_IsNumber(current_epoch) && isfinite(current_epoch->valuedouble)) {
+    for (int i = 0; i < cJSON_GetArraySize(times); ++i) {
+      opt_t epoch = number_at(field(hourly, "epoch"), i);
+      if (epoch.ok && current_epoch->valuedouble >= epoch.value
+          && current_epoch->valuedouble < epoch.value + 3600) { now_i = i; break; }
+    }
+  } else {
+    now_i = current_hour_index(times, cJSON_IsString(now_time) ? cJSON_GetStringValue(now_time) : NULL);
+  }
   if (now_i < 0) {
     return false;
   }
@@ -351,10 +367,10 @@ bool storm_conditions_build(
    * hourly row since current_weather doesn't carry them. */
   const cJSON *live_speed = field(current, "windspeed");
   const cJSON *live_dir = field(current, "winddirection");
-  opt_t wind_kmh = cJSON_IsNumber(live_speed)
+  opt_t wind_kmh = cJSON_IsNumber(live_speed) && isfinite(live_speed->valuedouble)
     ? (opt_t) {true, cJSON_GetNumberValue(live_speed)}
     : number_at(winds, now_i);
-  opt_t wind_dir = cJSON_IsNumber(live_dir) ? (opt_t) {true, cJSON_GetNumberValue(live_dir)} : (opt_t) {false, 0.0};
+  opt_t wind_dir = cJSON_IsNumber(live_dir) && isfinite(live_dir->valuedouble) ? (opt_t) {true, cJSON_GetNumberValue(live_dir)} : (opt_t) {false, 0.0};
   opt_t gust_now_kmh = number_at(gusts, now_i);
   max_result_t gust_peak = max_over(gusts, now_i, outlook_i);
 
@@ -389,7 +405,10 @@ bool storm_conditions_build(
 
   /* Alerts look at now through the next few hours. */
   thresholds_t t = storm_thresholds(config);
-  predicate_ctx_t ctx = {hourly, &t};
+  const cJSON *current_flags = field(current, "condition_flags");
+  uint32_t flags_now = cJSON_IsNumber(current_flags) && current_flags->valuedouble >= 0
+    && current_flags->valuedouble <= UINT32_MAX ? (uint32_t)current_flags->valuedouble : 0;
+  predicate_ctx_t ctx = {hourly, &t, flags_now, now_i};
   max_result_t ahead_gust = max_over(gusts, now_i, ahead_i);
   max_result_t ahead_wind_hourly = max_over(winds, now_i, ahead_i);
   max_result_t ahead_wind = or_zero(wind_kmh) >= (ahead_wind_hourly.ok ? ahead_wind_hourly.value : 0.0)
@@ -421,7 +440,8 @@ bool storm_conditions_build(
   snprintf(out->precip_unit, sizeof(out->precip_unit), "%s", imperial ? "in" : "mm");
 
   /* --- Plain-language wording --- */
-  bool snow_expected = or_zero(sum_over(field(hourly, "snowfall"), now_i, outlook_i)) > 0;
+  max_result_t snow_peak = max_over(field(hourly, "snowfall"), now_i, outlook_i);
+  bool snow_expected = snow_peak.ok && snow_peak.value > 0;
   const char *precip_word = snow_expected ? "Snow" : "Rain";
   char precip_word_lower[8];
   to_lower_copy(precip_word, precip_word_lower, sizeof(precip_word_lower));
@@ -452,6 +472,9 @@ bool storm_conditions_build(
   bool precip_likely = wet_i >= 0 || (chance_max.ok ? chance_max.value : 0.0) >= LIKELY_CHANCE;
   bool precip_possible = !precip_likely && (chance_max.ok ? chance_max.value : 0.0) >= POSSIBLE_CHANCE;
   bool raining_now = or_zero(precip_now_mm) >= MEASURABLE_PRECIP_MM;
+  bool dry_known = all_numbers(precipitation, now_i, outlook_i);
+  bool wind_known = wind_kmh.ok && all_numbers(winds, now_i, outlook_i)
+    && all_numbers(gusts, now_i, outlook_i);
 
   /* Short enough for the narrow rain column; the headline carries timing. */
   if (raining_now) {
@@ -465,7 +488,7 @@ bool storm_conditions_build(
   } else if (precip_possible) {
     snprintf(out->precip_status, sizeof(out->precip_status), "%s%% chance", chance_text);
   } else {
-    snprintf(out->precip_status, sizeof(out->precip_status), "No %s", precip_word_lower);
+    snprintf(out->precip_status, sizeof(out->precip_status), dry_known ? "No %s" : "%s unavailable", precip_word_lower);
   }
 
   int wet_hours = count_where(&ctx, now_i, outlook_i, pred_wet);
@@ -532,7 +555,7 @@ bool storm_conditions_build(
   /* --- Wind outlook (what's coming; the compass already shows now) --- */
   double gust_base = or_zero(gust_now_kmh) > or_zero(wind_kmh) ? or_zero(gust_now_kmh) : or_zero(wind_kmh);
   bool breezy_now = or_zero(wind_kmh) >= BREEZY_WIND_KMH || or_zero(gust_now_kmh) >= BREEZY_GUST_KMH;
-  int wind_ease_i = breezy_now ? end_index_where(&ctx, now_i, outlook_i, pred_breezy) : -1;
+  int wind_ease_i = breezy_now && wind_known ? end_index_where(&ctx, now_i, outlook_i, pred_breezy) : -1;
   char hour_text[12];
   if (gust_peak.ok && gust_peak.index > now_i && gust_peak.value >= gust_base + PICKING_UP_GUST_KMH) {
     format_hour(times, gust_peak.index, config->time_24h, hour_text, sizeof(hour_text));
@@ -546,11 +569,11 @@ bool storm_conditions_build(
   } else {
     /* Only mention gusts if something stronger than now is still to come. */
     bool stronger_later = gust_peak.ok && SPEED(gust_peak.value) > SPEED(gust_base);
-    snprintf(out->outlook_status, sizeof(out->outlook_status), "Steady");
+    snprintf(out->outlook_status, sizeof(out->outlook_status), "%s", wind_known ? "Steady" : "Unavailable");
     if (stronger_later) {
       snprintf(out->outlook_detail, sizeof(out->outlook_detail), "Gusts up to %d %s", SPEED(gust_peak.value), out->wind_unit);
     } else {
-      snprintf(out->outlook_detail, sizeof(out->outlook_detail), "No big change");
+      snprintf(out->outlook_detail, sizeof(out->outlook_detail), "%s", wind_known ? "No big change" : "Wind forecast unavailable");
     }
   }
 
@@ -582,7 +605,7 @@ bool storm_conditions_build(
     } else if (kind == STORM_ALERT_GUSTS || kind == STORM_ALERT_WIND) {
       bool is_gusts = kind == STORM_ALERT_GUSTS;
       max_result_t peak = is_gusts ? ahead_gust : ahead_wind;
-      int end_i = peak.index <= now_i
+      int end_i = peak.index <= now_i && all_numbers(is_gusts ? gusts : winds, now_i, outlook_i)
         ? end_index_where(&ctx, now_i, outlook_i, is_gusts ? pred_gust_strong : pred_wind_strong)
         : -1;
       if (peak.index > now_i) {
@@ -595,7 +618,7 @@ bool storm_conditions_build(
       }
       snprintf(phrase, STORM_TEXT_LEN, "%s up to %d %s %s", is_gusts ? "Gusts" : "Winds", SPEED(peak.value), out->wind_unit, tail);
     } else if (kind == STORM_ALERT_PRECIP) {
-      int end_i = heavy_precip_i <= now_i ? end_index_where(&ctx, now_i, outlook_i, pred_heavy) : -1;
+      int end_i = heavy_precip_i <= now_i && dry_known ? end_index_where(&ctx, now_i, outlook_i, pred_heavy) : -1;
       if (heavy_precip_i > now_i) {
         WHEN(heavy_precip_i, tail);
         snprintf(phrase, STORM_TEXT_LEN, "%s likely %s", out->alerts[a].label, tail);
@@ -625,7 +648,7 @@ bool storm_conditions_build(
      * mustn't say "calm" when something is coming later in the outlook. */
     int later_thunder_i = first_index_where(&ctx, now_i, outlook_i, pred_thunder);
     int later_gust_i = first_index_where(&ctx, now_i, outlook_i, pred_gust_strong);
-    int rain_end_i = raining_now ? end_index_where(&ctx, now_i, outlook_i, pred_wet) : -1;
+    int rain_end_i = raining_now && dry_known ? end_index_where(&ctx, now_i, outlook_i, pred_wet) : -1;
     char tail[24];
     out->has_detail = true;
     if (raining_now) {
@@ -666,14 +689,16 @@ bool storm_conditions_build(
       snprintf(out->headline, sizeof(out->headline), "Much %s tomorrow", swing_delta < 0 ? "colder" : "warmer");
       snprintf(out->detail, sizeof(out->detail), "High of %d\xc2\xb0, %d\xc2\xb0 today", swing_high, swing_today);
     } else if (pressure_falling) {
-      snprintf(out->headline, sizeof(out->headline), "Dry for now");
+      snprintf(out->headline, sizeof(out->headline), "%s", precip_now_mm.ok ? "Dry for now" : "Falling pressure");
       snprintf(out->detail, sizeof(out->detail), "Falling pressure can mean rain later");
     } else if (wind_ease_i >= 0) {
       format_hour(times, wind_ease_i, config->time_24h, hour_text, sizeof(hour_text));
       snprintf(out->headline, sizeof(out->headline), "Winds easing by %s", hour_text);
-      snprintf(out->detail, sizeof(out->detail), "Dry for the next 6 hours");
+      snprintf(out->detail, sizeof(out->detail), "%s", dry_known ? "Dry for the next 6 hours" : "Precipitation data limited");
     } else {
-      snprintf(out->headline, sizeof(out->headline), "%s", breezy_now ? "Breezy and dry" : "Calm and dry");
+      snprintf(out->headline, sizeof(out->headline), "%s", dry_known && wind_known
+        ? (breezy_now ? "Breezy and dry" : "Calm and dry") : "Weather data limited");
+      out->has_detail = dry_known && wind_known;
       snprintf(out->detail, sizeof(out->detail), "for the next %d hours", CONDITIONS_OUTLOOK_HOURS);
     }
   }
@@ -683,7 +708,7 @@ bool storm_conditions_build(
    * hints alone (falling pressure, a low chance of rain) only "may change". */
   bool changing = out->alert_count > 0
     || raining_now || precip_likely
-    || strcmp(out->outlook_status, "Steady") != 0
+    || (strcmp(out->outlook_status, "Steady") != 0 && strcmp(out->outlook_status, "Unavailable") != 0)
     || has_front || has_swing;
   bool may_change = !changing && (pressure_falling || precip_possible);
   out->alert = out->alert_count > 0;

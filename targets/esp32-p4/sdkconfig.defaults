@@ -7,6 +7,10 @@ CONFIG_SPIRAM_SPEED_200M=y
 CONFIG_SPIRAM_MEMTEST=n
 CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="32MB"
+# The application extends beyond 16 MiB; flash size alone does not enable
+# extended CPU/cache reads. Verify this SDK option on the board's GD flash.
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH=y
 CONFIG_CACHE_L2_CACHE_256KB=y
 # 64B, not 128B: esp_hosted's SDIO mempool (CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM
 # below) hands out PSRAM TX buffers with a 1600-byte stride. 1600 % 128 = 64, so

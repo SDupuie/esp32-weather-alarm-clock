@@ -2,7 +2,6 @@
   {
     "name": "dry thunder codes stay cloudy or partly cloudy",
     "date": "2026-07-02",
-    "dailyCode": 95,
     "dailyHigh": 99,
     "dailyLow": 73,
     "snowTempThreshold": 34,
@@ -21,21 +20,6 @@
         "2026-07-02T18:00",
         "2026-07-02T19:00",
         "2026-07-02T20:00"
-      ],
-      "weathercode": [
-        0,
-        0,
-        95,
-        3,
-        95,
-        95,
-        3,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0
       ],
       "precipitation_probability": [
         0,
@@ -126,14 +110,47 @@
         6,
         3,
         3
+      ],
+      "condition_flags": [
+        0,
+        0,
+        1,
+        0,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "sky": [
+        1,
+        1,
+        0,
+        3,
+        0,
+        0,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
       ]
     },
-    "expectedCode": 2
+    "dailyFacts": {
+      "flags": 1,
+      "sky": 0
+    },
+    "expectedPicture": "partlycloudy-day"
   },
   {
     "name": "brief thunder risk stays partly cloudy",
     "date": "2026-07-02",
-    "dailyCode": 95,
     "dailyHigh": 82,
     "dailyLow": 67,
     "snowTempThreshold": 34,
@@ -152,21 +169,6 @@
         "2026-07-02T18:00",
         "2026-07-02T19:00",
         "2026-07-02T20:00"
-      ],
-      "weathercode": [
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        95,
-        2,
-        2,
-        2,
-        2
       ],
       "precipitation_probability": [
         10,
@@ -257,14 +259,47 @@
         45,
         45,
         45
+      ],
+      "condition_flags": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0
+      ],
+      "sky": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        0,
+        2,
+        2,
+        2,
+        2
       ]
     },
-    "expectedCode": 2
+    "dailyFacts": {
+      "flags": 1,
+      "sky": 0
+    },
+    "expectedPicture": "partlycloudy-day"
   },
   {
     "name": "several rainy hours becomes rain",
     "date": "2026-07-02",
-    "dailyCode": 3,
     "dailyHigh": 74,
     "dailyLow": 63,
     "snowTempThreshold": 34,
@@ -279,17 +314,6 @@
         "2026-07-02T14:00",
         "2026-07-02T15:00",
         "2026-07-02T16:00"
-      ],
-      "weathercode": [
-        3,
-        3,
-        61,
-        61,
-        61,
-        61,
-        3,
-        3,
-        3
       ],
       "precipitation_probability": [
         20,
@@ -356,14 +380,39 @@
         88,
         88,
         88
+      ],
+      "condition_flags": [
+        0,
+        0,
+        16,
+        16,
+        16,
+        16,
+        0,
+        0,
+        0
+      ],
+      "sky": [
+        3,
+        3,
+        0,
+        0,
+        0,
+        0,
+        3,
+        3,
+        3
       ]
     },
-    "expectedCode": 61
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "expectedPicture": "rain"
   },
   {
     "name": "cold snowy daytime becomes snow",
     "date": "2026-07-02",
-    "dailyCode": 71,
     "dailyHigh": 31,
     "dailyLow": 24,
     "snowTempThreshold": 34,
@@ -376,15 +425,6 @@
         "2026-07-02T12:00",
         "2026-07-02T13:00",
         "2026-07-02T14:00"
-      ],
-      "weathercode": [
-        3,
-        3,
-        73,
-        73,
-        73,
-        3,
-        3
       ],
       "precipitation_probability": [
         20,
@@ -439,14 +479,35 @@
         92,
         92,
         92
+      ],
+      "condition_flags": [
+        0,
+        0,
+        96,
+        96,
+        96,
+        0,
+        0
+      ],
+      "sky": [
+        3,
+        3,
+        0,
+        0,
+        0,
+        3,
+        3
       ]
     },
-    "expectedCode": 73
+    "dailyFacts": {
+      "flags": 96,
+      "sky": 0
+    },
+    "expectedPicture": "snow"
   },
   {
     "name": "true stormy case still becomes thunderstorm",
     "date": "2026-07-02",
-    "dailyCode": 95,
     "dailyHigh": 85,
     "dailyLow": 70,
     "snowTempThreshold": 34,
@@ -459,15 +520,6 @@
         "2026-07-02T12:00",
         "2026-07-02T13:00",
         "2026-07-02T14:00"
-      ],
-      "weathercode": [
-        3,
-        3,
-        3,
-        95,
-        95,
-        3,
-        3
       ],
       "precipitation_probability": [
         20,
@@ -522,8 +574,1433 @@
         85,
         85,
         85
+      ],
+      "condition_flags": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0
+      ],
+      "sky": [
+        3,
+        3,
+        3,
+        0,
+        0,
+        3,
+        3
       ]
     },
-    "expectedCode": 95
+    "dailyFacts": {
+      "flags": 1,
+      "sky": 0
+    },
+    "expectedPicture": "thunderstorm"
+  },
+  {
+    "name": "constructed: two hail reports need neither thunder nor precipitation",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        4,
+        4
+      ],
+      "sky": [
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "hail"
+  },
+  {
+    "name": "constructed: one hail report does not qualify",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        4,
+        0
+      ],
+      "sky": [
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: hail wins over cold thunder",
+    "date": "2026-07-02",
+    "dailyHigh": 20,
+    "dailyLow": 10,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        5,
+        5
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "precipitation": [
+        1,
+        1
+      ],
+      "precipitation_probability": [
+        70,
+        70
+      ]
+    },
+    "expectedPicture": "hail"
+  },
+  {
+    "name": "constructed: duplicate hail epoch is one report",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        4,
+        4
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "epoch": [
+        100,
+        100
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: duplicate hourly timestamp is one hail report",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T08:00"
+      ],
+      "condition_flags": [
+        4,
+        4
+      ],
+      "sky": [
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: 08 and 20 included,07 and21 excluded",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T20:00",
+        "2026-07-02T07:00",
+        "2026-07-02T21:00"
+      ],
+      "condition_flags": [
+        4,
+        4,
+        0,
+        0
+      ],
+      "sky": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "hail"
+  },
+  {
+    "name": "constructed: hail outside daytime does not qualify",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T07:00",
+        "2026-07-02T21:00"
+      ],
+      "condition_flags": [
+        4,
+        4
+      ],
+      "sky": [
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "cloudy"
+  },
+  {
+    "name": "constructed: hail on another date does not qualify",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-03T08:00",
+        "2026-07-03T09:00"
+      ],
+      "condition_flags": [
+        4,
+        4
+      ],
+      "sky": [
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "cloudy"
+  },
+  {
+    "name": "constructed: paired rain probability/amount boundary 50% / 1.5mm",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00"
+      ],
+      "condition_flags": [
+        16
+      ],
+      "sky": [
+        2
+      ],
+      "precipitation": [
+        1.5
+      ],
+      "precipitation_probability": [
+        50
+      ]
+    },
+    "expectedPicture": "rain"
+  },
+  {
+    "name": "constructed: paired rain probability/amount boundary 49.99% / 1.5mm",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00"
+      ],
+      "condition_flags": [
+        16
+      ],
+      "sky": [
+        2
+      ],
+      "precipitation": [
+        1.5
+      ],
+      "precipitation_probability": [
+        49.99
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: paired rain 50 percent 1.499 mm",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00"
+      ],
+      "condition_flags": [
+        16
+      ],
+      "sky": [
+        2
+      ],
+      "precipitation": [
+        1.499
+      ],
+      "precipitation_probability": [
+        50
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: paired rain 99 percent 0.1 mm",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00"
+      ],
+      "condition_flags": [
+        16
+      ],
+      "sky": [
+        2
+      ],
+      "precipitation": [
+        0.1
+      ],
+      "precipitation_probability": [
+        99
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: three wet trace hours no longer bypass paired rule",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        16,
+        16,
+        16
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ],
+      "precipitation": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "precipitation_probability": [
+        70,
+        70,
+        70
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: probability and amount may come from different hours",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        16,
+        16
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "precipitation": [
+        0,
+        1.5
+      ],
+      "precipitation_probability": [
+        50,
+        0
+      ]
+    },
+    "expectedPicture": "rain"
+  },
+  {
+    "name": "constructed: fractional amounts retained",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        16,
+        16,
+        16
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ],
+      "precipitation": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "precipitation_probability": [
+        50,
+        50,
+        50
+      ]
+    },
+    "expectedPicture": "rain"
+  },
+  {
+    "name": "constructed: Showers win subtype tie",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        16,
+        144
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "precipitation": [
+        0.75,
+        0.75
+      ],
+      "precipitation_probability": [
+        50,
+        50
+      ]
+    },
+    "expectedPicture": "showers-day"
+  },
+  {
+    "name": "constructed: drizzle preserves existing daily subtype",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        8208,
+        8208
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "precipitation": [
+        0.75,
+        0.75
+      ],
+      "precipitation_probability": [
+        50,
+        50
+      ]
+    },
+    "expectedPicture": "showers-day"
+  },
+  {
+    "name": "constructed: mixed strict majority of snow hours",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        112,
+        112,
+        96
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "rain-snow"
+  },
+  {
+    "name": "constructed: mixed tie remains Snow",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        112,
+        96
+      ],
+      "sky": [
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "snow"
+  },
+  {
+    "name": "constructed: rain then snow is not mixed",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        16,
+        96,
+        96
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "snow"
+  },
+  {
+    "name": "constructed: blowing snow with rain is not falling snow",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        80,
+        80
+      ],
+      "sky": [
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "snow"
+  },
+  {
+    "name": "constructed: positive snowfall and liquid same period refine snow",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        16,
+        16
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "snowfall": [
+        0.3,
+        0.3
+      ]
+    },
+    "expectedPicture": "rain-snow"
+  },
+  {
+    "name": "constructed: total precip plus snow does not prove liquid",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        96,
+        96
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "precipitation": [
+        0.8,
+        0.8
+      ],
+      "precipitation_probability": [
+        70,
+        70
+      ]
+    },
+    "expectedPicture": "snow"
+  },
+  {
+    "name": "constructed: cold snow guess without mixed remains snow",
+    "date": "2026-07-02",
+    "dailyHigh": 20,
+    "dailyLow": 10,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        16,
+        16,
+        16
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ],
+      "precipitation": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "precipitation_probability": [
+        60,
+        60,
+        60
+      ]
+    },
+    "expectedPicture": "snow"
+  },
+  {
+    "name": "constructed: freezing remains before mixed",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        120,
+        120
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "precipitation": [
+        0.5,
+        0.5
+      ],
+      "precipitation_probability": [
+        0,
+        0
+      ]
+    },
+    "expectedPicture": "freezing-rain"
+  },
+  {
+    "name": "constructed: thunder remains before freezing",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        121,
+        121
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "precipitation": [
+        0.3,
+        0.3
+      ],
+      "precipitation_probability": [
+        35,
+        35
+      ]
+    },
+    "expectedPicture": "thundersnow"
+  },
+  {
+    "name": "constructed: same-period thundersnow not temperature dependent",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        97,
+        97
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "precipitation": [
+        0.3,
+        0.3
+      ],
+      "precipitation_probability": [
+        35,
+        35
+      ]
+    },
+    "expectedPicture": "thundersnow"
+  },
+  {
+    "name": "constructed: snow other hour cannot create thundersnow",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        17,
+        17,
+        96
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ],
+      "precipitation": [
+        0.3,
+        0.3,
+        0
+      ],
+      "precipitation_probability": [
+        35,
+        35,
+        35
+      ]
+    },
+    "expectedPicture": "thunderstorm"
+  },
+  {
+    "name": "constructed: cold thunder guess retained",
+    "date": "2026-07-02",
+    "dailyHigh": 20,
+    "dailyLow": 10,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        17,
+        17
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "precipitation": [
+        0.3,
+        0.3
+      ],
+      "precipitation_probability": [
+        35,
+        35
+      ]
+    },
+    "expectedPicture": "thundersnow"
+  },
+  {
+    "name": "constructed: one thunder needs original60percent",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00"
+      ],
+      "condition_flags": [
+        17
+      ],
+      "sky": [
+        2
+      ],
+      "precipitation": [
+        0.1
+      ],
+      "precipitation_probability": [
+        59.99
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: one thunder qualifies at60percent",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00"
+      ],
+      "condition_flags": [
+        17
+      ],
+      "sky": [
+        2
+      ],
+      "precipitation": [
+        0.1
+      ],
+      "precipitation_probability": [
+        60
+      ]
+    },
+    "expectedPicture": "thunderstorm"
+  },
+  {
+    "name": "constructed: freezing preserves60percent",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00"
+      ],
+      "condition_flags": [
+        8
+      ],
+      "sky": [
+        2
+      ],
+      "precipitation_probability": [
+        60
+      ]
+    },
+    "expectedPicture": "freezing-rain"
+  },
+  {
+    "name": "constructed: missing probability does not qualify ordinary rain",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        16,
+        16,
+        16
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ],
+      "precipitation": [
+        1,
+        1,
+        1
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: missing amount does not qualify ordinary rain",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        16,
+        16,
+        16
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ],
+      "precipitation_probability": [
+        90,
+        90,
+        90
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: missing all weather quantities does not manufacture sky",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00"
+      ],
+      "condition_flags": [
+        0
+      ],
+      "sky": [
+        0
+      ],
+      "cloud_cover": [
+        null
+      ]
+    },
+    "expectedPicture": ""
+  },
+  {
+    "name": "constructed: current-only facts excluded from daytime picture",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00"
+      ],
+      "condition_flags": [
+        6656
+      ],
+      "sky": [
+        2
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: no-hour fallback cannot select hail",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 4,
+      "sky": 0
+    },
+    "hourly": {
+      "time": [],
+      "condition_flags": [],
+      "sky": []
+    },
+    "expectedPicture": ""
+  },
+  {
+    "name": "constructed: no-hour fallback cannot select ice",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 512,
+      "sky": 0
+    },
+    "hourly": {
+      "time": [],
+      "condition_flags": [],
+      "sky": []
+    },
+    "expectedPicture": ""
+  },
+  {
+    "name": "constructed: no-hour fallback cannot select wind",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 2048,
+      "sky": 0
+    },
+    "hourly": {
+      "time": [],
+      "condition_flags": [],
+      "sky": []
+    },
+    "expectedPicture": ""
+  },
+  {
+    "name": "constructed: no-hour fallback cannot select funnel",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 4096,
+      "sky": 0
+    },
+    "hourly": {
+      "time": [],
+      "condition_flags": [],
+      "sky": []
+    },
+    "expectedPicture": ""
+  },
+  {
+    "name": "constructed: no-hour fallback mixed day union stays snow",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 368,
+      "sky": 0
+    },
+    "hourly": {
+      "time": [],
+      "condition_flags": [],
+      "sky": []
+    },
+    "expectedPicture": "snow"
+  },
+  {
+    "name": "constructed: no-hour fallback thunder snow union stays thunder",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 97,
+      "sky": 0
+    },
+    "hourly": {
+      "time": [],
+      "condition_flags": [],
+      "sky": []
+    },
+    "expectedPicture": "thunderstorm"
+  },
+  {
+    "name": "constructed: no-hour fallback retains accompanying rain",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 6676,
+      "sky": 0
+    },
+    "hourly": {
+      "time": [],
+      "condition_flags": [],
+      "sky": []
+    },
+    "expectedPicture": "rain"
+  },
+  {
+    "name": "constructed: fog rule preserved",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        1024,
+        1024,
+        1024
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ],
+      "precipitation": [
+        0,
+        0,
+        0
+      ],
+      "cloud_cover": [
+        80,
+        80,
+        80
+      ]
+    },
+    "expectedPicture": "fog"
+  },
+  {
+    "name": "constructed: sky cloud average preserves70percent",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        0,
+        0
+      ],
+      "sky": [
+        2,
+        2
+      ],
+      "cloud_cover": [
+        70,
+        70
+      ]
+    },
+    "expectedPicture": "cloudy"
+  },
+  {
+    "name": "constructed: explicit freezing rain without quantitative support stays sky",
+    "date": "2026-07-02",
+    "dailyHigh": 70,
+    "dailyLow": 50,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00"
+      ],
+      "condition_flags": [
+        24,
+        24
+      ],
+      "sky": [
+        2,
+        2
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: fractional temperatures remain above cold-guess boundary",
+    "date": "2026-07-02",
+    "dailyHigh": 34.7,
+    "dailyLow": 34.1,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        16,
+        16,
+        16
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ],
+      "precipitation": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "precipitation_probability": [
+        60,
+        60,
+        60
+      ]
+    },
+    "expectedPicture": "partlycloudy-day"
+  },
+  {
+    "name": "constructed: fractional temperature average at cold boundary",
+    "date": "2026-07-02",
+    "dailyHigh": 34.4,
+    "dailyLow": 33.6,
+    "snowTempThreshold": 34,
+    "dailyFacts": {
+      "flags": 0,
+      "sky": 3
+    },
+    "hourly": {
+      "time": [
+        "2026-07-02T08:00",
+        "2026-07-02T09:00",
+        "2026-07-02T10:00"
+      ],
+      "condition_flags": [
+        16,
+        16,
+        16
+      ],
+      "sky": [
+        2,
+        2,
+        2
+      ],
+      "precipitation": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "precipitation_probability": [
+        60,
+        60,
+        60
+      ]
+    },
+    "expectedPicture": "snow"
   }
 ]

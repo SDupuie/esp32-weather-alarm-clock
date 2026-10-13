@@ -1,20 +1,12 @@
 #pragma once
 
-#include "cJSON.h"
+#include "weather_icon_names.h"
 
-/* Pure C calculation that picks a representative weather code for a forecast
- * day from Open-Meteo hourly data. It has no ESP-IDF dependency, so the native
- * C test can run it with the JSON cases in
- * shared/test-data/forecast-representative-cases.json. Those cases own the
- * test inputs and expected codes; this C function owns the calculation used
- * by the ESP32-P4 application.
- */
-
-int forecast_pick_representative_code(
-  const cJSON *hourly,
-  const char *date,
-  int daily_code,
-  int daily_high,
-  int daily_low,
-  int snow_threshold
+/* One shared calculation over normalized hourly arrays. A daily condition is
+ * only a fallback when there are no matching 08:00..20:00 samples. The daily
+ * union cannot qualify Hail or a same-period compound. */
+weather_picture_t forecast_pick_representative_picture(
+  const cJSON *hourly, const char *date,
+  const weather_condition_facts_t *daily_facts,
+  double daily_high, double daily_low, int snow_threshold
 );

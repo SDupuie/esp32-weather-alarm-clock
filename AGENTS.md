@@ -14,18 +14,19 @@ Use existing ESP-IDF, LVGL, and board facilities. Reuse and change existing appl
 
 Use plain language. Report only credible, consequential audit findings.
 
-Test affected behavior and compile firmware after source changes; distinguish these checks from hardware verification. A board is available; hardware testing is pending. Do not push, merge, or flash without authorization.
+Test affected behavior and compile firmware after source changes; distinguish these checks from hardware verification. A board is available; completed checks, accepted verification limits and remaining work are recorded in [docs/work.md](docs/work.md). Do not push, merge, or flash without authorization.
 
 ## Document authority
 
 - [AGENTS.md](AGENTS.md): agent workflow and this authority map.
 - [docs/architecture.md](docs/architecture.md): approved behavior, defaults, accepted tradeoffs, service rules, implementation ownership and source structure; links to the approved visual reference.
+- [docs/weather.md](docs/weather.md): approved and proposed provider-to-condition/icon mappings, artwork previews, source limitations, selection recommendations and current firmware mapping; linked from the architecture. Recorded proposals, approved behavior changes and completed firmware implementation are distinct states.
 - [docs/work.md](docs/work.md): current development tasks, completed slices and the next slice; does not define product or architecture requirements.
 - [README.md](README.md): user-facing project overview, features, hardware, setup and user guide; links to detailed development instructions.
 - [targets/esp32-p4/README.md](targets/esp32-p4/README.md): ESP32-P4 environment preparation, build and flash commands.
 - [targets/esp32-p4/tests/README.md](targets/esp32-p4/tests/README.md): runnable test instructions and verification limits.
 
-Keep product and architecture requirements in [docs/architecture.md](docs/architecture.md); link to them rather than restating them in other documents.
+Keep product and architecture requirements in [docs/architecture.md](docs/architecture.md), with detailed weather mappings owned by its linked [docs/weather.md](docs/weather.md). Link to these owners rather than restating their requirements in other documents. A proposed or unresolved item does not become approved merely by being recorded there.
 
 ## Current checkout and retained material
 

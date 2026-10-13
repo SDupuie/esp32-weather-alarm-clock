@@ -20,7 +20,7 @@ if [[ $# -gt 0 ]]; then
   settings_only=true
 fi
 
-# Settings icons share one approved output. Keep SVG and PNG
+# Utility and weather icons share one approved output. Keep SVG and PNG
 # conversion in the existing tools, without another maintained asset input.
 "$PYTHON_BIN" - "$PROJECT_DIR" <<'PY'
 import sys
@@ -30,7 +30,7 @@ import cairosvg
 
 project = Path(sys.argv[1])
 sys.path.insert(0, str(project / "tools"))
-from render_screen_stage_svg import build_settings_icon
+from render_screen_stage_svg import build_settings_icon, build_weather_icon
 from generate_lvgl_image import decode_png, convert_rows, render_source
 
 sources = []
@@ -58,12 +58,31 @@ with tempfile.TemporaryDirectory(prefix="wac-settings-icons-") as temporary:
         values, stride = convert_rows(pixels, "a8", 4)
         sources.append(render_source(symbol, "wac_icons.h", "a8", width, height, stride, values))
         symbols.append(symbol)
+
+    for variant, suffix in (
+        ("freezing_rain", "freezing_rain"),
+        ("hail", "hail"),
+        ("ice", "ice"),
+        ("wind", "wind"),
+        ("tornado", "tornado"),
+    ):
+        symbol = "wac_weather_" + suffix
+        png = Path(temporary) / (suffix + ".png")
+        cairosvg.svg2png(
+            bytestring=build_weather_icon(variant).encode(),
+            write_to=str(png),
+        )
+        width, height, pixels = decode_png(png)
+        values, stride = convert_rows(pixels, "argb8565", 4)
+        sources.append(render_source(symbol, "wac_icons.h", "argb8565", width, height, stride, values))
+        symbols.append(symbol)
+
 (project / "main/assets/wac_icons.c").write_text("\n".join(sources))
 (project / "main/assets/wac_icons.h").write_text('#pragma once\n\n#include "lvgl.h"\n\n' + "".join(f"extern const lv_image_dsc_t {symbol};\n" for symbol in symbols))
 PY
 
 if $settings_only; then
-  echo "Settings icons regenerated."
+  echo "Icon assets regenerated."
   exit 0
 fi
 

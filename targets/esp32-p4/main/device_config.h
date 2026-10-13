@@ -11,7 +11,13 @@
 #define DEVICE_CONFIG_SHORT_STR_LEN 16
 #define DEVICE_CONFIG_TIME_STR_LEN 6
 #define DEVICE_CONFIG_COORD_LEN 16
+#define DEVICE_CONFIG_WEATHER_KEY_LEN 129
 #define DEVICE_CONFIG_MIN_BRIGHTNESS 20
+
+typedef enum {
+  DEVICE_CONFIG_WEATHER_OPEN_METEO = 0,
+  DEVICE_CONFIG_WEATHER_VISUAL_CROSSING,
+} device_config_weather_provider_t;
 
 typedef enum {
   DEVICE_CONFIG_ALARM_CLASSIC_BEEP = 0,
@@ -37,6 +43,8 @@ typedef struct {
   char default_clock_face[DEVICE_CONFIG_SHORT_STR_LEN];
   char time_format[DEVICE_CONFIG_SHORT_STR_LEN];
   char units[DEVICE_CONFIG_SHORT_STR_LEN];
+  device_config_weather_provider_t weather_provider;
+  char weather_api_key[DEVICE_CONFIG_WEATHER_KEY_LEN];
   char latitude[DEVICE_CONFIG_COORD_LEN];
   char longitude[DEVICE_CONFIG_COORD_LEN];
   char night_shift_start[DEVICE_CONFIG_TIME_STR_LEN];

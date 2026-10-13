@@ -1,0 +1,1561 @@
+{
+  "queryCost": 1,
+  "latitude": 30.5788,
+  "longitude": -97.8531,
+  "resolvedAddress": "30.5788,-97.8531",
+  "address": "30.5788,-97.8531",
+  "timezone": "America/Chicago",
+  "tzoffset": -5,
+  "days": [
+    {
+      "datetime": "2026-10-13",
+      "tempmax": 91.9,
+      "tempmin": 76.8,
+      "precip": 0,
+      "precipprob": 5,
+      "preciptype": null,
+      "snow": 0,
+      "cloudcover": 43.8,
+      "conditions": "type_42",
+      "description": "Clearingpm.",
+      "icon": "partly-cloudy-day",
+      "hours": [
+        {
+          "datetime": "00:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 0,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "01:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 0,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "02:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 14.6,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "03:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 93.5,
+          "conditions": "type_41",
+          "icon": "cloudy"
+        },
+        {
+          "datetime": "04:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 93.5,
+          "conditions": "type_41",
+          "icon": "cloudy"
+        },
+        {
+          "datetime": "05:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 91.5,
+          "conditions": "type_41",
+          "icon": "cloudy"
+        },
+        {
+          "datetime": "06:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 93.1,
+          "conditions": "type_41",
+          "icon": "cloudy"
+        },
+        {
+          "datetime": "07:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 93.1,
+          "conditions": "type_41",
+          "icon": "cloudy"
+        },
+        {
+          "datetime": "08:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": [
+            "rain"
+          ],
+          "cloudcover": 91.5,
+          "conditions": "type_41",
+          "icon": "cloudy"
+        },
+        {
+          "datetime": "09:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 86.5,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "10:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 59,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "11:00:00",
+          "precip": 0,
+          "precipprob": 5,
+          "snow": 0,
+          "preciptype": [
+            "rain"
+          ],
+          "cloudcover": 48,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "12:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 39,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "13:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 32,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "14:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 28,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "15:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 26,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "16:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 25,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "17:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 25,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "18:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 23,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "19:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 20,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "20:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 16,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "21:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 13,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "22:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 15,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "23:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 24,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        }
+      ]
+    },
+    {
+      "datetime": "2026-10-14",
+      "tempmax": 88.7,
+      "tempmin": 76.6,
+      "precip": 0.067,
+      "precipprob": 29,
+      "preciptype": [
+        "rain"
+      ],
+      "snow": 0,
+      "cloudcover": 46.3,
+      "conditions": "type_42",
+      "description": "Variablecloud.",
+      "icon": "partly-cloudy-day",
+      "hours": [
+        {
+          "datetime": "00:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 38,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "01:00:00",
+          "precip": 0,
+          "precipprob": 3,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 53,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "02:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 64,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "03:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 69,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "04:00:00",
+          "precip": 0,
+          "precipprob": 5,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 68,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "05:00:00",
+          "precip": 0,
+          "precipprob": 5,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 66,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "06:00:00",
+          "precip": 0,
+          "precipprob": 6,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 64,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "07:00:00",
+          "precip": 0,
+          "precipprob": 8,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 65,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "08:00:00",
+          "precip": 0,
+          "precipprob": 8,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 64,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "09:00:00",
+          "precip": 0,
+          "precipprob": 8,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 61,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "10:00:00",
+          "precip": 0,
+          "precipprob": 11,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 57,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "11:00:00",
+          "precip": 0.004,
+          "precipprob": 10,
+          "snow": 0,
+          "preciptype": [
+            "rain"
+          ],
+          "cloudcover": 52,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "12:00:00",
+          "precip": 0,
+          "precipprob": 14,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 49,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "13:00:00",
+          "precip": 0,
+          "precipprob": 12,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 47,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "14:00:00",
+          "precip": 0,
+          "precipprob": 13,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 44,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "15:00:00",
+          "precip": 0,
+          "precipprob": 13,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 38,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "16:00:00",
+          "precip": 0.02,
+          "precipprob": 20,
+          "snow": 0,
+          "preciptype": [
+            "rain"
+          ],
+          "cloudcover": 31,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "17:00:00",
+          "precip": 0.012,
+          "precipprob": 21,
+          "snow": 0,
+          "preciptype": [
+            "rain"
+          ],
+          "cloudcover": 31,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "18:00:00",
+          "precip": 0.028,
+          "precipprob": 29,
+          "snow": 0,
+          "preciptype": [
+            "rain"
+          ],
+          "cloudcover": 34,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "19:00:00",
+          "precip": 0.001,
+          "precipprob": 15,
+          "snow": 0,
+          "preciptype": [
+            "rain"
+          ],
+          "cloudcover": 32,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "20:00:00",
+          "precip": 0.001,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": [
+            "rain"
+          ],
+          "cloudcover": 27,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "21:00:00",
+          "precip": 0.001,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": [
+            "rain"
+          ],
+          "cloudcover": 21,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "22:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 17,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "23:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 19,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        }
+      ]
+    },
+    {
+      "datetime": "2026-10-15",
+      "tempmax": 87.4,
+      "tempmin": 70.4,
+      "precip": 0,
+      "precipprob": 13,
+      "preciptype": null,
+      "snow": 0,
+      "cloudcover": 26.7,
+      "conditions": "type_42",
+      "description": "Variablecloud.",
+      "icon": "partly-cloudy-day",
+      "hours": [
+        {
+          "datetime": "00:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 25,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "01:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 32,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "02:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 37,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "03:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 39,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "04:00:00",
+          "precip": 0,
+          "precipprob": 2,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 42,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "05:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 46,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "06:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 49,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "07:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 49,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "08:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 44,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "09:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 37,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "10:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 31,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "11:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 26,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "12:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 21,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "13:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 17,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "14:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 14,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "15:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 11,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "16:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 9,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "17:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 9,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "18:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 9,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "19:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 10,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "20:00:00",
+          "precip": 0,
+          "precipprob": 13,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 13,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "21:00:00",
+          "precip": 0,
+          "precipprob": 13,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 18,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "22:00:00",
+          "precip": 0,
+          "precipprob": 13,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 24,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "23:00:00",
+          "precip": 0,
+          "precipprob": 13,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 28,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        }
+      ]
+    },
+    {
+      "datetime": "2026-10-16",
+      "tempmax": 73.2,
+      "tempmin": 62,
+      "precip": 0,
+      "precipprob": 16,
+      "preciptype": null,
+      "snow": 0,
+      "cloudcover": 45.5,
+      "conditions": "type_42",
+      "description": "Variablecloud.",
+      "icon": "partly-cloudy-day",
+      "hours": [
+        {
+          "datetime": "00:00:00",
+          "precip": 0,
+          "precipprob": 13,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 32,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "01:00:00",
+          "precip": 0,
+          "precipprob": 13,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 37,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "02:00:00",
+          "precip": 0,
+          "precipprob": 16,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 43,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "03:00:00",
+          "precip": 0,
+          "precipprob": 16,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 50,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "04:00:00",
+          "precip": 0,
+          "precipprob": 16,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 56,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "05:00:00",
+          "precip": 0,
+          "precipprob": 16,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 62,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "06:00:00",
+          "precip": 0,
+          "precipprob": 16,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 67,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "07:00:00",
+          "precip": 0,
+          "precipprob": 16,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 70,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "08:00:00",
+          "precip": 0,
+          "precipprob": 8,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 68,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "09:00:00",
+          "precip": 0,
+          "precipprob": 8,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 63,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "10:00:00",
+          "precip": 0,
+          "precipprob": 8,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 59,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "11:00:00",
+          "precip": 0,
+          "precipprob": 8,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 53,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "12:00:00",
+          "precip": 0,
+          "precipprob": 8,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 47,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "13:00:00",
+          "precip": 0,
+          "precipprob": 8,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 43,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "14:00:00",
+          "precip": 0,
+          "precipprob": 3,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 41,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "15:00:00",
+          "precip": 0,
+          "precipprob": 3,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 40,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "16:00:00",
+          "precip": 0,
+          "precipprob": 3,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 38,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "17:00:00",
+          "precip": 0,
+          "precipprob": 3,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 35,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "18:00:00",
+          "precip": 0,
+          "precipprob": 3,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 31,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "19:00:00",
+          "precip": 0,
+          "precipprob": 3,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 29,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "20:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 29,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "21:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 31,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "22:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 33,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "23:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 34,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        }
+      ]
+    },
+    {
+      "datetime": "2026-10-17",
+      "tempmax": 70.3,
+      "tempmin": 55,
+      "precip": 0,
+      "precipprob": 0,
+      "preciptype": null,
+      "snow": 0,
+      "cloudcover": 30.5,
+      "conditions": "type_42",
+      "description": "Variablecloud.",
+      "icon": "partly-cloudy-day",
+      "hours": [
+        {
+          "datetime": "00:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 36,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "01:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 38,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "02:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 39,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "03:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 38,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "04:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 38,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "05:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 40,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "06:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 41,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "07:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 41,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "08:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 41,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "09:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 39,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "10:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 37,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "11:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 34,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "12:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 30,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "13:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 26,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "14:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 25,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "15:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 23,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "16:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 23,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "17:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 23,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "18:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 21,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "19:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 19,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "20:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 19,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "21:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 20,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "22:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 20,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "23:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 20,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        }
+      ]
+    },
+    {
+      "datetime": "2026-10-18",
+      "tempmax": 75.4,
+      "tempmin": 52.6,
+      "precip": 0,
+      "precipprob": 4,
+      "preciptype": null,
+      "snow": 0,
+      "cloudcover": 25.6,
+      "conditions": "type_42",
+      "description": "Variablecloud.",
+      "icon": "partly-cloudy-day",
+      "hours": [
+        {
+          "datetime": "00:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 19,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "01:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 19,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "02:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 19,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "03:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 18,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "04:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 19,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "05:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 20,
+          "conditions": "type_43",
+          "icon": "clear-night"
+        },
+        {
+          "datetime": "06:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 21,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "07:00:00",
+          "precip": 0,
+          "precipprob": 0,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 22,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "08:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 21,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "09:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 19,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "10:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 19,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "11:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 19,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "12:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 20,
+          "conditions": "type_43",
+          "icon": "clear-day"
+        },
+        {
+          "datetime": "13:00:00",
+          "precip": 0,
+          "precipprob": 1,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 21,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "14:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 23,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "15:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 25,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "16:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 28,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "17:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 30,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "18:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 32,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-day"
+        },
+        {
+          "datetime": "19:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 34,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "20:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 37,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "21:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 40,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "22:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 44,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        },
+        {
+          "datetime": "23:00:00",
+          "precip": 0,
+          "precipprob": 4,
+          "snow": 0,
+          "preciptype": null,
+          "cloudcover": 46,
+          "conditions": "type_42",
+          "icon": "partly-cloudy-night"
+        }
+      ]
+    }
+  ]
+}

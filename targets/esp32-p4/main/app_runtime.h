@@ -29,6 +29,7 @@ typedef struct {
   bool valid;
   bool stale;
   time_t updated_at;
+  time_t observed_at; /* Provider observation, distinct from download time. */
   int temp;
   int high;
   int low;

@@ -98,9 +98,11 @@ typedef struct {
   storm_alert_t alerts[STORM_MAX_ALERTS];
 } storm_conditions_t;
 
-/* `current` is Open-Meteo's current_weather object; `hourly` and `daily` are
- * the response's hourly/daily objects (daily may be NULL). Returns false when
- * the current hour can't be found in the hourly data. */
+/* Uses normalized weather arrays documented in weather_icon_names.h. Current
+ * carries local time, optional epoch, windspeed km/h and winddirection degrees.
+ * Daily temperature_2m_max is in the selected temperature unit. Thunder uses
+ * condition_flags, never a provider code or winning picture. Missing values
+ * remain unavailable. Returns false if the current hour cannot be matched. */
 bool storm_conditions_build(
   const storm_conditions_config_t *config,
   const cJSON *current,

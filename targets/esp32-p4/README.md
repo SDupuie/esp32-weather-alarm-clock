@@ -25,6 +25,12 @@ targets/esp32-p4/scripts/build.sh
 
 The checked-in configuration uses the BSP's returned-error option so speaker setup failures can be reported without its optional whole-device abort. This also affects checked display/touch/bus/backlight failures; it is not a promise that every board failure is recoverable. Healthy paths and the standard touch/display setup are preserved.
 
+The application uses the board's 32 MB flash, including addresses above 16 MiB.
+The configuration enables ESP-IDF's extended cache-address option and its
+experimental-feature gate; setting the flash size alone does not enable those
+reads. Keep the matching bootloader and application together when flashing.
+Board verification and chip-specific limits belong in the [work record](../../docs/work.md).
+
 The checked-in configuration selects ESP32-P4. Use `scripts/set-target.sh` only when intentionally resetting the target configuration. See [test instructions](tests/README.md) for native checks.
 
 Artwork generators update existing outputs. When adding or retiring a generated source, update `main/CMakeLists.txt` under the [source-list rules](../../docs/architecture.md#existing-code-changes-that-matter); there is no separate generated build manifest.

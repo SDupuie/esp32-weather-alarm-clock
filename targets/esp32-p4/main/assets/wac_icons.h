@@ -25,3 +25,8 @@ extern const lv_image_dsc_t wac_icon_alarm_clock_off;
 extern const lv_image_dsc_t wac_icon_alarm_clock_small;
 extern const lv_image_dsc_t wac_icon_alarm_clock_off_small;
 extern const lv_image_dsc_t wac_icon_close;
+extern const lv_image_dsc_t wac_weather_freezing_rain;
+extern const lv_image_dsc_t wac_weather_hail;
+extern const lv_image_dsc_t wac_weather_ice;
+extern const lv_image_dsc_t wac_weather_wind;
+extern const lv_image_dsc_t wac_weather_tornado;

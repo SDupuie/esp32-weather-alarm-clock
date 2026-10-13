@@ -469,7 +469,7 @@ void wac_clock_log_weather(const app_weather_snapshot_t *weather)
   }
 
   const char *current_icon_name = live_weather
-    ? weather_icon_name_for_snapshot(weather)
+    ? weather->icon_name
     : weather_icon_fallback_name();
   bool current_used_fallback = live_weather && !weather_icon_name_is_known(weather->icon_name);
   const lv_image_dsc_t *current_asset = weather_icon_image_for_name(current_icon_name);
@@ -1413,7 +1413,7 @@ void wac_clock_update_weather(const app_weather_snapshot_t *weather)
   format_high_low(high_low, sizeof(high_low), weather->high, weather->low);
   wac_ui_set_label_text(s_clock.analog_high_low_label, high_low);
   if (s_clock.analog_weather_icon != NULL) {
-    lv_image_set_src(s_clock.analog_weather_icon, weather_icon_image_for_name(weather_icon_name_for_snapshot(weather)));
+    lv_image_set_src(s_clock.analog_weather_icon, weather_icon_image_for_name(weather->icon_name));
   }
 
   wac_ui_set_label_text(s_clock.digital_temp_label, temps);

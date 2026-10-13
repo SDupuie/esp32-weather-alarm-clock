@@ -75,6 +75,7 @@ static device_config_t alarm_edit(device_config_t value)
 static void test_defaults_and_read_only_copies(void)
 {
   device_config_t value = fresh();
+  assert(value.weather_provider == DEVICE_CONFIG_WEATHER_OPEN_METEO && !value.weather_api_key[0]);
   assert(!strcmp(value.room_name, "Clock"));
   assert(!strcmp(value.device_id, "clock-esp32-p4"));
   assert(!strcmp(value.default_clock_face, "digital"));
@@ -356,7 +357,7 @@ static void test_save_failures(save_fn save, device_config_t (*edit)(device_conf
     assert(device_config_init() == ESP_OK);
     applied = current();
     if (save != device_config_save_weather) assert(device_config_validate(&applied) == ESP_OK);
-    else assert(!applied.location_ready);
+    else assert(applied.location_ready == (failure > 5));
     /* Single-mode Device saves first rewrite the unchanged sharing mode.
      * Other editors first write a field changed by these test drafts. */
     unsigned first_changed_write = save == device_config_save_device ? 2 : 1;
@@ -379,7 +380,7 @@ static void test_save_failures(save_fn save, device_config_t (*edit)(device_conf
       assert(device_config_save_alarm(&with_device, &draft) == ESP_OK);
       applied = current();
       assert(applied.alarm_enabled && applied.day_brightness == 75);
-      assert(!applied.location_ready);
+      assert(applied.location_ready == (failure > 5));
       /* First setup can finish by saving the resolved location again, using
        * the actual partial values now loaded as the editor's baseline. */
       draft = resolved(applied);
@@ -599,7 +600,7 @@ static void test_unchanged_saves_write_only_selected_group(void)
   const char *device_keys[] = {"msg_share", "device_id", "room_name", "wifi_ssid", "wifi_pass",
     "night_st", "night_end", "night_mode", "sunset_offset", "sunrise_offset"};
   const char *display_keys[] = {"clock_face", "time_fmt", "lead_zero", "day_brightness", "night_bright"};
-  const char *weather_keys[] = {"location", "timezone", "units", "lat", "lon"};
+  const char *weather_keys[] = {"location", "timezone", "units", "lat", "lon", "weather_src", "weather_key"};
   const char *alarm_keys[] = {"alarm_enabled", "alarm_hour", "alarm_minute", "alarm_days",
     "alarm_sound", "alarm_volume", "alarm_snooze"};
   const char *toggle_keys[] = {"alarm_enabled"};
@@ -835,6 +836,63 @@ static void test_slow_save_readers_and_serialized_writers(void)
   }
 }
 
+static void test_weather_provider_key_storage(void)
+{
+  device_config_t base = fresh(), draft = resolved(base);
+  draft.weather_provider = DEVICE_CONFIG_WEATHER_VISUAL_CROSSING;
+  assert(device_config_validate(&draft) == ESP_ERR_INVALID_ARG);
+  strcpy(draft.weather_api_key, "constructed-test-key");
+  assert(device_config_validate(&draft) == ESP_OK);
+  fake_nvs_clear_activity();
+  assert(device_config_save_weather(&base, &draft) == ESP_OK);
+  assert(fake_nvs_calls(FAKE_SET) == 7 && fake_nvs_calls(FAKE_COMMIT) == 1);
+  assert(device_config_init() == ESP_OK);
+  base = current();
+  assert(base.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
+    && !strcmp(base.weather_api_key, "constructed-test-key"));
+  draft = base;
+  draft.weather_provider = DEVICE_CONFIG_WEATHER_OPEN_METEO;
+  assert(device_config_save_weather(&base, &draft) == ESP_OK);
+  assert(device_config_init() == ESP_OK);
+  base = current();
+  assert(base.weather_provider == DEVICE_CONFIG_WEATHER_OPEN_METEO
+    && !strcmp(base.weather_api_key, "constructed-test-key"));
+  draft = base;
+  draft.weather_api_key[0] = '\0';
+  assert(device_config_save_weather(&base, &draft) == ESP_OK);
+  assert(device_config_init() == ESP_OK);
+  base = current();
+  assert(!base.weather_api_key[0]);
+  draft = base;
+  draft.weather_provider = (device_config_weather_provider_t) 2;
+  fake_nvs_clear_activity();
+  assert(device_config_save_weather(&base, &draft) == ESP_ERR_INVALID_ARG);
+  assert(fake_nvs_calls(FAKE_SET) == 0);
+  draft = base;
+  memset(draft.weather_api_key, 'x', sizeof(draft.weather_api_key));
+  assert(device_config_validate(&draft) == ESP_ERR_INVALID_ARG);
+
+  /* A constructed returned-error case: disabling is stored before clearing,
+   * so a partial explicit clear does not leave a keyed provider with no key. */
+  draft = base;
+  strcpy(draft.weather_api_key, "constructed-test-key");
+  draft.weather_provider = DEVICE_CONFIG_WEATHER_VISUAL_CROSSING;
+  assert(device_config_save_weather(&base, &draft) == ESP_OK);
+  base = current(); draft = base;
+  draft.weather_provider = DEVICE_CONFIG_WEATHER_OPEN_METEO;
+  draft.weather_api_key[0] = '\0';
+  fake_nvs_clear_activity(); fake_nvs_fail(FAKE_SET, 7);
+  assert(device_config_save_weather(&base, &draft) == ESP_FAIL);
+  device_config_t still_applied = current(); assert_same(&base, &still_applied);
+  fake_nvs_clear_activity(); assert(device_config_init() == ESP_OK);
+  base = current();
+  assert(base.weather_provider == DEVICE_CONFIG_WEATHER_OPEN_METEO
+    && !strcmp(base.weather_api_key, "constructed-test-key"));
+  draft = base; draft.weather_api_key[0] = '\0';
+  assert(device_config_save_weather(&base, &draft) == ESP_OK);
+  assert(!current().weather_api_key[0]);
+}
+
 int main(void)
 {
   device_config_t not_started;
@@ -843,6 +901,7 @@ int main(void)
   assert(device_config_set_alarm_enabled(true) == ESP_ERR_INVALID_STATE);
   assert(device_config_save_display(&not_started, &not_started) == ESP_ERR_INVALID_STATE);
   test_defaults_and_read_only_copies();
+  test_weather_provider_key_storage();
   test_validation();
   test_editor_merges_and_readiness();
   test_display_scope_and_latest_choices();

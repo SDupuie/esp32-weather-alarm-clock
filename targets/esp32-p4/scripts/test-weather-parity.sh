@@ -57,6 +57,7 @@ echo "Building forecast parity test..."
 "$CC" "${COMMON_FLAGS[@]}" \
   "$PROJECT_DIR/tests/test_forecast_representative.c" \
   "$PROJECT_DIR/main/forecast_representative.c" \
+  "$PROJECT_DIR/main/weather_icon_names.c" \
   "$CJSON_DIR/cJSON.c" \
   -o "$BUILD_DIR/test_forecast_representative"
 
@@ -71,6 +72,7 @@ echo "Building storm-conditions parity test..."
 "$CC" "${COMMON_FLAGS[@]}" \
   "$PROJECT_DIR/tests/test_storm_conditions.c" \
   "$PROJECT_DIR/main/storm_conditions.c" \
+  "$PROJECT_DIR/main/weather_icon_names.c" \
   "$CJSON_DIR/cJSON.c" \
   -lm \
   -o "$BUILD_DIR/test_storm_conditions"

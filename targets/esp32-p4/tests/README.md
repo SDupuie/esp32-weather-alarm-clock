@@ -17,6 +17,14 @@ fixtures in `shared/test-data/`. It also checks that provider search names retai
 state/country qualifiers before the provider's result limit. No Raspberry Pi or
 JavaScript suite is required. cJSON is read from `$IDF_PATH/components/json/cJSON`.
 
+Weather fixtures exercise the [approved provider mappings and daily rules](../../../docs/weather.md),
+including compound facts, unknown/no-picture inputs, current-only exclusions,
+the paired ordinary-rain gate, independent Hail reports and mixed-snow majority.
+The retained daily cold-weather guesses are checked separately from current
+classification, which requires reported snow evidence. Missing Conditions data
+must remain unavailable. Constructed rare-condition cases establish decoding
+behavior, not evidence that the provider returns those conditions in practice.
+
 Conditions cases exercise the fixed [weather-warning limits](../../../docs/architecture.md#conditions-contract),
 measurements, outlook and time formatting. The two gust-boundary cases supply
 the same 64 km/h gust: metric warns at its inclusive limit, while imperial stays
@@ -199,16 +207,26 @@ initialization error/retry and callbacks advancing the actual completion count.
 These are controlled concurrency checks; they do not establish
 ESP-Hosted behavior or real Wi-Fi driver and network timing.
 
-The weather-service target compiles production `main/weather_client.c` with
-substitute HTTP responses and the existing weather calculations. Its build also
+The weather-service target includes production `main/weather_client.c` with
+substitute HTTP responses and the existing weather calculations, allowing checks
+of private normalized values without a firmware test interface. Its build also
 extracts the actual private weather worker and publication helpers from
 `main/main.c`; source changes regenerate that build include. It checks provider
 date/temperature/icon pairing, missing or invalid dates, downloads without
 usable time, retained payloads after failure, ten-minute refreshes and independent
 twenty-second weather and network-time-startup retries, including slow requests
 whose retry times overlap. It also checks that a saved location is required.
-The service test checks the resulting forecast icons; the separate representative
-calculation check verifies the chosen weather codes directly.
+Both providers are exercised using retained real response data and explicitly
+constructed current/error/rare-condition supplements. Checks cover selected
+units, raw fractional amounts, observation timestamps, provider local times
+across DST, repeated-hour identity, missing optional fields, required daily
+values and bounded responses. Request checks cover encoded dummy keys,
+serialized admission, key-specific daily-quota pauses, generic rate errors,
+retry/reset waits and hourly failed-check recovery. No real credential or quota
+exhaustion is needed. To check a separately captured, sanitized full Visual
+Crossing response with the same decoder, pass its path to `test_weather_service`
+or set `WAC_WEATHER_LIVE_RESPONSE`; this reads a file and makes no live request.
+The separate representative calculation check verifies the selected pictures.
 The transport itself is substituted in these worker checks; the connectivity
 checks above exercise actual synchronization startup/completion. Live HTTP,
 certificate validation and network-time traffic remain unverified.
@@ -285,12 +303,15 @@ shared raised typing geometry across all six fields and all keyboard pages,
 and the single-line automatic-timezone note between the input and keyboard.
 They measure the note and real error bands using existing fonts, including
 glyph coverage, single-line fit and clearance from the first row or keyboard.
-Open-Meteo's Not required key row cannot open a keyboard; Visual Crossing's
-masked key and provider remain unsaved UI drafts. Pointer Save checks prove
-that unsupported selection cannot start a lookup, write settings or restart.
-Returning to Open-Meteo preserves ordinary location/units saving without a key.
-Cancel/Back discard the temporary fields, retained Device edits stay isolated,
-and alarm hiding/resumption preserves the existing Weather editor and its draft.
+Open-Meteo's Not required key row cannot open a keyboard. Visual Crossing checks
+cover masked Configured/Entered states, missing keys, Clear, replacement and
+Cancel; successful activation precedes the seven ordinary Weather writes.
+Controlled failed checks write nothing and retain the editable draft for retry.
+Unchanged provider/key saves make no activation request; switching Open-Meteo
+retains a key until explicit clearing is saved. Fresh-process `vc_day`, `vc_night`,
+`vc_location`, `vc_clear` and `vc_key` cases cover restart completion, including
+closed/replaced/hidden editors. Retained Device edits stay isolated and alarm
+hiding/resumption preserves the existing Weather editor and its draft.
 These checks do not establish physical Day/Night readability or provider traffic.
 
 Nearby-network checks exercise real LVGL pointer scrolling beyond the first three
@@ -339,8 +360,11 @@ unverified; the mockup’s browser-native slider track is not a fixed raster ass
 Alarm/Sound/Snooze/Solar menu checks compare actual rows, switches, footers,
 descriptions, selected checks and icon/text spacing with both reference palettes.
 They verify draft-only time/repeat/sound/snooze edits, Alarm Save without restart,
-immediate enabled-only writes, failed Save/retry and pending controls. Volume
-checks open the real Sound editor, use Done and save unrelated alarm edits while
+immediate enabled-only writes, failed Save/retry and pending controls. Toggle
+checks also verify that the Alarm Settings switch preserves all other drafts,
+that Cancel/Back retain a successful toggle, and that task-start/commit failures
+leave On/Off unchanged for retry, including with an unfinished repeat-day draft.
+Volume checks open the real Sound editor, use Done and save unrelated alarm edits while
 preserving stored 0/7/37 values. Actual pointer and keyboard input then checks
 five-point steps, 10–100% selections and label updates without rebuilding it.
 Preview is enabled when its audio worker accepts requests; hardware readiness

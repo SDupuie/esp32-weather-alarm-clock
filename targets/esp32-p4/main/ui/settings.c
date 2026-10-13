@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "location_lookup.h"
+#include "weather_client.h"
 
 #define SCAN_LIMIT 10
 
@@ -76,6 +77,7 @@ typedef struct {
 typedef struct {
   bool ready;
   bool lookup_failed;
+  bool provider_failed;
   esp_err_t error;
   save_kind_t kind;
   unsigned route;
@@ -90,7 +92,7 @@ typedef struct {
 } scan_completion_t;
 typedef enum { NOTICE_GENERAL, NOTICE_LOCATION_NOT_FOUND,
   NOTICE_LOCATION_UNAVAILABLE, NOTICE_LOCATION_OFFLINE,
-  NOTICE_SAVE_ERROR, NOTICE_LOCATION_CHECKING, NOTICE_RESTART_SAVED_EDITOR } notice_kind_t;
+  NOTICE_SAVE_ERROR, NOTICE_LOCATION_CHECKING, NOTICE_PROVIDER_CHECKING, NOTICE_PROVIDER_ERROR, NOTICE_RESTART_SAVED_EDITOR } notice_kind_t;
 
 /* Only these completion slots cross task boundaries. Workers never keep
  * LVGL objects or access drafts. The heartbeat consumes each slot once. */
@@ -103,7 +105,7 @@ static struct {
   lv_obj_t *preview_button, *preview_caption;
   wac_audio_snapshot_t audio;
   esp_err_t preview_submission_error;
-  struct { lv_obj_t *block, *input, *summary, *arrow; int y; } fields[6];
+  struct { lv_obj_t *block, *input, *summary, *arrow, *clear; int y; } fields[6];
   lv_obj_t *active_input;
   const char *network_note;
   int notice_y;
@@ -119,9 +121,6 @@ static struct {
   /* Weather has an independent draft while its Device parent keeps edits. */
   device_config_t held_device_draft;
   bool holding_device_draft;
-  /* Presentation-only Weather choices; never submitted to a provider or NVS. */
-  bool visual_crossing_draft;
-  char weather_key_draft[129];
   connectivity_scan_result_t networks[SCAN_LIMIT];
   size_t network_count;
   esp_err_t scan_error;
@@ -134,7 +133,7 @@ enum {
   ACTION_BACK = 100, ACTION_DONE, ACTION_CANCEL, ACTION_SAVE,
   ACTION_ALARM_TOGGLE, ACTION_FACE, ACTION_FORMAT, ACTION_ZERO,
   ACTION_UNITS, ACTION_SHARING, ACTION_SCAN, ACTION_MANUAL, ACTION_PROVIDER,
-  ACTION_ALARM_DRAFT_TOGGLE, ACTION_PREVIEW,
+  ACTION_PREVIEW, ACTION_CLEAR_KEY,
   ACTION_HOUR_UP, ACTION_HOUR_DOWN, ACTION_MINUTE_UP, ACTION_MINUTE_DOWN,
   ACTION_AM, ACTION_PM, ACTION_WEEKDAYS, ACTION_EVERY_DAY,
   ACTION_OFFSET_BEFORE, ACTION_OFFSET_AT, ACTION_OFFSET_AFTER,
@@ -539,10 +538,10 @@ static void refresh_notice(void)
       case NOTICE_LOCATION_OFFLINE: text = "Wi-Fi Required.\nConnect before saving a location."; break;
       case NOTICE_SAVE_ERROR: text = "Couldn't save settings.\nTry Save again."; break;
       case NOTICE_LOCATION_CHECKING: text = "Checking Location…"; break;
+      case NOTICE_PROVIDER_CHECKING: text = "Checking Weather…"; break;
+      case NOTICE_PROVIDER_ERROR: text = "Weather check failed.\nTry Save again."; break;
       default: break;
     }
-    if (s_settings.visual_crossing_draft)
-      text = "Visual Crossing is not available yet.";
   } else if (!s_settings.field_error && view == WAC_SETTINGS_CREDENTIALS
       && s_settings.notice_kind == NOTICE_SAVE_ERROR)
     text = "Couldn’t save settings.\nTry Save & Restart again.";
@@ -559,12 +558,11 @@ static void refresh_notice(void)
   }
   if (view == WAC_SETTINGS_WEATHER) {
     bool two_lines = strchr(text, '\n') != NULL;
-    bool unsupported = !s_settings.active_input && s_settings.visual_crossing_draft;
-    lv_obj_set_pos(s_settings.status, unsupported ? 140 : s_settings.field_error ? 230 : 245,
+    lv_obj_set_pos(s_settings.status, s_settings.field_error ? 230 : 245,
       two_lines ? 170 : 178);
-    lv_obj_set_width(s_settings.status, unsupported ? 520 : s_settings.field_error ? 340 : 310);
+    lv_obj_set_width(s_settings.status, s_settings.field_error ? 340 : 310);
     lv_obj_set_style_text_font(s_settings.status,
-      s_settings.field_error || two_lines || unsupported ? &lv_font_montserrat_18
+      s_settings.field_error || two_lines ? &lv_font_montserrat_18
       : strstr(text, "…") ? &wac_font_settings_26 : &lv_font_montserrat_22, 0);
   }
   lv_label_set_text(s_settings.status, text);
@@ -603,7 +601,8 @@ static const char *field_summary(int field_id)
 {
   const char *value = lv_textarea_get_text(s_settings.fields[field_id].input);
   if (field_id == FIELD_API_KEY)
-    return !s_settings.visual_crossing_draft ? "Not required" : has_text(value) ? "Entered (not saved)" : "Required";
+    return s_settings.draft.weather_provider != DEVICE_CONFIG_WEATHER_VISUAL_CROSSING ? "Not required" : !has_text(value) ? "Required"
+      : strcmp(value, s_settings.baseline.weather_api_key) == 0 ? "Configured" : "Entered (not saved)";
   return field_id == FIELD_LOCATION && !value[0] ? "City, State" : value;
 }
 
@@ -625,6 +624,10 @@ static void typing_layout(lv_obj_t *input)
     lv_obj_set_y(block, s_settings.fields[i].input == input ? 212 : s_settings.fields[i].y);
     if (!s_settings.fields[i].summary) continue;
     bool typing = s_settings.fields[i].input == input;
+    if (s_settings.fields[i].clear) {
+      if (typing) lv_obj_remove_flag(s_settings.fields[i].clear, LV_OBJ_FLAG_HIDDEN);
+      else lv_obj_add_flag(s_settings.fields[i].clear, LV_OBJ_FLAG_HIDDEN);
+    }
     lv_obj_t *caption = lv_obj_get_child(block, 0);
     lv_obj_set_height(block, typing ? 140 : 96);
     lv_obj_set_style_border_width(block, typing ? 0 : 1, 0);
@@ -781,8 +784,8 @@ static void field_changed(lv_event_t *event)
     case FIELD_SSID: dest = s_settings.draft.wifi_ssid; length = sizeof(s_settings.draft.wifi_ssid); break;
     case FIELD_PASSWORD: dest = s_settings.draft.wifi_password; length = sizeof(s_settings.draft.wifi_password); break;
     case FIELD_API_KEY:
-      if (!s_settings.visual_crossing_draft) return;
-      dest = s_settings.weather_key_draft; length = sizeof(s_settings.weather_key_draft); break;
+      if (s_settings.draft.weather_provider != DEVICE_CONFIG_WEATHER_VISUAL_CROSSING) return;
+      dest = s_settings.draft.weather_api_key; length = sizeof(s_settings.draft.weather_api_key); break;
     case FIELD_LOCATION:
       dest = s_settings.draft.location; length = sizeof(s_settings.draft.location);
       if (strcmp(dest, value) != 0) {
@@ -804,7 +807,7 @@ static void field(const char *title, const char *value, int field_id, size_t len
 {
   bool compact = wac_ui_settings_view() == WAC_SETTINGS_DEVICE
     || wac_ui_settings_view() == WAC_SETTINGS_WEATHER;
-  bool disabled = field_id == FIELD_API_KEY && !s_settings.visual_crossing_draft;
+  bool disabled = field_id == FIELD_API_KEY && s_settings.draft.weather_provider != DEVICE_CONFIG_WEATHER_VISUAL_CROSSING;
   lv_obj_t *block = compact ? lv_button_create(s_settings.body) : lv_obj_create(s_settings.body);
   lv_obj_remove_style_all(block);
   lv_obj_set_pos(block, 140, y);
@@ -821,6 +824,7 @@ static void field(const char *title, const char *value, int field_id, size_t len
   lv_obj_set_size(obj, 520, 96);
   lv_textarea_set_max_length(obj, length - 1);
   lv_textarea_set_password_mode(obj, password);
+  if (field_id == FIELD_API_KEY) lv_textarea_set_password_show_time(obj, 0);
   lv_textarea_set_text(obj, value);
   lv_textarea_set_placeholder_text(obj, field_id == FIELD_LOCATION ? "City, State"
     : field_id == FIELD_API_KEY ? disabled ? "Not required" : "Required" : title);
@@ -837,6 +841,21 @@ static void field(const char *title, const char *value, int field_id, size_t len
   lv_obj_add_event_cb(obj, field_focus, LV_EVENT_CLICKED, NULL);
   lv_obj_add_event_cb(obj, field_focus, LV_EVENT_FOCUSED, NULL);
   lv_obj_add_event_cb(obj, field_changed, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)field_id);
+  if (field_id == FIELD_API_KEY) {
+    lv_obj_t *clear = lv_button_create(block);
+    lv_obj_remove_style_all(clear);
+    lv_obj_set_pos(clear, 410, 0); lv_obj_set_size(clear, 110, 36);
+    lv_obj_add_style(clear, &s_palette[STYLE_BUTTON], 0);
+    lv_obj_set_style_bg_opa(clear, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(clear, 1, 0); lv_obj_set_style_radius(clear, 18, 0);
+    lv_obj_set_style_pad_all(clear, 0, 0);
+    lv_obj_remove_flag(clear, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *caption = label(clear, "Clear", 0, 0, 110, &lv_font_montserrat_22);
+    lv_obj_center(caption);
+    lv_obj_add_event_cb(clear, action_event, LV_EVENT_CLICKED, (void *)(intptr_t)ACTION_CLEAR_KEY);
+    lv_obj_add_flag(clear, LV_OBJ_FLAG_HIDDEN);
+    s_settings.fields[field_id].clear = clear;
+  }
   if (s_settings.saving || s_settings.restarting || disabled) lv_obj_add_state(obj, LV_STATE_DISABLED);
   s_settings.fields[field_id].block = block;
   s_settings.fields[field_id].input = obj;
@@ -1061,6 +1080,7 @@ static void save_task(void *arg)
   save_request_t *request = arg;
   esp_err_t error;
   bool lookup_failed = false;
+  bool provider_failed = false;
   if (request->kind == SAVE_WEATHER) {
     bool lookup = needs_location_lookup(&request->draft);
     if (lookup) {
@@ -1071,6 +1091,16 @@ static void save_task(void *arg)
       snprintf(request->draft.latitude, sizeof(request->draft.latitude), "%s", result.latitude);
       snprintf(request->draft.longitude, sizeof(request->draft.longitude), "%s", result.longitude);
       snprintf(request->draft.timezone, sizeof(request->draft.timezone), "%s", result.timezone);
+    }
+    bool validate_provider = request->draft.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
+      && (request->baseline.weather_provider != DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
+          || strcmp(request->baseline.weather_api_key, request->draft.weather_api_key) != 0);
+    if (validate_provider) {
+      app_weather_snapshot_t *checked = calloc(1, sizeof(*checked));
+      error = checked ? (connectivity_is_wifi_connected()
+        ? weather_client_fetch(&request->draft, checked) : ESP_ERR_WIFI_NOT_CONNECT) : ESP_ERR_NO_MEM;
+      free(checked);
+      if (error != ESP_OK) { provider_failed = true; goto complete; }
     }
     error = device_config_save_weather(&request->baseline, &request->draft);
   } else if (request->kind == SAVE_DEVICE) error = device_config_save_device(&request->baseline, &request->draft);
@@ -1083,6 +1113,7 @@ complete:
   s_save_completion.route = request->route;
   s_save_completion.draft = request->draft;
   s_save_completion.lookup_failed = lookup_failed;
+  s_save_completion.provider_failed = provider_failed;
   s_save_completion.error = error;
   s_save_completion.ready = true;
   portEXIT_CRITICAL(&s_completion_lock);
@@ -1093,8 +1124,9 @@ complete:
 static void submit_save(save_kind_t kind)
 {
   if (s_settings.saving || s_settings.restarting) return;
-  if (kind == SAVE_WEATHER && s_settings.visual_crossing_draft) {
-    show_notice("Visual Crossing is not available yet.");
+  if (kind == SAVE_WEATHER && s_settings.draft.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
+      && !has_text(s_settings.draft.weather_api_key)) {
+    focus_validation(WAC_SETTINGS_WEATHER, FIELD_API_KEY, "Enter a Visual Crossing API key.");
     return;
   }
   if (kind == SAVE_DEVICE && wac_ui_settings_view() == WAC_SETTINGS_CREDENTIALS
@@ -1136,6 +1168,10 @@ static void submit_save(save_kind_t kind)
   bool lookup = kind == SAVE_WEATHER && needs_location_lookup(&request->draft);
   show_notice(lookup ? "Checking Location…" : kind == SAVE_WEATHER ? "Saving settings…" : "Saving settings...");
   if (lookup) s_settings.notice_kind = NOTICE_LOCATION_CHECKING;
+  else if (kind == SAVE_WEATHER && request->draft.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
+      && (request->baseline.weather_provider != DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
+          || strcmp(request->baseline.weather_api_key, request->draft.weather_api_key) != 0))
+    s_settings.notice_kind = NOTICE_PROVIDER_CHECKING;
   if (xTaskCreate(save_task, "settings_save", 8192, request, 4, NULL) != pdPASS) {
     s_settings.saving = false;
     free(request); show_notice("Could not start saving. Try again.");
@@ -1173,8 +1209,6 @@ static void scan_networks(void)
 void wac_settings_start_weather(const device_config_t *config)
 {
   s_settings.holding_device_draft = false;
-  s_settings.visual_crossing_draft = false;
-  memset(s_settings.weather_key_draft, 0, sizeof(s_settings.weather_key_draft));
   s_settings.baseline = *config;
   s_settings.draft = *config;
 }
@@ -1185,8 +1219,6 @@ void wac_settings_begin(lv_obj_t *parent, const device_config_t *config)
   s_settings.preview_submission_error = ESP_OK;
   s_settings.applied = *config;
   s_settings.holding_device_draft = false;
-  s_settings.visual_crossing_draft = false;
-  memset(s_settings.weather_key_draft, 0, sizeof(s_settings.weather_key_draft));
   s_settings.baseline = s_settings.draft = *config;
   ++s_settings.route;
   s_settings.notice[0] = '\0';
@@ -1206,8 +1238,6 @@ void wac_settings_begin(lv_obj_t *parent, const device_config_t *config)
 void wac_settings_close(void)
 {
   s_settings.holding_device_draft = false;
-  s_settings.visual_crossing_draft = false;
-  memset(s_settings.weather_key_draft, 0, sizeof(s_settings.weather_key_draft));
   stop_preview();
   ++s_settings.route;
   if (s_settings.root) lv_obj_delete(s_settings.root);
@@ -1269,11 +1299,6 @@ static void repeat_summary(char *text, size_t size, uint8_t days, bool compact)
 
 static void navigate(wac_settings_view_t view)
 {
-  wac_settings_view_t previous = wac_ui_settings_view();
-  if (view != previous && (view == WAC_SETTINGS_WEATHER || previous == WAC_SETTINGS_WEATHER)) {
-    s_settings.visual_crossing_draft = false;
-    memset(s_settings.weather_key_draft, 0, sizeof(s_settings.weather_key_draft));
-  }
   stop_preview();
   s_settings.preview_submission_error = ESP_OK;
   ++s_settings.route;
@@ -1357,6 +1382,10 @@ static void action_event(lv_event_t *event)
     return;
   }
   if (action == ACTION_ALARM_TOGGLE) { submit_save(SAVE_TOGGLE); return; }
+  if (action == ACTION_CLEAR_KEY) {
+    lv_textarea_set_text(s_settings.fields[FIELD_API_KEY].input, "");
+    return;
+  }
   if (action == ACTION_SCAN) { scan_networks(); return; }
   if (action == ACTION_MANUAL) {
     s_settings.network_note = "Enter the network name and password.";
@@ -1396,11 +1425,11 @@ static void action_event(lv_event_t *event)
     draft->leading_zero_12h = !draft->leading_zero_12h;
   else if (action == ACTION_UNITS) snprintf(s_settings.draft.units, sizeof(s_settings.draft.units), "%s", strcmp(s_settings.draft.units, "metric") == 0 ? "imperial" : "metric");
   else if (action == ACTION_PROVIDER) {
-    s_settings.visual_crossing_draft = !s_settings.visual_crossing_draft;
-    show_notice(s_settings.visual_crossing_draft ? "Visual Crossing is not available yet." : "");
+    draft->weather_provider = draft->weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
+      ? DEVICE_CONFIG_WEATHER_OPEN_METEO : DEVICE_CONFIG_WEATHER_VISUAL_CROSSING;
+    show_notice("");
   }
   else if (action == ACTION_SHARING) snprintf(draft->message_sharing, sizeof(draft->message_sharing), "%s", strcmp(draft->message_sharing, "shared") == 0 ? "single" : "shared");
-  else if (action == ACTION_ALARM_DRAFT_TOGGLE) s_settings.draft.alarm_enabled = !s_settings.draft.alarm_enabled;
   else if (action >= ACTION_DAY_BASE && action < ACTION_DAY_BASE + 7) s_settings.draft.alarm_repeat_days ^= 1 << (action - ACTION_DAY_BASE);
   else if (action >= ACTION_SOUND_BASE && action < ACTION_SOUND_BASE + 3) s_settings.draft.alarm_sound = action - ACTION_SOUND_BASE;
   else if (action >= ACTION_SNOOZE_BASE && action < ACTION_SNOOZE_BASE + 3) s_settings.draft.alarm_snooze_minutes = 5 * (action - ACTION_SNOOZE_BASE + 1);
@@ -1446,7 +1475,13 @@ void wac_settings_poll(void)
           s_settings.baseline = s_settings.draft = s_settings.applied;
           navigate(WAC_SETTINGS_ENTRY);
           show_notice(save.kind == SAVE_DISPLAY ? "Display settings saved." : "Alarm settings saved.");
-        } else show_notice("Alarm setting saved.");
+        } else {
+          /* On/Off is already applied. Cancel and a later full Save must keep
+           * it while the other alarm edits remain in this editor's draft. */
+          s_settings.baseline.alarm_enabled = s_settings.applied.alarm_enabled;
+          s_settings.draft.alarm_enabled = s_settings.applied.alarm_enabled;
+          show_notice("Alarm setting saved.");
+        }
       } else {
         char text[192];
         if (save.kind == SAVE_WEATHER && !save.lookup_failed) {
@@ -1466,7 +1501,7 @@ void wac_settings_poll(void)
           s_settings.notice_kind = NOTICE_LOCATION_UNAVAILABLE;
         else if (save.kind == SAVE_WEATHER && save.lookup_failed)
           s_settings.notice_kind = NOTICE_LOCATION_OFFLINE;
-        else s_settings.notice_kind = NOTICE_SAVE_ERROR;
+        else s_settings.notice_kind = save.provider_failed ? NOTICE_PROVIDER_ERROR : NOTICE_SAVE_ERROR;
       }
       wac_settings_render(wac_ui_settings_view());
     } else if (s_settings.root) {
@@ -1591,9 +1626,9 @@ void wac_settings_render(wac_settings_view_t view)
       button("Done", ACTION_DONE, 270, 664, 260, 80, true); break;
     case WAC_SETTINGS_WEATHER:
       field("Weather Location", d->location, FIELD_LOCATION, sizeof(d->location), 212, false);
-      value_row("Provider", s_settings.visual_crossing_draft ? "Visual Crossing" : "Open-Meteo", ACTION_PROVIDER, 320);
+      value_row("Provider", (s_settings.draft.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING) ? "Visual Crossing" : "Open-Meteo", ACTION_PROVIDER, 320);
       value_row("Units", strcmp(d->units, "metric") == 0 ? "Metric" : "Imperial", ACTION_UNITS, 428);
-      field("API Key", s_settings.weather_key_draft, FIELD_API_KEY, sizeof(s_settings.weather_key_draft), 536, true);
+      field("API Key", s_settings.draft.weather_api_key, FIELD_API_KEY, sizeof(s_settings.draft.weather_api_key), 536, true);
       s_settings.normal_note = label(s_settings.body, "Time zone is set automatically from this location.", 140, 359, 520, &lv_font_montserrat_22);
       /* Keep the nearest existing font on one line in the illustrated band. */
       lv_obj_set_style_text_letter_space(s_settings.normal_note, -1, 0);
@@ -1640,7 +1675,7 @@ void wac_settings_render(wac_settings_view_t view)
       s_settings.status = label(s_settings.body, "", 180, 169, 440, &wac_font_settings_28);
       lv_obj_add_style(s_settings.status, &s_palette[STYLE_MUTED], 0);
       refresh_notice();
-      switch_row("Alarm", d->alarm_enabled, ACTION_ALARM_DRAFT_TOGGLE, 212);
+      switch_row("Alarm", d->alarm_enabled, ACTION_ALARM_TOGGLE, 212);
       format_time(text, sizeof(text), d->alarm_hour, d->alarm_minute, d);
       value_entry("Alarm Time", text, WAC_SETTINGS_ALARM_TIME, 320, 96);
       repeat_summary(text, sizeof(text), d->alarm_repeat_days, true);

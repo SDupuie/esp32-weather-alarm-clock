@@ -12,11 +12,13 @@
 #include "freertos/task.h"
 
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_lcd_touch.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
+#include "cJSON.h"
 
 #include "bsp/esp32_p4_wifi6_touch_lcd_xc.h"
 
@@ -32,6 +34,11 @@
 #include "clock_time.h"
 
 static const char *TAG = "rwd_esp32_p4";
+
+static void *json_alloc(size_t size)
+{
+  return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
 
 static const uint32_t UI_HEARTBEAT_LOCK_TIMEOUT_MS = 250;
 static const uint32_t INITIAL_UI_LOCK_TIMEOUT_MS = 1000;
@@ -354,11 +361,12 @@ static void ui_heartbeat_task(void *arg)
   (void) arg;
 
   const TickType_t delay_ticks = pdMS_TO_TICKS(1000);
+  uint32_t reported_stack_min = UINT32_MAX;
 
   while (true) {
     vTaskDelay(delay_ticks);
 
-    /* Static, not on this task's 4 KB stack: the runtime state carries the
+    /* Static, not on this task's stack: the runtime state carries the
      * full weather snapshot including the conditions summary. Only this
      * task touches it. */
     static app_runtime_state_t runtime_snapshot;
@@ -385,6 +393,13 @@ static void ui_heartbeat_task(void *arg)
       if (have_alarm_result)
         app_ui_complete_alarm_action(alarm_result.action, &alarm_result.occurrence, alarm_result.error);
       bsp_display_unlock();
+      if (runtime_snapshot.weather.valid) {
+        uint32_t stack_min = (uint32_t) uxTaskGetStackHighWaterMark(NULL);
+        if (stack_min < reported_stack_min) {
+          reported_stack_min = stack_min;
+          ESP_LOGI(TAG, "UI after weather: stack_free_min_bytes=%u", (unsigned) stack_min);
+        }
+      }
     }
   }
 }
@@ -506,6 +521,8 @@ static void weather_service_task(void *arg)
       continue;
     }
 
+    int64_t quota_due = weather_client_next_allowed_us(&config);
+    if (quota_due > next_weather_attempt_us) next_weather_attempt_us = quota_due;
     if (esp_timer_get_time() < next_weather_attempt_us) {
       weather_service_wait(next_weather_attempt_us, time_retry_due_us);
       continue;
@@ -533,6 +550,8 @@ static void weather_service_task(void *arg)
           : "Weather request failed. Retrying..."
       );
       next_weather_attempt_us = esp_timer_get_time() + (int64_t) WEATHER_RETRY_INTERVAL_MS * 1000;
+      quota_due = weather_client_next_allowed_us(&config);
+      if (quota_due > next_weather_attempt_us) next_weather_attempt_us = quota_due;
       weather_service_wait(next_weather_attempt_us, time_retry_due_us);
       continue;
     }
@@ -552,6 +571,10 @@ static void weather_service_task(void *arg)
 
 void app_main(void)
 {
+  /* Set once before JSON users start. Small response nodes must not consume
+   * internal task/driver memory while the board's PSRAM is available. */
+  cJSON_Hooks json_hooks = { .malloc_fn = json_alloc, .free_fn = heap_caps_free };
+  cJSON_InitHooks(&json_hooks);
   /* Storage failure stops dependent startup; never erase user data to repair it. */
   esp_err_t storage_err = nvs_flash_init();
   if (storage_err == ESP_OK) {
@@ -570,6 +593,7 @@ void app_main(void)
   }
   device_config_t config;
   ESP_ERROR_CHECK(device_config_copy(&config));
+  ESP_ERROR_CHECK(weather_client_init());
   ESP_ERROR_CHECK(wac_time_init(config.timezone));
   log_device_clock("Clock after boot timezone apply");
   wac_time_snapshot_t startup_clock;
@@ -653,7 +677,7 @@ void app_main(void)
   BaseType_t ui_task_ok = xTaskCreate(
     ui_heartbeat_task,
     "rwd_ui_heartbeat",
-    4096,
+    6144,
     NULL,
     4,
     NULL

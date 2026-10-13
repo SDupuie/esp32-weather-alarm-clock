@@ -14,13 +14,9 @@
 #include "weather_icon_thunderstorm.h"
 #include "weather_icon_thundersnow.h"
 #include "weather_icon_names.h"
+#include "wac_icons.h"
 
 #include <string.h>
-
-static const lv_image_dsc_t *fallback_weather_icon(void)
-{
-  return &weather_icon_partlycloudy_day;
-}
 
 const lv_image_dsc_t *weather_icon_image_for_name(const char *icon_name)
 {
@@ -62,7 +58,7 @@ const lv_image_dsc_t *weather_icon_image_for_name(const char *icon_name)
     return &weather_icon_showers_night;
   }
 
-  if (strcmp(resolved_name, "sleet") == 0) {
+  if (strcmp(resolved_name, "rain-snow") == 0) {
     return &weather_icon_sleet;
   }
 
@@ -78,10 +74,15 @@ const lv_image_dsc_t *weather_icon_image_for_name(const char *icon_name)
     return &weather_icon_thundersnow;
   }
 
-  return fallback_weather_icon();
+  if (strcmp(resolved_name, "freezing-rain") == 0) return &wac_weather_freezing_rain;
+  if (strcmp(resolved_name, "hail") == 0) return &wac_weather_hail;
+  if (strcmp(resolved_name, "ice") == 0) return &wac_weather_ice;
+  if (strcmp(resolved_name, "wind") == 0) return &wac_weather_wind;
+  if (strcmp(resolved_name, "tornado") == 0) return &wac_weather_tornado;
+  return NULL;
 }
 
 const lv_image_dsc_t *weather_icon_image_for_snapshot(const app_weather_snapshot_t *weather)
 {
-  return weather_icon_image_for_name(weather_icon_name_for_snapshot(weather));
+  return weather && weather->valid ? weather_icon_image_for_name(weather->icon_name) : NULL;
 }

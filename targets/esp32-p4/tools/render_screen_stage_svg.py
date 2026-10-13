@@ -14,6 +14,14 @@ FACE_CY = CENTER + STAGE_Y_TRIM
 FACE_RADIUS = 390
 FORECAST_FRAME_SIZE = 500
 FORECAST_FRAME_CENTER = FORECAST_FRAME_SIZE // 2
+WEATHER_ICON_SIZE = 250
+WEATHER_ICON_VARIANTS = (
+    "freezing_rain",
+    "hail",
+    "ice",
+    "wind",
+    "tornado",
+)
 
 PALETTE_DAY = {
     "stage_start": "rgba(39, 53, 79, 0.55)",
@@ -231,6 +239,52 @@ def build_settings_icon(variant: str, size: int = 24) -> str:
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{inner}</svg>'
 
 
+def build_weather_icon(variant: str) -> str:
+    """Return approved weather artwork that is absent from the existing icon set."""
+    if variant not in WEATHER_ICON_VARIANTS:
+        raise ValueError(f"Unsupported weather icon: {variant}")
+
+    shared = f'width="{WEATHER_ICON_SIZE}" height="{WEATHER_ICON_SIZE}" viewBox="0 0 250 250"'
+    cloud = (
+        '<path fill="#bfc3c9" transform="translate(125 70) scale(.85 .75) translate(-125 -70)" '
+        'd="M77 130c-25 0-43-18-43-42 0-22 17-40 39-41 C81 25 101 12 124 12c28 0 49 20 51 48 '
+        '23-3 42 13 44 36 3 19-11 34-31 34z"/>'
+    )
+
+    if variant == "freezing_rain":
+        icicles = (
+            '<path fill="#5590cc" d="M77 108h16l-8 31-17 28 4-27zm43 0h15l-7 46-8 14-7-14zm44 0h16l15 31 4 27-19-28z"/>'
+        )
+        inner = cloud + icicles
+    elif variant == "hail":
+        inner = cloud + ''.join(
+            f'<circle cx="{x}" cy="{y}" r="11" fill="#fff"/>'
+            for x, y in ((75, 166), (125, 183), (175, 166))
+        )
+    elif variant == "ice":
+        inner = '''
+  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="14">
+    <path d="M125 60v130M68 92l114 66M68 158l114-66"/>
+  </g>'''
+    elif variant == "wind":
+        inner = '''
+  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="13">
+    <path d="M75 87h69c12 0 17-9 11-16-5-6-14-5-17 2"/>
+    <path d="M55 125h140"/>
+    <path d="M71 163h74c12 0 17 10 11 17-5 6-14 5-17-2"/>
+  </g>'''
+    else:  # tornado
+        inner = '''
+  <g fill="#aeb4bc" transform="translate(125 125) scale(.75 .8) translate(-125 -125)">
+    <path d="M29 44c57 15 135 15 192 0l-12 24c-48 12-120 12-168 0z"/>
+    <path d="M48 91c43 13 111 13 154 0l-12 23c-36 10-94 10-130 0z"/>
+    <path d="M70 137c31 11 79 11 110 0l-13 23c-24 8-60 8-84 0z"/>
+    <path d="M94 183c17 7 45 7 62 0l-13 21c-10 5-26 5-36 0z"/>
+  </g>'''
+
+    return f'<svg xmlns="http://www.w3.org/2000/svg" {shared}>{inner}</svg>'
+
+
 def build_svg(variant: str, mode: str) -> str:
     if variant == "round_stage":
         return build_round_stage(mode)
@@ -238,12 +292,14 @@ def build_svg(variant: str, mode: str) -> str:
         return build_digital_stage(mode)
     if variant == "forecast_frame":
         return build_forecast_frame(mode)
+    if variant in WEATHER_ICON_VARIANTS:
+        return build_weather_icon(variant)
     raise ValueError(f"Unsupported variant: {variant}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Render non-analog screen SVG assets.")
-    parser.add_argument("--variant", choices=("round_stage", "digital_stage", "forecast_frame"), required=True)
+    parser.add_argument("--variant", choices=("round_stage", "digital_stage", "forecast_frame", *WEATHER_ICON_VARIANTS), required=True)
     parser.add_argument("--mode", choices=("day", "night"), default="day")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()

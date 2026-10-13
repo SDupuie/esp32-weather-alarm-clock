@@ -47,6 +47,7 @@ static bool strings_terminated(const device_config_t *config)
   CHECK_STRING(default_clock_face)
   CHECK_STRING(time_format)
   CHECK_STRING(units)
+  CHECK_STRING(weather_api_key)
   CHECK_STRING(latitude)
   CHECK_STRING(longitude)
   CHECK_STRING(night_shift_start)
@@ -138,6 +139,9 @@ static esp_err_t validate_settings(const device_config_t *config, bool allow_par
           && strcmp(config->default_clock_face, "analog") != 0)
       || (strcmp(config->time_format, "12") != 0 && strcmp(config->time_format, "24") != 0)
       || (strcmp(config->units, "imperial") != 0 && strcmp(config->units, "metric") != 0)
+      || (unsigned) config->weather_provider > DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
+      || (config->weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
+          && !has_text(config->weather_api_key))
       || !hhmm_valid(config->night_shift_start) || !hhmm_valid(config->night_shift_end)
       || (unsigned) config->night_shift_mode > DEVICE_CONFIG_NIGHT_SOLAR
       || !offset_valid(config->night_sunset_offset_minutes)
@@ -266,6 +270,7 @@ esp_err_t device_config_init(void)
   LOAD_STRING("clock_face", default_clock_face)
   LOAD_STRING("time_fmt", time_format)
   LOAD_STRING("units", units)
+  LOAD_STRING("weather_key", weather_api_key)
   LOAD_STRING("lat", latitude)
   LOAD_STRING("lon", longitude)
   LOAD_STRING("night_st", night_shift_start)
@@ -300,6 +305,10 @@ esp_err_t device_config_init(void)
   err = load_u8(handle, "alarm_sound", &value, &seeded);
   if (err != ESP_OK) { goto done; }
   config.alarm_sound = (device_config_alarm_sound_t) value;
+  value = config.weather_provider;
+  err = load_u8(handle, "weather_src", &value, &seeded);
+  if (err != ESP_OK) { goto done; }
+  config.weather_provider = (device_config_weather_provider_t) value;
 
   /* Keep the display readable without rewriting stored brightness at startup. */
   if (config.day_brightness < DEVICE_CONFIG_MIN_BRIGHTNESS) {
@@ -396,6 +405,15 @@ static esp_err_t write_settings(settings_save_t group, const device_config_t *co
       SAVE_STRING("units", units)
       SAVE_STRING("lat", latitude)
       SAVE_STRING("lon", longitude)
+      /* Disable the keyed provider before an explicit key clear; install the
+       * key before selecting it. Ordinary partial saves are still accepted. */
+      if (config->weather_provider == DEVICE_CONFIG_WEATHER_OPEN_METEO) {
+        SAVE_NUMBER(u8, "weather_src", weather_provider)
+        SAVE_STRING("weather_key", weather_api_key)
+      } else {
+        SAVE_STRING("weather_key", weather_api_key)
+        SAVE_NUMBER(u8, "weather_src", weather_provider)
+      }
       break;
     case SAVE_ALARM:
       SAVE_NUMBER(u8, "alarm_enabled", alarm_enabled)
@@ -505,6 +523,8 @@ esp_err_t device_config_save_weather(const device_config_t *baseline, const devi
   MERGE_STRING(longitude)
   MERGE_STRING(timezone)
   MERGE_STRING(units)
+  MERGE_NUMBER(weather_provider)
+  MERGE_STRING(weather_api_key)
   /* Unlike initial defaults, an explicitly saved location must be resolved. */
   if (!has_text(after.location)) {
     xSemaphoreGive(s_save_lock);

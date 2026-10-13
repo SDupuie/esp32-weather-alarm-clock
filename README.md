@@ -21,7 +21,7 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 - A forecast for the next five days, with icons chosen to represent the daytime weather.
 - A conditions screen with wind, gusts, pressure, rain or snow, and a short weather outlook.
 - An edge indicator for approaching storm conditions, with quick access to the conditions screen.
-- Weather from Open-Meteo, with no API key to configure.
+- Weather from Open-Meteo without a key, or Visual Crossing with your API key.
 - Time synchronized over Wi-Fi.
 - DS3231 backup-clock support for startup while network synchronization proceeds, with lost-time and connection notices.
 - A red Night Shift appearance with Off, Always On, Fixed Schedule or locally calculated Sunset to Sunrise preferences, remembered startup fallback, and separate Day/Night brightness with gradual transitions.
@@ -129,7 +129,7 @@ Your selected analog or digital face is the home screen.
 | Clock | Swipe right | Open Messages. |
 | Messages | Swipe left | Return to the clock. |
 | Clock | Swipe down | Open settings. |
-| Settings editor | Tap **Cancel** | Discard that editor's changes; Weather returns to Device Setup, while Display, Device Setup and Alarm return to Settings. |
+| Settings editor | Tap **Cancel** | Discard that editor's unsaved changes; Weather returns to Device Setup, while Display, Device Setup and Alarm return to Settings. |
 | Settings entry | Tap **Back** | Return to the clock after first-use location setup is complete. |
 | Unread message | Tap the displayed message | Mark it read for this clock and return home after acknowledgment succeeds. |
 
@@ -141,7 +141,9 @@ During an alert, a pulsing edge indicator appears on the clock. It is amber duri
 
 Weather normally refreshes every ten minutes. If an update fails, the clock keeps the last available weather while retrying. That retained weather may be out of date.
 
-In **Device Setup → Weather**, keep Provider set to **Open-Meteo**; no API key is required. The Visual Crossing controls can be inspected, but that provider is not available yet and cannot be saved. Any key entered there is discarded when leaving Weather.
+In **Device Setup → Weather**, choose **Open-Meteo** without a key or
+**Visual Crossing** with your API key. The [configuration guide](#configuration)
+explains activation checks, key retention and clearing.
 
 ### Night Shift
 
@@ -200,6 +202,7 @@ Room Name, Device ID and House Messages are under **Device Setup → Messaging**
 | --- | --- |
 | Wi-Fi | Network and password; tap **Wi-Fi** to scan or enter a network manually. |
 | Weather location | The place used for weather and the clock's timezone. Enter `City, State`, optionally followed by a country code, such as `Cincinnati,OH,US`. For a city and country without a state, use `Paris,FR`. |
+| Weather provider / API key | Choose Open-Meteo or Visual Crossing in **Device Setup → Weather**. Visual Crossing requires a key, checked when first selected or changed. |
 | Room name | The friendly name shown when choosing message targets. |
 | Device ID | The identity used by shared messaging; choose a distinct value for every shared clock. |
 | House Messages | **Single** for this clock or **Shared** for several clocks. |
@@ -215,7 +218,19 @@ Display Settings has its own **Cancel** and **Save**. Save applies the clock fac
 
 Conditions descriptions also use the saved time format, including while showing weather retained after a failed update.
 
-Device Setup and Wi-Fi share a draft for **Save & Restart**. The **Weather** entry opens the Weather editor for location and units, which save independently and restart after success. Its Back or Cancel returns to Device Setup with any other device edits retained; Weather Save applies only the weather choices. Alarm **Save** and the Settings-entry alarm toggle apply settings without restarting. Nested **Done** keeps edits in the parent draft; **Cancel** discards that editor's edits. See the [architecture](docs/architecture.md#editing-and-saving-user-settings) for save rules and accepted partial-save behavior.
+Device Setup and Wi-Fi share a draft for **Save & Restart**. The **Weather** entry opens the Weather editor for location, provider, units and API key, which save independently and restart after success. Its Back or Cancel returns to Device Setup with any other device edits retained; Weather Save applies only the weather choices. Alarm **Save** applies settings without restarting. The **Alarm On/Off** switches in Settings and Alarm Settings save immediately; **Cancel** does not undo a successful switch change. Other alarm edits still require **Save**. Nested **Done** keeps edits in the parent draft; **Cancel** discards unsaved edits. See the [architecture](docs/architecture.md#editing-and-saving-user-settings) for save rules and accepted partial-save behavior.
+
+Visual Crossing's API key stays masked. **Configured** means a key is saved;
+**Entered (not saved)** means you changed it in the editor. Save checks a newly
+selected Visual Crossing provider or changed key before applying it. If the
+check fails, the editor stays open for retry without restarting. Choosing
+Open-Meteo keeps the saved key for later reuse. To remove it, open API Key while
+Visual Crossing is selected, tap **Clear**, close the keyboard, choose
+Open-Meteo and Save. Cancel discards unsaved key changes.
+
+If Visual Crossing confirms that the key's daily allowance is exhausted, the
+clock keeps its last weather and waits for the provider's retry time, or checks
+once an hour when none is supplied. You can choose another provider yourself.
 
 Tap a text field to open the keyboard. The active input stays visible above it; Done or Close returns to the menu with your unsaved text. Passwords are masked.
 
@@ -225,7 +240,7 @@ Preview Sound plays the selected draft sound at the draft volume without saving 
 
 ## Documentation
 
-See the [firmware setup and update guide](targets/esp32-p4/README.md) for detailed installation instructions and the [approved design](docs/architecture.md) for product behavior. Development work and verification records are kept in [docs/work.md](docs/work.md).
+See the [firmware setup and update guide](targets/esp32-p4/README.md) for detailed installation instructions and the [approved design](docs/architecture.md) for product behavior. The [weather mapping reference](docs/weather.md) shows our icons, both providers' mappings and source limitations. Development work and verification records are kept in [docs/work.md](docs/work.md).
 
 ## License and attribution
 
