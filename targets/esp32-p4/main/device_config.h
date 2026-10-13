@@ -26,6 +26,21 @@ typedef enum {
 } device_config_alarm_sound_t;
 
 typedef enum {
+  DEVICE_CONFIG_SOUND_MACHINE_RAIN = 0,
+  DEVICE_CONFIG_SOUND_MACHINE_THUNDER,
+  DEVICE_CONFIG_SOUND_MACHINE_OCEAN,
+  DEVICE_CONFIG_SOUND_MACHINE_WIND,
+  DEVICE_CONFIG_SOUND_MACHINE_FOREST,
+  DEVICE_CONFIG_SOUND_MACHINE_CAMPFIRE,
+  DEVICE_CONFIG_SOUND_MACHINE_STREAM,
+  DEVICE_CONFIG_SOUND_MACHINE_NIGHT,
+  DEVICE_CONFIG_SOUND_MACHINE_SINGING_BOWL,
+  DEVICE_CONFIG_SOUND_MACHINE_WHITE_NOISE,
+  DEVICE_CONFIG_SOUND_MACHINE_PINK_NOISE,
+  DEVICE_CONFIG_SOUND_MACHINE_BROWN_NOISE,
+} device_config_sound_machine_sound_t;
+
+typedef enum {
   DEVICE_CONFIG_NIGHT_OFF = 0,
   DEVICE_CONFIG_NIGHT_ALWAYS_ON,
   DEVICE_CONFIG_NIGHT_FIXED,
@@ -63,6 +78,10 @@ typedef struct {
   device_config_alarm_sound_t alarm_sound;
   uint8_t alarm_volume;
   uint8_t alarm_snooze_minutes;
+  device_config_sound_machine_sound_t sound_machine_sound;
+  uint8_t sound_machine_volume;
+  /* Zero selects Continuous; otherwise 15, 30, 60 or 120 minutes. */
+  uint8_t sound_machine_timer_minutes;
   /* Derived consumer conveniences, ignored as submitted settings. */
   bool wifi_ready;
   bool location_ready;
@@ -95,4 +114,6 @@ esp_err_t device_config_save_display(const device_config_t *baseline, const devi
 esp_err_t device_config_save_device(const device_config_t *baseline, const device_config_t *draft);
 esp_err_t device_config_save_weather(const device_config_t *baseline, const device_config_t *draft);
 esp_err_t device_config_save_alarm(const device_config_t *baseline, const device_config_t *draft);
+/* Immediate preference controls use their own group. Playback is not stored. */
+esp_err_t device_config_save_sound_machine(const device_config_t *baseline, const device_config_t *draft);
 esp_err_t device_config_set_alarm_enabled(bool enabled);

@@ -72,6 +72,14 @@ static device_config_t alarm_edit(device_config_t value)
   return value;
 }
 
+static device_config_t sound_machine_edit(device_config_t value)
+{
+  value.sound_machine_sound = DEVICE_CONFIG_SOUND_MACHINE_OCEAN;
+  value.sound_machine_volume = 65;
+  value.sound_machine_timer_minutes = 120;
+  return value;
+}
+
 static void test_defaults_and_read_only_copies(void)
 {
   device_config_t value = fresh();
@@ -91,6 +99,8 @@ static void test_defaults_and_read_only_copies(void)
   assert(!strcmp(value.night_shift_start, "22:00") && !strcmp(value.night_shift_end, "06:00"));
   assert(value.night_sunset_offset_minutes == 0 && value.night_sunrise_offset_minutes == 0);
   assert(value.day_brightness == 80 && value.night_brightness == 30);
+  assert(value.sound_machine_sound == DEVICE_CONFIG_SOUND_MACHINE_RAIN);
+  assert(value.sound_machine_volume == 30 && value.sound_machine_timer_minutes == 30);
   assert(fake_nvs_calls(FAKE_SET) == fake_nvs_key_count());
   assert(fake_nvs_calls(FAKE_COMMIT) == 1);
   for (unsigned i = 0; i < fake_nvs_key_count(); ++i) {
@@ -128,6 +138,11 @@ static void test_validation(void)
   INVALID(bad.alarm_repeat_days = 0);
   INVALID(bad.alarm_sound = (device_config_alarm_sound_t)3);
   INVALID(bad.alarm_volume = 101);
+  INVALID(bad.sound_machine_sound = (device_config_sound_machine_sound_t) -1);
+  INVALID(bad.sound_machine_sound = (device_config_sound_machine_sound_t) 12);
+  INVALID(bad.sound_machine_volume = 101);
+  INVALID(bad.sound_machine_timer_minutes = 1);
+  INVALID(bad.sound_machine_timer_minutes = 121);
   INVALID(bad.alarm_snooze_minutes = 7);
   INVALID(bad.night_shift_mode = (device_config_night_mode_t)4);
   INVALID(strcpy(bad.night_shift_start, "24:00"));
@@ -604,12 +619,14 @@ static void test_unchanged_saves_write_only_selected_group(void)
   const char *alarm_keys[] = {"alarm_enabled", "alarm_hour", "alarm_minute", "alarm_days",
     "alarm_sound", "alarm_volume", "alarm_snooze"};
   const char *toggle_keys[] = {"alarm_enabled"};
-  const char **groups[] = {device_keys, display_keys, weather_keys, alarm_keys, toggle_keys};
+  const char *sound_machine_keys[] = {"sm_sound", "sm_volume", "sm_timer"};
+  const char **groups[] = {device_keys, display_keys, weather_keys, alarm_keys, sound_machine_keys, toggle_keys};
   const unsigned counts[] = {sizeof(device_keys) / sizeof(device_keys[0]),
     sizeof(display_keys) / sizeof(display_keys[0]),
-    sizeof(weather_keys) / sizeof(weather_keys[0]), sizeof(alarm_keys) / sizeof(alarm_keys[0]), 1};
-  save_fn saves[] = {device_config_save_device, device_config_save_display, device_config_save_weather, device_config_save_alarm};
-  for (unsigned group = 0; group < 5; ++group) {
+    sizeof(weather_keys) / sizeof(weather_keys[0]), sizeof(alarm_keys) / sizeof(alarm_keys[0]), 3, 1};
+  save_fn saves[] = {device_config_save_device, device_config_save_display, device_config_save_weather,
+    device_config_save_alarm, device_config_save_sound_machine};
+  for (unsigned group = 0; group < 6; ++group) {
     device_config_t base = fresh(), weather = resolved(base);
     assert(device_config_save_weather(&base, &weather) == ESP_OK);
     base = current();
@@ -619,7 +636,7 @@ static void test_unchanged_saves_write_only_selected_group(void)
      * constructed isolation check, not a normal saved configuration. */
     for (unsigned i = 0; i < keys; ++i) fake_nvs_put_str(fake_nvs_key(i), "untouched marker");
     fake_nvs_clear_activity();
-    if (group < 4) assert(saves[group](&base, &base) == ESP_OK);
+    if (group < 5) assert(saves[group](&base, &base) == ESP_OK);
     else assert(device_config_set_alarm_enabled(base.alarm_enabled) == ESP_OK);
     assert(fake_nvs_calls(FAKE_SET) == counts[group]);
     assert(fake_nvs_calls(FAKE_COMMIT) == 1);
@@ -698,8 +715,9 @@ static void test_malformed_saved_values(void)
     assert_same(&base, &applied);
     assert(fake_nvs_calls(FAKE_SET) == 0);
   }
-  const char *numeric_keys[] = {"alarm_days", "alarm_hour", "night_mode", "lead_zero"};
-  const uint8_t numeric_values[] = {0, 24, 255, 2};
+  const char *numeric_keys[] = {"alarm_days", "alarm_hour", "night_mode", "lead_zero",
+    "sm_sound", "sm_volume", "sm_timer"};
+  const uint8_t numeric_values[] = {0, 24, 255, 2, 12, 101, 1};
   for (unsigned i = 0; i < sizeof(numeric_values); ++i) {
     device_config_t base = fresh();
     fake_nvs_put_u8(numeric_keys[i], numeric_values[i]);
@@ -781,7 +799,7 @@ static bool wait_worker(worker_t *work, bool done, long milliseconds)
 
 static void test_slow_save_readers_and_serialized_writers(void)
 {
-  for (unsigned pairing = 0; pairing < 3; ++pairing) {
+  for (unsigned pairing = 0; pairing < 5; ++pairing) {
     device_config_t base = fresh();
     worker_t first = {.baseline = base, .draft = base, .save = device_config_save_device,
       .lock = PTHREAD_MUTEX_INITIALIZER, .condition = PTHREAD_COND_INITIALIZER};
@@ -792,7 +810,7 @@ static void test_slow_save_readers_and_serialized_writers(void)
     if (pairing == 0) {
       strcpy(first.draft.room_name, "Bedroom");
       second.draft.day_brightness = 65;
-    } else {
+    } else if (pairing < 3) {
       first.save = device_config_save_display;
       first.draft.day_brightness = 65;
       if (pairing == 1) {
@@ -802,6 +820,16 @@ static void test_slow_save_readers_and_serialized_writers(void)
         /* Two Display editors based on the same applied copy can save separate
          * controls without restoring the other's unchanged baseline fields. */
         strcpy(second.draft.time_format, "24");
+      }
+    } else {
+      first.save = device_config_save_sound_machine;
+      first.draft.sound_machine_volume = 65;
+      if (pairing == 3) {
+        second.save = device_config_save_alarm;
+        second.draft = alarm_edit(base);
+      } else {
+        second.save = device_config_save_sound_machine;
+        second.draft.sound_machine_timer_minutes = 0;
       }
     }
     pthread_t first_thread, second_thread, reader_thread;
@@ -823,17 +851,139 @@ static void test_slow_save_readers_and_serialized_writers(void)
     assert(pthread_join(reader_thread, NULL) == 0);
     assert(first.result == ESP_OK && second.result == ESP_OK);
     device_config_t applied = current();
-    assert(applied.day_brightness == 65);
+    assert(applied.day_brightness == (pairing < 3 ? 65 : 80));
     if (pairing == 0) assert(!strcmp(applied.room_name, "Bedroom"));
     else if (pairing == 1) assert(applied.alarm_enabled && applied.alarm_hour == 6
       && applied.alarm_sound == DEVICE_CONFIG_ALARM_CLASSIC_BELL);
-    else assert(!strcmp(applied.time_format, "24"));
-    assert(fake_nvs_calls(FAKE_SET) == (pairing == 0 ? 15u : pairing == 1 ? 12u : 10u));
+    else if (pairing == 2) assert(!strcmp(applied.time_format, "24"));
+    else {
+      assert(applied.sound_machine_volume == 65);
+      if (pairing == 3) assert(applied.alarm_volume == 75 && applied.alarm_enabled);
+      else assert(applied.sound_machine_timer_minutes == 0);
+    }
+    const unsigned writes[] = {15, 12, 10, 10, 6};
+    assert(fake_nvs_calls(FAKE_SET) == writes[pairing]);
     assert(fake_nvs_calls(FAKE_COMMIT) == 2);
     pthread_mutex_destroy(&first.lock); pthread_cond_destroy(&first.condition);
     pthread_mutex_destroy(&second.lock); pthread_cond_destroy(&second.condition);
     pthread_mutex_destroy(&reader.lock); pthread_cond_destroy(&reader.condition);
   }
+}
+
+static void test_sound_machine_preferences(void)
+{
+  const device_config_sound_machine_sound_t sounds[] = {
+    DEVICE_CONFIG_SOUND_MACHINE_RAIN, DEVICE_CONFIG_SOUND_MACHINE_THUNDER,
+    DEVICE_CONFIG_SOUND_MACHINE_OCEAN, DEVICE_CONFIG_SOUND_MACHINE_WIND,
+    DEVICE_CONFIG_SOUND_MACHINE_FOREST, DEVICE_CONFIG_SOUND_MACHINE_CAMPFIRE,
+    DEVICE_CONFIG_SOUND_MACHINE_STREAM, DEVICE_CONFIG_SOUND_MACHINE_NIGHT,
+    DEVICE_CONFIG_SOUND_MACHINE_SINGING_BOWL, DEVICE_CONFIG_SOUND_MACHINE_WHITE_NOISE,
+    DEVICE_CONFIG_SOUND_MACHINE_PINK_NOISE, DEVICE_CONFIG_SOUND_MACHINE_BROWN_NOISE};
+  const uint8_t timers[] = {0, 15, 30, 60, 120};
+  device_config_t base = fresh();
+  for (unsigned sound = 0; sound < sizeof(sounds) / sizeof(sounds[0]); ++sound) {
+    for (unsigned timer = 0; timer < sizeof(timers); ++timer) {
+      device_config_t draft = base;
+      draft.sound_machine_sound = sounds[sound];
+      draft.sound_machine_timer_minutes = timers[timer];
+      draft.sound_machine_volume = timer % 2 ? 100 : 0;
+      assert(device_config_validate(&draft) == ESP_OK);
+      assert(device_config_save_sound_machine(&base, &draft) == ESP_OK);
+      fake_nvs_clear_activity();
+      assert(device_config_init() == ESP_OK);
+      device_config_t applied = current();
+      assert_same(&draft, &applied);
+      assert(applied.alarm_volume == 50);
+      assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+      base = applied;
+    }
+  }
+  /* Each absent preference gets its own default without rewriting the other
+   * remembered choices. Wrong types remain startup errors. */
+  const char *keys[] = {"sm_sound", "sm_volume", "sm_timer"};
+  for (unsigned key = 0; key < 3; ++key) {
+    base = fresh();
+    device_config_t draft = sound_machine_edit(base);
+    assert(device_config_save_sound_machine(&base, &draft) == ESP_OK);
+    fake_nvs_remove(keys[key]);
+    fake_nvs_clear_activity();
+    assert(device_config_init() == ESP_OK);
+    device_config_t expected = draft, applied = current();
+    if (key == 0) expected.sound_machine_sound = DEVICE_CONFIG_SOUND_MACHINE_RAIN;
+    if (key == 1) expected.sound_machine_volume = 30;
+    if (key == 2) expected.sound_machine_timer_minutes = 30;
+    assert_same(&expected, &applied);
+    assert(fake_nvs_calls(FAKE_SET) == 1 && fake_nvs_calls(FAKE_COMMIT) == 1);
+    fake_nvs_put_str(keys[key], "wrong type");
+    fake_nvs_clear_activity();
+    assert(device_config_init() == ESP_ERR_NVS_TYPE_MISMATCH);
+    applied = current();
+    assert_same(&expected, &applied);
+    assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+  }
+  base = fresh();
+  device_config_t draft = base;
+  draft.sound_machine_volume = 42;
+  assert(device_config_save_sound_machine(&base, &draft) == ESP_OK);
+  device_config_t newer = current(), device = device_edit(base), alarm = alarm_edit(base);
+  assert(device_config_save_device(&base, &device) == ESP_OK);
+  assert(device_config_save_alarm(&base, &alarm) == ESP_OK);
+  draft = base;
+  draft.sound_machine_sound = DEVICE_CONFIG_SOUND_MACHINE_NIGHT;
+  /* Pending fields in the same shared UI draft are outside this save. */
+  draft.alarm_hour = 24;
+  draft.room_name[0] = 0;
+  assert(device_config_save_sound_machine(&base, &draft) == ESP_OK);
+  device_config_t applied = current();
+  assert(applied.sound_machine_sound == DEVICE_CONFIG_SOUND_MACHINE_NIGHT);
+  assert(applied.sound_machine_volume == newer.sound_machine_volume);
+  assert(applied.sound_machine_timer_minutes == 30);
+  assert(applied.alarm_hour == 6 && applied.alarm_volume == 75);
+  assert(!strcmp(applied.room_name, "Bedroom"));
+  const uint8_t invalid_timers[] = {1, 14, 16, 29, 31, 59, 61, 119, 121, 255};
+  fake_nvs_clear_activity();
+  for (unsigned i = 0; i < sizeof(invalid_timers); ++i) {
+    draft = applied;
+    draft.sound_machine_timer_minutes = invalid_timers[i];
+    assert(device_config_save_sound_machine(&applied, &draft) == ESP_ERR_INVALID_ARG);
+  }
+  draft = applied;
+  draft.sound_machine_volume = 101;
+  assert(device_config_save_sound_machine(&applied, &draft) == ESP_ERR_INVALID_ARG);
+  draft = applied;
+  draft.sound_machine_sound = (device_config_sound_machine_sound_t) -1;
+  assert(device_config_save_sound_machine(&applied, &draft) == ESP_ERR_INVALID_ARG);
+  assert(device_config_save_sound_machine(NULL, &draft) == ESP_ERR_INVALID_ARG);
+  assert(device_config_save_sound_machine(&base, NULL) == ESP_ERR_INVALID_ARG);
+  device_config_t after = current();
+  assert_same(&applied, &after);
+  assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+  /* A retained failed immediate choice can retry after another preference
+   * succeeds, without replacing that newer preference or the alarm toggle. */
+  base = fresh();
+  draft = base;
+  draft.sound_machine_sound = DEVICE_CONFIG_SOUND_MACHINE_FOREST;
+  fake_nvs_clear_activity();
+  fake_nvs_fail(FAKE_COMMIT, 1);
+  assert(device_config_save_sound_machine(&base, &draft) == ESP_FAIL);
+  after = current();
+  assert_same(&base, &after);
+  fake_nvs_clear_activity();
+  device_config_t volume = base;
+  volume.sound_machine_volume = 77;
+  assert(device_config_save_sound_machine(&base, &volume) == ESP_OK);
+  assert(device_config_set_alarm_enabled(true) == ESP_OK);
+  fake_nvs_clear_activity();
+  assert(device_config_save_sound_machine(&base, &draft) == ESP_OK);
+  assert(fake_nvs_calls(FAKE_SET) == 3 && fake_nvs_calls(FAKE_COMMIT) == 1);
+  after = current();
+  assert(after.sound_machine_sound == DEVICE_CONFIG_SOUND_MACHINE_FOREST);
+  assert(after.sound_machine_volume == 77 && after.alarm_enabled);
+  fake_nvs_clear_activity();
+  assert(device_config_init() == ESP_OK);
+  applied = current();
+  assert_same(&after, &applied);
+  assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
 }
 
 static void test_weather_provider_key_storage(void)
@@ -900,9 +1050,11 @@ int main(void)
   assert(device_config_copy(&not_started) == ESP_ERR_INVALID_STATE);
   assert(device_config_set_alarm_enabled(true) == ESP_ERR_INVALID_STATE);
   assert(device_config_save_display(&not_started, &not_started) == ESP_ERR_INVALID_STATE);
+  assert(device_config_save_sound_machine(&not_started, &not_started) == ESP_ERR_INVALID_STATE);
   test_defaults_and_read_only_copies();
   test_weather_provider_key_storage();
   test_validation();
+  test_sound_machine_preferences();
   test_editor_merges_and_readiness();
   test_display_scope_and_latest_choices();
   test_display_invalid_choices_and_retry();
@@ -911,6 +1063,7 @@ int main(void)
   test_save_failures(device_config_save_display, display_edit);
   test_save_failures(device_config_save_weather, resolved);
   test_save_failures(device_config_save_alarm, alarm_edit);
+  test_save_failures(device_config_save_sound_machine, sound_machine_edit);
   test_startup_failures_and_missing_keys();
   test_loaded_brightness_minimum();
   test_brightness_save_limits();

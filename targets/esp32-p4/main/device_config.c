@@ -125,6 +125,9 @@ void device_config_set_defaults(device_config_t *config)
   config->alarm_sound = DEVICE_CONFIG_ALARM_CLASSIC_BEEP;
   config->alarm_volume = 50;
   config->alarm_snooze_minutes = 10;
+  config->sound_machine_sound = DEVICE_CONFIG_SOUND_MACHINE_RAIN;
+  config->sound_machine_volume = 30;
+  config->sound_machine_timer_minutes = 30;
 }
 
 static esp_err_t validate_settings(const device_config_t *config, bool allow_partial_location)
@@ -152,6 +155,11 @@ static esp_err_t validate_settings(const device_config_t *config, bool allow_par
       || config->alarm_repeat_days == 0 || (config->alarm_repeat_days & ~0x7f) != 0
       || (unsigned) config->alarm_sound > DEVICE_CONFIG_ALARM_RISING_TONES
       || config->alarm_volume > 100
+      || (unsigned) config->sound_machine_sound > DEVICE_CONFIG_SOUND_MACHINE_BROWN_NOISE
+      || config->sound_machine_volume > 100
+      || (config->sound_machine_timer_minutes != 0 && config->sound_machine_timer_minutes != 15
+          && config->sound_machine_timer_minutes != 30 && config->sound_machine_timer_minutes != 60
+          && config->sound_machine_timer_minutes != 120)
       || (config->alarm_snooze_minutes != 5 && config->alarm_snooze_minutes != 10
           && config->alarm_snooze_minutes != 15)) {
     return ESP_ERR_INVALID_ARG;
@@ -284,6 +292,8 @@ esp_err_t device_config_init(void)
   LOAD_U8("alarm_days", alarm_repeat_days)
   LOAD_U8("alarm_volume", alarm_volume)
   LOAD_U8("alarm_snooze", alarm_snooze_minutes)
+  LOAD_U8("sm_volume", sound_machine_volume)
+  LOAD_U8("sm_timer", sound_machine_timer_minutes)
 #undef LOAD_STRING
 #undef LOAD_U8
 #undef LOAD_I16
@@ -305,6 +315,10 @@ esp_err_t device_config_init(void)
   err = load_u8(handle, "alarm_sound", &value, &seeded);
   if (err != ESP_OK) { goto done; }
   config.alarm_sound = (device_config_alarm_sound_t) value;
+  value = config.sound_machine_sound;
+  err = load_u8(handle, "sm_sound", &value, &seeded);
+  if (err != ESP_OK) { goto done; }
+  config.sound_machine_sound = (device_config_sound_machine_sound_t) value;
   value = config.weather_provider;
   err = load_u8(handle, "weather_src", &value, &seeded);
   if (err != ESP_OK) { goto done; }
@@ -354,6 +368,7 @@ typedef enum {
   SAVE_DISPLAY,
   SAVE_WEATHER,
   SAVE_ALARM,
+  SAVE_SOUND_MACHINE,
   SAVE_ALARM_ENABLED,
 } settings_save_t;
 
@@ -426,6 +441,11 @@ static esp_err_t write_settings(settings_save_t group, const device_config_t *co
       break;
     case SAVE_ALARM_ENABLED:
       SAVE_NUMBER(u8, "alarm_enabled", alarm_enabled)
+      break;
+    case SAVE_SOUND_MACHINE:
+      SAVE_NUMBER(u8, "sm_sound", sound_machine_sound)
+      SAVE_NUMBER(u8, "sm_volume", sound_machine_volume)
+      SAVE_NUMBER(u8, "sm_timer", sound_machine_timer_minutes)
       break;
   }
 #undef SAVE_STRING
@@ -550,6 +570,21 @@ esp_err_t device_config_save_alarm(const device_config_t *baseline, const device
   MERGE_NUMBER(alarm_volume)
   MERGE_NUMBER(alarm_snooze_minutes)
   return finish_save(&after, SAVE_ALARM);
+}
+
+esp_err_t device_config_save_sound_machine(const device_config_t *baseline, const device_config_t *draft)
+{
+  if (baseline == NULL || draft == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  device_config_t before;
+  esp_err_t err = begin_save(&before);
+  if (err != ESP_OK) { return err; }
+  device_config_t after = before;
+  MERGE_NUMBER(sound_machine_sound)
+  MERGE_NUMBER(sound_machine_volume)
+  MERGE_NUMBER(sound_machine_timer_minutes)
+  return finish_save(&after, SAVE_SOUND_MACHINE);
 }
 #undef MERGE_STRING
 #undef MERGE_NUMBER

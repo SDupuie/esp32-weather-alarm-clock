@@ -196,6 +196,19 @@ live on the board; use the selected prepared MP3 files for the other nine sounds
 under the [recording rules](#sound-machine-recording-decisions). Changing between
 recordings and noise does not reset the remaining time.
 
+Generate the three noises efficiently in short audio chunks, using a lightweight
+pseudorandom source and small, fixed filter/integrator state. Keep that state
+across chunks so boundaries do not introduce discontinuities. Prepare filter
+coefficients outside the sample loop and use efficient integer or single-precision
+arithmetic. Do not allocate memory, perform file/network I/O, log, or wait on
+shared locks for each sample. Generation must finish with headroom inside each
+chunk's playback interval so it does not cause audible hiccups or leave the
+speaker without samples. Verify worst-case generation/feed timing and sustained
+playback on the board during representative normal weather, network, display and
+touch activity; host timing or listening to a short sample does not establish
+that result. Retain the existing single audio worker rather than adding a noise
+worker to compensate for inefficient generation.
+
 Ringing and alarm-sound previews take priority and stop Sound Machine, leaving
 it Stopped. There is no automatic resume after preview completion, Snooze or
 Dismiss; the user presses Play to start it again. Preserve existing ringing

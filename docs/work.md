@@ -501,10 +501,12 @@ this documentation update.
 
 ## Prepared Sound Machine sprint
 
-Prepared October 13, 2026. **Held at the user's request: not sent, not started.**
-The user will explicitly instruct when to send the sprint. This local preparation
-starts no implementation, automation, new chat, firmware build or board operation.
-The current authorized weather sprint and its remaining correction stay active.
+Prepared and sent October 13, 2026. The user reviewed and approved the sprint,
+including efficient, uninterrupted noise generation. **Dispatched to Development
+Orchestration** (`01a11e52-7ce0-78f3-a2e5-efcb90c7aa16`); delivery was confirmed by
+the task messaging tool. Implementation progress and evidence are owned by that
+sprint. Dispatch is not implementation completion or board verification. Preserve
+the existing weather work and its verification.
 
 The [Sound Machine playback rules](architecture.md#sound-machine-playback),
 [controls](architecture.md#sound-machine-controls),
@@ -514,6 +516,36 @@ The first-use volume is now 30%. All operating choices identified in the readine
 review are approved; decoder selection and buffer sizing are engineering work,
 not further product decisions. This plan expands the existing audio and settings
 implementation to deliver that approved behavior.
+
+Implementation started in Development Orchestration on October 13 after the
+originating human approval was verified. The first bounded slice adds ordinary
+Sound Machine preference saves in existing configuration/test files; MP3 decoder
+and packaging investigation runs alongside it. No new source path, board load,
+commit or remote action was authorized by this implementation start. The user
+subsequently authorized a local commit at the preference-storage checkpoint below. Detailed
+local evidence stays under `.reviews/sound-machine-sprint-2026-10-13/`.
+
+### Preference-storage checkpoint — October 13, 2026
+
+Completed the preference-storage portion of slice 1 in existing
+`device_config.c/.h` and `tests/test_device_config.c`. The three preferences use
+typed NVS entries, approved defaults and validation, and the existing serialized
+save/publication path. Saves preserve unrelated applied settings and pending
+drafts; no playback state or deadline is stored. Ordinary partial-save behavior
+remains unchanged. No new source file or storage mechanism was added.
+
+Parent verification passed the configuration checks, the full 38-test native
+suite (14.82 seconds), `git diff --check` and the ESP-IDF 5.5.5 firmware build.
+The application image is `0x104c670` bytes, with 19% of its partition free.
+These checks do not establish board behavior; this checkpoint was not flashed.
+Logs remain under `.reviews/sound-machine-sprint-2026-10-13/`.
+
+The read-only decoder investigation is complete. Its compatible-version and
+recording-trim recommendations remain engineering evidence, not an installed
+dependency or implemented playback path. Audio command ownership, recordings,
+noise generation, timer/priority handling, production UI and board verification
+remain unfinished. Next, integrate the compatible decoder and the existing audio
+owner through the bounded slices below.
 
 ### Implementation slices
 
@@ -533,7 +565,13 @@ implementation to deliver that approved behavior.
    facilities into the current 11 MiB storage partition; exclude originals and
    retain the BSP's non-formatting mount-failure behavior. Extend `audio.c/.h`
    for correctly rated mono recording playback, short buffered repeats and the
-   three live noise generators. Preserve the existing alarm generator and format.
+   three live noise generators under the architecture's efficiency rules.
+   Preserve the existing alarm generator and format. Check bounded generation
+   cost/state, continuous chunk boundaries, output levels and long-run stability.
+   Measure noise generation and speaker-feed timing on the board, retaining
+   headroom within each chunk interval; verify no generation-induced starvation
+   or audible hiccups under representative normal clock activity. Temporary
+   measurements must not add per-sample overhead or remain as production probes.
    Verify exact playable samples and repeats against the final manifest, output
    levels/noise character, cancellation during setup/read/decode, malformed or
    missing files, codec failures and release of decoder/buffer resources. Use
@@ -564,7 +602,8 @@ implementation to deliver that approved behavior.
    ESP-IDF 5.5.5. Inspect firmware/recording image sizes, actual heap allocation and
    decoder/worker stack needs before a separately authorized flash/board pass.
    On hardware, check all twelve sounds, recording seams, noise character and
-   comfortable volume, timer expiration/fade, Stop/preemption response, restart
+   comfortable volume, sustained noise timing/headroom without hiccups,
+   timer expiration/fade, Stop/preemption response, restart
    Stopped with remembered preferences, Day/Night controls and sustained playback
    during representative normal weather/network/display/touch activity. Use current
    applied preferences as the restoration baseline; restore any temporary changes.
@@ -593,9 +632,9 @@ partition expansion is planned.
 Preparation validation: checked authoritative decisions, file ownership,
 source-path permissions, existing audio/configuration/test/build facilities and
 recording capacity evidence. An independent read-only readiness check identified
-no remaining product choice. This entry is a prepared local plan, not dispatch
-or implementation evidence; no firmware tests, build or hardware checks were run
-for preparation.
+no remaining product choice. The subsequent approved dispatch is recorded above;
+it is not implementation evidence. No firmware tests, build or hardware checks were run for preparation
+or dispatch.
 
 ## Slice: Sound Machine mockup promotion — approved October 13, 2026
 
@@ -1328,11 +1367,12 @@ No new firmware or board work was performed during this documentation audit.
 ### Approved work still unfinished
 
 - **Sound Machine:** mockup and playback decisions are approved. The
-  [implementation sprint](#prepared-sound-machine-sprint) is prepared locally and
-  held unsent at the user's request. Firmware controls, generated noise,
-  recording playback and timer integration remain unimplemented. Await explicit
-  instruction to send the sprint; the current weather implementation checkpoint
-  remains active. Requirements belong in the
+  [implementation sprint](#prepared-sound-machine-sprint) was sent to
+  Development Orchestration, including efficient noise generation.
+  [Preference storage](#preference-storage-checkpoint--october-13-2026) is implemented
+  and verified in software; audio commands, playback, timer integration, controls
+  and board verification remain pending. Preserve the existing weather
+  implementation work. Requirements belong in the
   [specification](architecture.md#sound-machine-playback).
 - **Radar:** RainViewer and the custom palette are selected under the
   [radar specification](architecture.md#radar-source-and-palette). The refined
