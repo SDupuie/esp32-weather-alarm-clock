@@ -79,10 +79,13 @@ static pthread_cond_t overlap_condition=PTHREAD_COND_INITIALIZER;
 static bool block_http_once, http_blocked, http_released;
 static unsigned sync_calls, sync_failures, wifi_init_calls, clock_polls;
 static bool wifi_connected, actual_time_synced;
+static wac_time_snapshot_t download_clock;
+static esp_err_t wifi_init_result, wifi_wait_result;
 static unsigned delay_count, delay_limit;
 static TickType_t delays[64];
 static jmp_buf worker_finished;
 static void (*on_delay)(void);
+static void (*on_request)(void);
 
 esp_err_t device_config_copy(device_config_t *out)
 {
@@ -95,7 +98,7 @@ esp_err_t connectivity_init(const device_config_t *config)
 {
   assert(config->wifi_ready);
   ++wifi_init_calls;
-  return ESP_OK;
+  return wifi_init_result;
 }
 
 bool connectivity_is_wifi_connected(void) { return wifi_connected; }
@@ -104,8 +107,8 @@ bool connectivity_is_time_synced(void) { return actual_time_synced; }
 esp_err_t connectivity_wait_for_wifi(TickType_t timeout)
 {
   assert(timeout == pdMS_TO_TICKS(30000));
-  wifi_connected = true;
-  return ESP_OK;
+  if (wifi_wait_result == ESP_OK) wifi_connected = true;
+  return wifi_wait_result;
 }
 
 esp_err_t connectivity_sync_time(TickType_t timeout)
@@ -118,6 +121,8 @@ esp_err_t connectivity_sync_time(TickType_t timeout)
   if (sync_calls <= sync_failures) return ESP_FAIL;
   return actual_time_synced ? ESP_OK : ESP_ERR_TIMEOUT;
 }
+
+void wac_time_snapshot(wac_time_snapshot_t *out) { *out = download_clock; }
 
 void wac_time_poll(uint32_t generation)
 {
@@ -173,6 +178,7 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *co
 esp_err_t esp_http_client_perform(esp_http_client_handle_t handle)
 {
   assert(handle == &http_config);
+  if (on_request) on_request();
   pthread_mutex_lock(&overlap_mutex);
   if (block_http_once) {
     block_http_once=false; http_blocked=true;
@@ -260,8 +266,10 @@ static void reset_platform(void)
   http_requests = http_cleanups = sync_calls = sync_failures = wifi_init_calls = 0;
   delay_count = clock_polls = 0;
   wifi_connected = true;
+  wifi_init_result = wifi_wait_result = ESP_OK;
   actual_time_synced = false;
-  on_delay = NULL;
+  memset(&download_clock, 0, sizeof(download_clock));
+  on_delay = on_request = NULL;
   memset(&s_runtime_state, 0, sizeof(s_runtime_state));
 }
 
@@ -420,7 +428,7 @@ static void run_worker(unsigned stop_after_delays)
 {
   delay_limit = stop_after_delays;
   if (setjmp(worker_finished) == 0) weather_service_task(NULL);
-  assert(delay_count == stop_after_delays && wifi_init_calls == 1);
+  assert(delay_count == stop_after_delays);
   assert(http_requests == http_cleanups);
   assert(clock_polls == 0); /* Actual synchronization belongs to clock_control_task. */
 }
@@ -436,6 +444,22 @@ static void check_pending_time(void)
   assert(!actual_time_synced && sync_calls >= 1);
   assert_forecast(&s_runtime_state.weather);
   assert(!s_runtime_state.weather.stale);
+  assert(s_runtime_state.weather.updated_at == 0 && wifi_init_calls == 1);
+}
+
+static void check_download_timestamp(void)
+{
+  /* Usable network time at the download stamps age. RTC-only and unavailable
+   * time must not acquire a fabricated age when network time later arrives. */
+  for (int source = WAC_TIME_SOURCE_UNAVAILABLE; source <= WAC_TIME_SOURCE_NETWORK; ++source) {
+    reset_platform();
+    download_clock = (wac_time_snapshot_t){ .source = source,
+      .usable = source != WAC_TIME_SOURCE_UNAVAILABLE, .utc_now = 1798674600 };
+    run_worker(1);
+    assert_forecast(&s_runtime_state.weather);
+    assert(s_runtime_state.weather.updated_at ==
+      (source == WAC_TIME_SOURCE_NETWORK ? download_clock.utc_now : 0));
+  }
 }
 
 static void check_time_start_failure(void)
@@ -459,6 +483,35 @@ static void check_location_required(void)
   assert(delays[0] == 20000 && delays[1] == 20000);
 }
 
+static void check_quiet_connection_waits(void)
+{
+  /* No profile, failed Wi-Fi initialization, and connection timeout remain
+   * setup concerns. None publishes a routine clock footer before weather. */
+  for (unsigned scenario = 0; scenario < 3; ++scenario) {
+    reset_platform();
+    if (scenario == 0) applied_config.wifi_ready = false;
+    else if (scenario == 1) wifi_init_result = ESP_FAIL;
+    else {
+      wifi_connected = false;
+      wifi_wait_result = ESP_ERR_TIMEOUT;
+    }
+    run_worker(2);
+    assert(http_requests == 0 && !s_runtime_state.weather.valid);
+    assert(wifi_init_calls == (scenario == 0 ? 0 : scenario == 1 ? 2 : 1));
+    assert(delays[0] == 20000 && delays[1] == 20000);
+  }
+}
+
+static void observe_weather_notice_at_request(void)
+{
+  /* Observe in-flight retries: publication keeps the previous payload and
+   * stale state until success; an initial failure never invents data. */
+  if (http_requests == 0) assert(!s_runtime_state.weather.valid);
+  else if (request_results[http_requests - 1] != ESP_OK)
+    assert(!s_runtime_state.weather.valid || s_runtime_state.weather.stale);
+  else assert(s_runtime_state.weather.valid);
+}
+
 static void check_slow_weather_and_time_retry(void)
 {
   reset_platform();
@@ -476,6 +529,7 @@ static void check_weather_failure(void)
   reset_platform();
   sync_failures = 2;
   request_results[0] = ESP_ERR_TIMEOUT;
+  on_request = observe_weather_notice_at_request;
   run_worker(4);
   assert(sync_ticks[0] == 0 && sync_ticks[1] == 20000 && sync_ticks[2] == 40000);
   assert(http_requests == 3 && request_ticks[0] == 0 && request_ticks[1] == 20000 && request_ticks[2] == 620000);
@@ -525,9 +579,34 @@ static void check_retained_weather(void)
   reset_platform();
   request_results[1] = ESP_ERR_TIMEOUT;
   on_delay = observe_retention;
+  on_request = observe_weather_notice_at_request;
   run_worker(3);
   assert(http_requests == 3 && request_ticks[1] == 600000 && request_ticks[2] == 620000);
   assert(delays[0] == 600000 && delays[1] == 20000);
+  assert_forecast(&s_runtime_state.weather);
+  assert(!s_runtime_state.weather.stale);
+}
+
+static void observe_wifi_loss(void)
+{
+  observe_retention();
+  if (delay_count == 1) {
+    wifi_connected = false;
+    wifi_wait_result = ESP_ERR_TIMEOUT;
+  } else if (delay_count == 2) {
+    wifi_wait_result = ESP_OK;
+  }
+}
+
+static void check_retained_weather_after_wifi_loss(void)
+{
+  reset_platform();
+  on_delay = observe_wifi_loss;
+  on_request = observe_weather_notice_at_request;
+  run_worker(3);
+  assert(http_requests == 2 && wifi_init_calls == 1);
+  assert(request_ticks[0] == 0 && request_ticks[1] == 620000);
+  assert(delays[0] == 600000 && delays[1] == 20000 && delays[2] == 600000);
   assert_forecast(&s_runtime_state.weather);
   assert(!s_runtime_state.weather.stale);
 }
@@ -934,12 +1013,15 @@ int main(int argc, char **argv)
   check_decoder();
   check_conditions_decoder();
   check_pending_time();
+  check_download_timestamp();
   check_time_start_failure();
   check_location_required();
+  check_quiet_connection_waits();
   check_slow_weather_and_time_retry();
   check_weather_failure();
   check_overlapping_failure_deadlines();
   check_retained_weather();
+  check_retained_weather_after_wifi_loss();
   check_retained_conditions();
   check_current_period_and_failure();
   check_vc_decoder();

@@ -304,6 +304,228 @@ and screenshots are local under `.reviews/radar-design-promotion-2026-10-13*`.
 No firmware build, flash or hardware check was run: this slice only promotes
 the selected design. Live radar implementation remains in the current work list.
 
+October 15 follow-up: capitalized the heading to “Northern Colorado Radar” and
+named the official mockup selector Weather Radar, directly beside Forecast and
+Conditions. Carried over the preview's selected 48-pixel fade. The specification
+now records the page after the Forecast/Conditions pair while preserving their
+storm ordering. Embedded map/radar images and unrelated mockup content are
+unchanged. No firmware source or assets changed.
+All eleven inline scripts parse, the preview order check passes, and Safari
+inspection confirms the capitalized heading and Weather Radar page. Evidence is
+in `.reviews/radar-mockup-follow-up-2026-10-15.json` and its screenshot. No
+firmware build, flash or hardware check was needed for this mockup-only edit.
+
+First-version behavior approved October 15: recorded the fixed map centered on
+the weather location, its location marker, automatic updates/frame timestamp,
+retained old image after failed updates, unavailable state before any image,
+and no animation in the [radar specification](architecture.md#radar-source-and-palette).
+The marker and failure states are not yet drawn in the official mockup. The
+subsequent coverage/interval selection is recorded in the specification and
+prepared sprint below; its first step verifies the background source. Firmware
+remains unimplemented. This follow-up changes documentation only.
+
+## Prepared Weather Radar sprint — October 15, 2026
+
+**Status: prepared locally and held unsent at the user's explicit request.**
+Intended recipient: **Development Orchestration**
+(`01a11e52-7ce0-78f3-a2e5-efcb90c7aa16`). No message has been sent and no
+implementation, board load or remote action starts through this preparation.
+Obtain the user's instruction to dispatch before sending the handoff. Preserve
+the recipient's current notification review, pending firmware list, Sound
+Machine work and other changes in this shared `main` checkout.
+
+### Objective and boundaries
+
+Deliver the first live Weather Radar page under the
+[radar specification](architecture.md#radar-source-and-palette) and
+[official visual reference](../mockups/alarm-design.html). The approved fixed
+coverage and check interval replace the earlier open choices; the suggested
+150-mile view and optional zoom slider are outside this pass. Product details
+remain owned by the specification, including navigation, marker, latest-image
+presentation, retained-old/unavailable states and appearance. Do not add radar
+settings, animation, panning, persistent image storage or an extra supported
+firmware/platform implementation.
+
+This is a new feature. It must preserve existing weather refresh/retry/quota
+rules, alarm and Night Shift behavior, message/settings navigation and audio
+playback. It also includes the October 15 approved replacement of the device's
+Conditions page with Radar; Conditions stays in the mockup and its implementation
+and required assets are retained in the existing source tree. The loss of that
+page's wind/pressure/outlook display is intentional. Keep shared current-weather
+data and the remaining storm detection/indicators, with Radar taking the former Conditions
+position in normal and alert navigation. Before each implementation slice,
+disclose any additional existing
+behavior change under AGENTS.md; this sprint does not silently approve unrelated
+cleanup or changes to failure handling. No commit, push, merge, flash or release
+packaging is authorized by this draft.
+
+An additional existing-behavior change was approved October 15: remove falling
+pressure as a storm-alert trigger because it is too sensitive. The current
+calculator adds a pressure alert after a 3 hPa drop over three hours; remove
+that qualifying alert in existing `main/storm_conditions.c/.h` and update the
+affected existing fixtures/tests. Keep pressure measurements/trend and non-alert
+descriptions where used. Pressure alone must not light the storm indicator or
+put Radar first; the other qualifying alerts and their thresholds stay the same.
+This is an approved policy change, not a new adjustable sensitivity setting.
+
+### Bounded implementation slices
+
+1. **Confirm the real 50-mile image and decoding path.** Start with the
+   [USGSTopo raster service](https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer)
+   used for the selected sample, as a candidate rather than a newly approved
+   production dependency. Confirm its endpoint, applicable credits, geographic
+   coverage and legible town names at the actual clock image size. Its published
+   service includes place names, roads and terrain and supports PNG export.
+   Check a real 50-mile view at the configured weather location and the northern
+   Colorado comparison area, using current provider documentation and limited
+   public requests. Respect RainViewer's maximum zoom of 7: obtain supported
+   tiles, crop/resample to the requested ground coverage and assess the resulting
+   detail; do not silently widen the map or claim extra radar resolution.
+   The existing sample is a visual reference, not proof of production scale,
+   dynamic town labels or a working map pipeline. Select an existing ESP-IDF/LVGL
+   or managed runtime image-decoding route that exposes unsmoothed radar pixels
+   for the approved mapping. Current raster decoders are disabled; no custom
+   PNG decoder or general mapping framework is planned. Establish bounded
+   compressed/decompressed sizes and large-buffer allocation in PSRAM before
+   proceeding. Record the concrete provider, decoder and owner choices in the
+   architecture at the authorized implementation checkpoint. If matching the
+   approved view requires a user account, narrower location support, materially
+   different visuals or unlisted source paths, present that concrete choice
+   before adopting it.
+2. **Fetch, map and compose one current image.** Extend the existing
+   `targets/esp32-p4/main/weather_client.c/.h` request/decoding owner and only
+   needed existing configuration/dependency/build facilities. Fetch RainViewer's
+   published frame list and newest usable frame; validate dimensions, lengths,
+   returned errors and incomplete images with finite request bounds. Keep
+   forecast-provider credentials and quota state separate from radar requests.
+   Translate original unsmoothed colors/alpha under the specification before
+   resizing or composition. Use one geographic transform for the background, radar and
+   saved-location marker, including latitude's effect on ground distance. A
+   provider's projected-meter bounds are not automatically ground-mile bounds.
+   Confirm alignment and town readability with sourced imagery; don't bake the
+   sample's seven town names into production. Render the background at its final
+   display size; enlarge only the radar overlay as needed for the selected range,
+   keeping background roads and labels sharp. Retain the current location's
+   background in RAM and prepare replacements offscreen. Publish only a complete,
+   matching composition; an empty valid echo layer means no detected echoes,
+   not a failed download. Keep original frame time through retries and unchanged
+   responses. Do not fetch the static background on every radar check when the
+   current location/background remains usable.
+3. **Integrate scheduling and resource ownership.** Reuse the weather worker in
+   `main.c` with a separate radar deadline and short copied display status in
+   `app_runtime.h`. Its wait must consider radar independently of forecast retry,
+   time synchronization and provider quota deadlines; adding the radar wakeup
+   must not trigger extra forecast requests. Use monotonic elapsed time for the
+   check interval, independent of clock corrections. Give retained image buffers
+   one owner and define their lifetime through the UI's safe image replacement;
+   do not free a displayed buffer or publish a half-built one. Download/decode
+   outside the display lock and outside clock/audio tasks. Keep the last valid
+   same-location image on failure. After a location change, do not label an old
+   location's image as the new location's radar. Handle offline/reconnect and
+   failed allocation without a tight retry loop or changing forecast recovery.
+   No new permanent task, queue, image database or multi-level cache is planned.
+4. **Add the production page and finish its mockup states.** Reuse `ui/ui.c`,
+   `ui/weather_views.c`, `ui/ui_private.h` and only needed public display inputs
+   in `app_ui.h`. Replace the production Conditions page with Radar, keeping a
+   two-page weather row under the specification, reverse swipes and the row order
+   retained for the current visit. Keep the existing Conditions renderer,
+   required assets/build entries and useful tests in their current source
+   locations. Remove Conditions from user navigation and other user-accessible
+   routes; do not create inactive live display objects solely for code retention.
+   Keep shared weather data,
+   storm calculations for the remaining triggers and the clock's alert indicator.
+   Apply the approved pressure-alert removal in the existing calculation owner,
+   not by hiding its output only in the UI. Do not add a Conditions enable
+   setting, fallback route, alternate firmware mode or backup copy. Draw the
+   selected heading, map, legible town labels,
+   saved-location marker, frame timestamp, legend, credits and old/unavailable
+   states in Day/Night. Reuse existing fonts, grouped artwork and LVGL drawing
+   facilities. Complete the marker and failure-state reference in the existing
+   official mockup; preserve its Conditions page and all other reference screens.
+   Do not use its recorded data as live firmware input. Preserve alarm preemption
+   and the existing menus. Keep
+   UI navigation and LVGL handles with their current owners, not a second map UI.
+5. **Review, native/build checks and a separately authorized board pass.** Extend
+   existing `tests/test_weather_service.c`, `tests/test_ui.c` and test support/
+   CMake only as needed. Check five-minute scheduling alongside forecast/time/
+   quota deadlines, unchanged-frame checks without repeat image downloads,
+   truncated/failed images, representative source colors/band boundaries/alpha,
+   50-mile ground coverage/alignment, successful image replacement, location
+   changes and retained-old/first-unavailable presentation. Keep useful tests
+   for retained Conditions rendering and add production Forecast/Radar navigation
+   checks that ensure Conditions is not user-accessible. Retain tests of shared
+   weather data and the remaining storm detection. Update the existing
+   pressure-only case in `shared/test-data/storm-conditions-cases.json` to expect
+   no alert, and check that pressure plus another qualifying condition still
+   alerts for that other condition. Verify that pressure alone cannot activate
+   the indicator or storm-first ordering. Verify two-page navigation, Radar-first
+   alert order, both appearances and alarm preemption, and confirm that Conditions
+   remains selectable in the mockup while absent from the device UI. Distinguish
+   captured real data from constructed failure inputs. Independently review
+   coverage, correctness and whether each added mechanism is needed. Run the
+   current native suite and firmware build using the existing guides, including:
+
+   ```bash
+   source targets/esp32-p4/scripts/activate-idf.sh
+   cmake -S targets/esp32-p4/tests -B /tmp/esp32-p4-native-tests
+   cmake --build /tmp/esp32-p4-native-tests
+   ctest --test-dir /tmp/esp32-p4-native-tests --output-on-failure
+   targets/esp32-p4/scripts/test-weather-parity.sh
+   targets/esp32-p4/scripts/build.sh
+   ```
+
+   Inspect image/firmware sizes, peak internal/PSRAM use, worker/UI stack headroom
+   and repeated replacement cleanup. The old 2–4 MiB radar estimate is a planning
+   allowance, not measured free memory. Do not use `build-release.sh`, which also
+   updates published firmware files. Seek separate flash authorization for the
+   board pass. Then check actual source imagery/labels, range/marker alignment,
+   frame timestamps over real checks, swipe/touch responsiveness and recovery
+   from offline/failed fetches. Compare current Sound Machine playback before
+   and during repeated radar fetch/decode/render, including a recording and
+   generated noise; do not accept new audio cutouts. Exercise alarm preemption
+   while radar work is pending. Restore temporary settings and record genuine
+   board results and accepted limits in this work record. Update the user guide
+   only when the feature is delivered.
+
+### Source-path and readiness check
+
+The intended work fits existing approved owners; enabling a bundled decoder or
+adding a managed dependency uses the existing manifest, lock, configuration and
+build files. Do not create `radar_client.c/.h`, `test_radar.c`, a helper tool or
+another unlisted source path without exact-path permission. A separate module
+is an option only if a concrete implementation need justifies it; preparing
+this sprint grants no such permission.
+
+Preparation checked the authoritative decisions, current worker/client/UI/test
+paths, decoder configuration and build guide. A gpt-6-luna/xhigh read-only
+review confirmed the existing-owner route and identified the provider/decoder
+readiness checkpoint plus unmeasured resource/audio interaction. Parent source
+inspection confirmed independent forecast timing/quota and the weather-row
+snapshot behavior. No product behavior was reduced to avoid those checks; the
+subsequent user-requested Conditions replacement is recorded below.
+No firmware source, mockup, tests, build or board state changed during this
+preparation. The sprint remains **UNSENT**.
+
+Scope revised October 15 after the user's instruction to replace Conditions on
+the working clock with Radar while retaining Conditions in the official mockup.
+This supersedes the draft's earlier three-page row; it intentionally changes
+which information is available on the device. Updated the specification,
+implementation slice and verification criteria only. This revision does not
+dispatch the sprint or start firmware work, and it does not remove Conditions
+from the currently running board before the replacement is implemented.
+
+The subsequent falling-pressure decision is included in this same unsent
+sprint and in the authoritative alert rules. Firmware still contains its old
+pressure trigger until the sprint is dispatched and implemented; no source,
+build or board change was made while recording this decision.
+
+Retention correction, October 15: the user explicitly requested keeping the
+Conditions implementation while removing its user-interface access. Retain its
+code, required assets and useful tests in place; this supersedes the earlier
+instruction to retire the renderer. Conditions remains available in the mockup.
+The specification, implementation slice and checks reflect this correction.
+The sprint remains unsent; this correction changes documentation only.
+
 ## Radar and Sound Machine memory estimate — October 13, 2026
 
 Read-only feasibility check: budget **2–4 MiB of additional RAM for radar**,
@@ -521,9 +743,14 @@ Implementation started in Development Orchestration on October 13 after the
 originating human approval was verified. The first bounded slice adds ordinary
 Sound Machine preference saves in existing configuration/test files; MP3 decoder
 and packaging investigation runs alongside it. No new source path, board load,
-commit or remote action was authorized by this implementation start. The user
-subsequently authorized a local commit at the preference-storage checkpoint below. Detailed
+commit or remote action was authorized by this implementation start. Detailed
 local evidence stays under `.reviews/sound-machine-sprint-2026-10-13/`.
+
+Coordination correction: the user's commit instruction preceded this sprint and
+was completed as `246f4a3`. After context recovery it was mistakenly reused,
+producing the additional partial commit `2ca209a` and an early stop. The user did
+not request that second commit or a pause. The approved full sprint continues;
+no further commit or board operation is authorized by this correction.
 
 ### Preference-storage checkpoint — October 13, 2026
 
@@ -546,6 +773,1057 @@ dependency or implemented playback path. Audio command ownership, recordings,
 noise generation, timer/priority handling, production UI and board verification
 remain unfinished. Next, integrate the compatible decoder and the existing audio
 owner through the bounded slices below.
+
+### Sound Machine source checkpoint — October 13, 2026
+
+All five implementation slices are complete through software integration and
+review. The existing audio worker now plays the nine recordings and generates
+the three noises, owns the elapsed timer/fade and copied status, and preserves
+alarm/preview priority and restart recovery. The existing settings and clock UI
+owners implement the approved controls, immediate preference saves and shortcuts.
+The replaced Settings-entry switch, retained Alarm Settings switch, title-case
+clock headers and matching header spacing follow the approved reference.
+
+Review corrected pending choices lost by closing/navigating during a save,
+clock-shortcut Back navigation, stale playback status after preview preemption,
+and editor controls/keyboard preservation while a Sound Machine save completes.
+Only three desired preferences cross that existing save boundary; there is no
+second applied configuration, countdown, audio worker or persistence mechanism.
+Original artwork definitions and alarm tap areas remain intact. All changed
+source paths already existed; no added or renamed source path required approval.
+
+Parent final verification passed all 44 native checks in 16.11 seconds and the
+ESP-IDF 5.5.5 firmware build. The application is `0x1067cd0` bytes, with 18% of
+its partition free. Only the exact compatible decoder dependency was added;
+unrelated locked components were retained. Existing main CMake removes that
+package's redundant search flag that mishandles a project path containing spaces;
+the managed package itself is unchanged. The generated 11 MiB recording image
+contains exactly the nine prepared MP3s, independently reconstructed byte-for-byte
+from SPIFFS data pages, with 5.082 MiB of empty blocks. Ordinary USB flash arguments
+include it at `0x1410000`; NVS occupies separate sectors.
+
+The audio worker remains at 6 KiB. Its compiled local frame is 2,608 bytes;
+recording application buffers total 8,420 heap bytes, in addition to decoder,
+stdio and codec storage. These are source/build facts, not measured runtime
+reserve. Sound Machine's separate .66 maximum PCM gain retains the squared
+volume curve and recorded relative levels while allowing for the codec gain;
+the alarm's .82 gain is unchanged. Independent review and focused audio/UI
+evidence are local under `.reviews/sound-machine-sprint-2026-10-13/`.
+
+Board verification remains required: actual decoder output/counts and repeat
+seams, all sounds/levels, maximum generation/refill/wrap timing, heap/stack reserve,
+Stop/preemption, timer/fade, restart Stopped with retained choices, Day/Night
+controls and sustained weather/network/display/touch activity. Host decoder
+substitutes and short noise checks do not establish those results. This firmware
+has not been flashed or committed; the prior coordination-error commit is
+recorded above. The next step is a separately authorized flash and board pass.
+
+The user also requested a format comparison. PCM would require 24.809 MiB;
+diagnostic IMA ADPCM WAVs total 6.220 MiB versus the approved MP3s' 5.392 MiB.
+ADPCM can use whole encoded blocks after a small loop-length adjustment during
+preparation, but its quality still needs comparison. This is an evaluated option,
+not an approved asset/format change. The current implementation uses MP3.
+
+### Sound Machine board checks started — October 13, 2026
+
+The user authorized flashing and beginning the board checks after the report-only
+adversarial review. The reviewed production firmware, with no added measurement
+probes, was flashed through the ordinary USB helper. Bootloader, partition table,
+application and the nine-recording storage image each passed the flash tool's
+written-data verification. No NVS erase was performed. Firmware/source hashes
+still match the passing software checkpoint.
+
+Saved settings were read from the board before flashing, excluding credentials
+from reports: Digital, 12-Hour, Leading Zero Off, Day 100% / Night 25%, Night Shift
+Off; Alarm Off, 07:00 Monday–Friday, Rising Tones, 75%, ten-minute snooze;
+Visual Crossing with a configured key, Imperial, Leander. Sound Machine keys were
+absent, so the approved first-use choices apply. These actual saved values are
+the restoration baseline for any later test edits.
+
+The user confirmed clock/weather/touch work, but reported Rain cutting out about
+every two seconds and occasional plain blue flashes while changing Volume.
+Untouched Rain and White Noise both cut out at 50%, so MP3/file decoding alone
+cannot explain the common failure. Rain is quiet at 30% and 100%; White Noise is
+much louder. Navigation/shortcut/Stop were not separately confirmed. These are
+failed playback checks, not a completed board checkpoint.
+
+Serial capture has no panic so far. The installed display driver describes blue
+flashes as a possible external-memory underrun; the actual cause is not yet
+established. This build keeps caches enabled during ordinary flash operations,
+so cache disabling is not assumed. Temporary measurements in existing `audio.c`
+will separate control copies, reads, decode/generation and speaker feeding;
+report after playback stops, then remove probes after the investigation. No new
+source path, audio worker or save mechanism is proposed. The level complaint is
+being assessed separately against the full recordings and codec gain.
+
+The temporary measurement build passes all 15 existing audio checks and the
+ESP-IDF 5.5.5 build (`0x1068340`, 18% application partition free). Independent
+inspection verified exact probe removal restores the reviewed audio source.
+Counters report after Stop/cleanup; instrumented sound-change and alarm-preemption
+timing is excluded because the report can delay opening the replacement sound.
+These first probes locate the common cutouts, rather than establish complete
+decoder repeat/sample or long-duration acceptance. The application-only diagnostic
+flash passed written-data verification, preserving the already verified recording
+image and NVS. Serial capture is active; untouched Rain/White Noise runs followed
+by Stop and a Stopped-volume drag comparison are awaiting user observations.
+This is a measurement load, not a claimed correction.
+
+At priority 4, the measured Rain maximum preparation gap was 69.7 ms and write
+interval 108.5 ms. White Noise reached 53.5 ms inside its fixed generation loop,
+64.2 ms preparation and a 264.1 ms write interval. Stage times include time spent
+waiting for CPU/other work; they do not prove those durations are computation.
+The user narrowed White Noise cutouts to Analog display and saw no blue flash
+during Stopped-volume dragging. The worker's observed lifetime stack reserve was
+1,140 bytes, and recording cleanup released its buffers; this is bounded-run
+evidence, not full resource acceptance.
+
+A one-line priority comparison raises the existing audio worker from 4 to 7,
+ahead of the LVGL drawing task at 6, with the same diagnostic probes, buffers,
+sounds and volume. Actual IDF P4 floating-point use pins a task to its current
+core; the ordinary unpinned creation does not guarantee migration during playback.
+This comparison tests execution-time competition before adding buffering or
+changing persistence. All 15 audio checks and firmware compilation pass. The
+native hardware-call assertion follows the priority change; it does not prove
+real scheduling. The application-only comparison load passed written-data
+verification after stopping a serial capture that interfered with its first
+attempt. Capture and flashing now have exclusive serial access. Retain the
+priority change only after checking audio, clock, touch and display behavior;
+blue-flash cause and louder recording correction remain open.
+
+The priority-7 comparison failed: the user reports occasional cutouts despite
+some improvement, occasional skipped Analog seconds, and blue flashes during
+Volume changes. Its 15-minute capture expired before the user's run, so these
+observations have no matching timing counters. The capture limit will be longer
+for the next pass. Priority 4 and its native assertion are restored in source;
+the next measurement load will restore that on the board. Priority 7 is not an
+accepted fix.
+
+Direct source inspection identified the actual triple-partial display path's
+whole-frame C2M writeback and M2C invalidation: each addresses 1,280,000 bytes.
+The installed SDK holds a critical section during each whole-range cache
+operation with C2M chunking disabled. This is a credible shared-delay candidate,
+not measured proof; full range does not mean every byte is physically dirty.
+The next bounded measurement wraps the existing cache API in temporary code
+within `audio.c` and its existing CMake link options, preserving real arguments
+and results. It will record duration/direction/core/caller and report after
+Stop, with task affinities. No SDK/library edits, new source path, worker,
+buffering scheme, cache setting or gain change is selected yet.
+
+The cache-call measurement build passes the 15 existing audio checks and the
+ESP-IDF 5.5.5 build (`0x1068bb0`, 18% application partition free), with audio
+priority restored to 4. Compiled-image inspection confirms the temporary
+wrapper and timer are in internal instruction memory, its counters/lock are in
+internal data memory, and both the display helpers and I2S completion callbacks
+use it. The real call runs outside the probe's short lock; durations include
+preemption and do not directly measure time with interrupts disabled. Reports
+are emitted only after Stop/cleanup. Removing the marked block and probe calls
+restores the reviewed production audio hash. The application-only measurement
+load passed written-data verification, preserving storage/NVS. Its one-hour
+serial capture is active for the requested matched Analog Rain/White Noise
+runs and a separate playing-volume drag. Observations and timing results are
+pending; this is not a fix. Independent source review found no actionable
+wrapper defect. I2S auto-clear also calls the same SDK cache API from its
+completion interrupt, using a separate audio buffer, so a slow small-buffer
+call could indicate waiting behind display work. That connection still needs
+measurements; a maximum records elapsed call time, not the entire event sequence.
+
+The first cache-probe runs failed: Rain cut out with each Analog second-hand
+update; White Noise was similar, with occasional skipped hand positions. Volume
+dragging glitched sound without a blue flash on that run. Stop rebooted the board
+three times. Captured assertions identify a diagnostic-only defect: the probe
+queried the 16-character heartbeat name, while FreeRTOS requires lookup names
+shorter than its 16-byte task-name limit. Native substitutions and the source
+review did not catch this SDK precondition. Audio and LVGL affinity reports
+confirmed both on core 0, but the assertion prevented all cache timing reports.
+The capture was stopped deliberately before reloading. The probe now uses the
+SDK-truncated heartbeat name with a compile-time length guard. All 15 audio
+checks and firmware compilation pass (`0x1068bc0`, 18% application partition
+free); the native checks do not execute the firmware-only diagnostic branch.
+The application-only replacement passed written-data verification. A fresh
+one-hour capture is active, with one 30-second Analog/White Noise run and Stop
+requested to check the diagnostic correction and collect the lost timings.
+Physical Stop verification is pending. The correction does not address the
+original cutouts, whose cause remains unconfirmed.
+
+The corrected probe's White Noise run captured about 18 seconds of measurements;
+the user confirms Stop no longer reboots and audio still glitches with the
+Analog hand. Audio, LVGL, UI heartbeat and clock all report core-0 affinity.
+Audio remains priority 4, while LVGL is 6. Maximum elapsed generation is 28.4 ms,
+preparation 31.5 ms, write interval 188.1 ms and blocking write 178.9 ms. The
+largest recorded C2M latency is 27.7 ms for a 512-byte call from I2S writing;
+whole-frame M2C invalidation is at most 32 microseconds. These elapsed calls
+include preemption and shared-lock waits; the maximum-only buckets do not
+separately retain large-frame C2M costs or establish a cache-work cause.
+
+A bounded comparison creates the same audio worker on core 1, retaining its
+priority 4, stack, buffers, playback and settings. The SDK pins tasks after first
+floating-point use, so unpinned creation did not keep audio mobile. Speaker/I2S
+initialization occurs in this worker; its lazy completion interrupt allocation
+also follows the calling core. Thus this compares audio execution and completion
+handling away from drawing, rather than separating those two causes. Shared
+memory and cache locks remain shared. Only existing audio task creation and its
+native substitutes change. All 44 native checks pass in 17.81 seconds and the
+firmware build passes (`0x1068bc0`, 18% application partition free). Parent
+inspection preserved the ordinary task-create declaration used by other native
+checks, verified the new SDK signature/core assertion, and confirmed removing
+the probes leaves only this single audio task-creation change. The previous
+capture was stopped before the application-only comparison load, which passed
+written-data verification and retained recording storage/NVS. A fresh one-hour
+capture is active for matched Analog/White Noise and Rain runs plus playing
+Volume dragging. Physical results and measured core-1 affinity are pending.
+This is a placement experiment, not an accepted correction. A read-only level
+assessment continues separately; no recording gain or asset has changed.
+
+The core-1 comparison improves the observed periodic audio failure: the user
+hears no cutouts during the White Noise/Rain checks. Captured White Noise runs
+30.9 seconds with maximum generation 473 microseconds, preparation 506
+microseconds and write interval 23.4 ms; longest write is 23.2 ms. Audio affinity
+is 1 and LVGL/UI heartbeat/clock remain 0. Rain includes a 71.5-second run with
+normal writes at most 23.4 ms and cache calls at most 206 microseconds. Retain
+this tested placement while remaining failures are investigated; this is not
+complete Sound Machine acceptance. Occasional Analog hand skips remain, with
+their introduction unresolved. Volume changes still cause a whole plain-blue
+screen; their sound effect is uncertain. The capture has no DSI underrun error
+or panic. Later source inspection found that the display's underrun interrupt
+is masked below a configured line count; the absence of that log does not rule
+out missing display data.
+
+That Rain run crosses one repeat and records a 131.4 ms combined rewind/decoder
+reset, producing a 155.3 ms write interval. This exceeds the source-derived
+35 ms Rain DMA reserve even on core 1; an audible repeat gap was not separately
+confirmed. Existing temporary probes now measure actual `fseek` and decoder
+reset calls separately, preserving all calls, results, gains and sample counts.
+The split measurement is being tested/built but is not loaded yet. A manual
+unsaved Brightness drag while White Noise plays is also requested to distinguish
+ordinary drawing from Sound Machine's saves/gain changes, without changing
+settings. Blue-flash cause, repeat delay and recording loudness remain open.
+
+The user reports no blue flash while dragging unsaved Day Brightness during
+White Noise. This narrows the comparison but does not prove storage is the
+cause. The next temporary firmware preserves Sound Machine validation,
+serialized updates/publication, controls and playback while returning success
+before NVS access for that group only. Its Sound/Volume/Timer test choices apply
+in memory and deliberately do not survive restart; other save groups remain
+ordinary. This limitation was disclosed before implementation. Restore normal
+Sound Machine storage immediately after the comparison and before closure.
+The same build splits actual file-seek and decoder-reset costs. All 16 focused
+audio/configuration checks and firmware compilation pass (`0x1068c60`, 18%
+application partition free). Native checks exercise ordinary storage, excluding
+the firmware-only diagnostic bypass; the RAM comparison requires board evidence.
+Removing that guarded block restores the exact prior configuration source hash,
+and removing audio probes restores only the tested core-1 task-creation change.
+The application-only comparison load passed written-data verification. The user
+reports no blue screen with its temporary RAM-only saves, generally continuous
+sound and occasional volume-slider lag. Rain still has an audible dropout about
+every 38 seconds. The captured completed Rain run lasts 129.6 seconds and crosses
+three repeats: backward file seek takes up to 132.1 ms, while decoder reset takes
+22 microseconds. No separate completed White Noise timing report was captured.
+This identifies file seeking as the repeat delay and connects the blue flash to
+the storage path; it does not yet identify which storage operation causes it.
+The temporary bypass was then removed, restoring the exact prior configuration
+source. The currently loaded build saves Sound Machine preferences normally.
+
+The next bounded correction retains each recording's filename and closes/reopens
+that same stream at its exact sample boundary, using SPIFFS's cached filename
+lookup instead of the slow backward seek. Decoder reset, joined tail/head chunks,
+sample counts, cancellation and the existing explicit-retry error policy remain.
+Native checks cover two repeats of every recording with simulated PCM, stream
+open/close accounting, returned reopen/close failures and Stop during reopening;
+they do not establish real decoded sound or hardware refill speed.
+
+That build also includes a fixed one-second UI heartbeat, with work included in
+the period and no replay of missed frames after an overrun. All 44 native checks
+pass in 16.84 seconds and the ESP-IDF 5.5.5 build passes (`0x10694d0`, 18% app
+partition free). The application-only flash passed written-data verification.
+The new capture deliberately restarts once to record display initialization.
+Temporary diagnostics time NVS flash operations without recording their contents
+and change the display's missing-data fallback pixel from blue to black. A black
+flash would identify this hardware fallback; this marker is not a proposed visual
+fix and must be removed. Startup confirms the original pixel value is `0x3fff`,
+the diagnostic value is zero, the interrupt-discard count is 800, and memory
+read/write priorities are both zero. No memory priority has been changed.
+Normal storage is restored. On October 14 the user reports no flash during
+White Noise volume changes and no heard dropout during the roughly one-minute
+Rain repeat check, but a blue screen during Rain volume changes. The hand was
+not separately reported in that response; its earlier sound-off skips remain
+open. The one-hour capture had already completed before these later tests, so
+there are no matched repeat or flash-operation timings for those observations.
+
+Further SDK review found a flaw in the temporary color diagnostic: DPI register
+changes require the existing configuration-update helper. Reading back zero
+without that apply step does not establish the active fallback color. The next
+comparison calls that helper after setting the marker and prints its register
+value and existing interrupt configuration at Stop. Persistent blue in the
+earlier test does not rule out display starvation. No interrupt masks, memory
+priorities, display speed or normal appearance are changed by this diagnostic.
+
+Read-only level assessment recommends a Rain-only 1.7x playback multiplier as
+the smallest clean increase, approximately 4.6 dB with about 1 dB predicted
+codec headroom. It would preserve file bytes/blends/counts and all other sounds,
+but still leave Rain far quieter than White Noise by RMS. This is an unimplemented
+recommendation under the user's loudness request, not a new product requirement
+or established acoustic result. A larger adjustment needs transient control and
+listening; no normalization framework or re-encoding has been selected.
+
+The previous UI heartbeat delayed one second after completing its work and
+could wait another 250 ms for the display lock, allowing accumulated drift.
+The loaded comparison includes the fixed-period correction described above.
+The user still reports occasional two-second Analog hand jumps with sound
+stopped. Actual sampling/drawing timing remains unmeasured; this remains open
+independently of audio, and source review is checking the remaining delays and
+the relationship between the update schedule and clock-second boundaries.
+
+The corrected-marker comparison is built (`0x1069890`, 18% application
+partition free) and its application-only written hash is verified. A fresh
+two-hour capture starts without an extra reset. The matched Rain run lasts
+112.7 seconds and crosses two repeats: same-file reopen takes at most 254
+microseconds and total repeat reset 284 microseconds, compared with the earlier
+132 ms backward seek. Audio write interval is at most 35.0 ms and the user hears
+continuous sound. During volume changes the user now sees flashing described as
+probably black, definitely not blue; Stop confirms marker zero and the unchanged
+interrupt-discard setting. The display-starvation explanation is supported,
+without using absent interrupt logs to rule it out. The same run records 154 NVS
+reads (maximum 7.4 ms), 66 writes (maximum 2.6 ms) and no erase. These are elapsed
+individual operations, not a complete save duration or exact per-flash timeline.
+No cadence-anomaly or lock-failure line is captured, and the user sees no Analog
+hand skips in the requested two-minute sound-off observation. This is bounded
+hardware evidence, not a claim that skips can never recur.
+
+Settings inspection confirms one active save and one retained latest desired
+Sound Machine choice; there is no unbounded save queue. A later desired value
+waits for the existing completion poll before the next save. The connection to
+storage remains credible, but a growing queue has not been established. A
+separate SDK check rejects enabling cache-safe display interrupts on the assumed
+cache-disable theory: current instruction/constant-data PSRAM settings select a
+flash path that does not disable those interrupts. No such option is changed.
+
+The next bounded comparison requests a higher display memory-read QoS value
+through the existing SDK helper in `main.c`, from zero to one, preserving that
+port's write value and other read values. It affects all reads through the
+display's DW_GDMA memory port, including descriptors. The SDK names it a priority
+setting but does not establish exact arbitration guarantees; this is a trial,
+not a proven correction. It adds less machinery than interrupt wrapping, while
+possibly delaying other memory users. Retain normal saving and the current
+audio/clock changes, compare Rain volume changes and two repeats, and check audio,
+touch, clock cadence and normal weather. Revert if the flash persists or other
+work worsens. The build passes (`0x1069970`, 18% app partition free), and its
+application-only write is hash-verified. The immediate no-reset capture records
+the requested read field changing from `0x0` to `0x10000`, with writes still zero,
+and a successful ordinary Visual Crossing startup response (`200`, `queryCost=1`).
+Its early three-second clock jump occurs with a one-second update interval and
+short snapshot/lock waits, shortly after network connection; that is consistent
+with startup time correction, not evidence of a three-second rendering stall.
+No matched volume comparison result has been requested for this priority trial.
+
+The user questioned treating the symptom and briefly offered final-volume saving
+at the end of a touch as a less-responsive fallback. That comparison was prepared
+and host-checked but never flashed. The user then canceled it: even one flash is
+a defect and root-cause investigation should continue. Only those trial edits
+were reversed in Settings and its tests; the pre-existing live volume, ordinary
+saving and Sound Machine work are restored. The parent rebuilt the native suite
+after restoration: all 44 checks pass in 16.69 seconds. No product requirement
+was changed. Saving only at release is no longer the intended correction.
+
+The read-priority trial is also removed from source. The next load restores its
+original value; current board priority remains the disclosed trial until then.
+The next diagnostic measures actual display frame-completion callback intervals
+alongside the existing NVS operation timestamps, preserving the adapter's
+callbacks and userdata and reporting only after Stop. It uses the existing
+diagnostic block and public SDK registration path, not a copied driver or new
+worker. This is intended to distinguish missing frame-feed progress from an
+ordinary UI update or storage queue. Corrected marker, audio/core placement,
+repeat handling and cadence remain as described above. The diagnostic build
+passes (17,217,760 application bytes, 18% partition free; SHA-256
+`9a675a19282f7f7c0f6e8781cd7db5565080913dc77f375b59a7a3a7506a0c82`).
+Parent source/ELF checks verify the intended call interception, internal-memory
+interrupt helper/state placement and removal of the read-priority setter.
+The existing callback slots, user data and callback return behavior are retained.
+This adds approximately 5.8 KiB of fixed internal diagnostic data, with no new
+task, driver fork or source path. It records an initial frame interval baseline,
+the longest gap, eight recent above-baseline gaps and 128 completed NVS/cache
+check spans. These are software DMA rearm callback intervals, not physical panel
+VSYNC measurements; overwritten or unfinished storage spans limit correlation.
+All reports run after Stop. The application-only flash is hash-verified and its
+immediate no-reset capture confirms normal startup, original display read/write
+priorities of zero, diagnostic marker zero and a successful ordinary Visual
+Crossing response (`200`, `queryCost=1`). Serial evidence is local under
+`.reviews/sound-machine-sprint-2026-10-13/board/frame-trace-*`.
+
+The matched 26.13-second Rain/volume run confirms continuous sound with dark
+flashes. The callback probe installs successfully and records 2,806 frames.
+Before storage activity, 1,223 intervals average 9,240 microseconds with a
+9,277-microsecond maximum. The longest interval is 20,210 microseconds and
+overlaps four individual NVS reads; the retained recent enlarged intervals also
+overlap reads/writes. The run records 77 reads (maximum 8,420 microseconds),
+33 writes (maximum 3,170 microseconds), no erase and 33 cache checks with no
+actual mapped-flash invalidation. Cache synchronization maxima are 36
+microseconds on core 0 and 29 on core 1. All measured NVS access is on core 1;
+frame callbacks are on core 0. Audio first-fill internal memory is 39,863 bytes
+free, largest block 23,552; after closing it is 77,195 bytes free. No panic or
+unexpected restart is captured in this run. These timings narrow the storage
+connection; they do not identify a hardware stall versus delayed CPU service or
+timestamp the visible flash directly. The report retains eight of 43 above-
+baseline intervals and 128 of 143 completed storage/check spans, so discarded
+history remains an explicit limit.
+
+Source inspection of the selected GD flash read path finds no deliberate sleep
+or busy-wait for a previous write in its 32-byte read; a single host transaction
+is enough. The next temporary diagnostic in existing `audio.c`/CMake times host
+configuration after the SPI1 mutex, the host read and command-completion polling.
+This will split the surprising 5–8 ms small-read elapsed time without changing
+normal saving, driver behavior, priorities or display refresh speed. The build
+passes (17,216,528 bytes, 18% partition free; SHA-256
+`3cb865fd7e5d6487e96c1819191941b7090aea4d8157bd36e3d6634fc484d0b1`).
+Parent verification confirms all three flash-host function pointers use the
+timing wrappers and required helper/state placement in internal memory. The
+production audio reconstruction is unchanged. All 15 affected audio checks pass
+in 1.01 seconds after rebuilding; the preceding full 44-check pass remains.
+The narrower diagnostic retains 16 storage spans rather than 128, releasing
+4,480 bytes; its small read-stage/heap records add 772 bytes, for a net 3,708-byte
+fixed-data reduction. It measures free/largest DMA-capable internal blocks at
+first fill and after Stop, separately from total internal memory. The
+application-only flash is hash-verified, with immediate no-reset capture confirming
+normal boot, original zero display priorities, temporary black fallback marker
+and a successful startup Visual Crossing response (`200`, `queryCost=1`).
+The matched 27.63-second Rain-volume test again confirms dark flashes with
+continuous sound. Frame callbacks average 9,239 microseconds before saving,
+with a 9,261-microsecond baseline maximum and a 19,885-microsecond overall gap.
+The longest 32-byte NVS read takes 8,461 microseconds: 8,113 elapse before host
+configuration, whereas the actual host read takes 88 and command polling 16.
+No read scope is skipped. Most of this measured delay precedes the hardware
+read; it combines initial API work, allocation, mutex waiting and scheduling.
+At first fill, DMA-capable internal free/largest is 2,331/608 bytes, despite
+41,891 total internal free and a 31,744-byte largest internal block. After Stop,
+DMA-capable free/largest is 39,683/28,672. The preceding five periodic weather
+responses on this image succeed before audio; post-audio overlap is unverified.
+Evidence remains local under the same board directory's
+`read-stage-*` files. All temporary diagnostics must be removed for final closure.
+
+Read-only UI review confirms successful ordinary volume changes neither rebuild
+nor clear the Sound Machine page; they update small labels/notices. A volume
+change also does not reopen the recording/codec or reset the timer. The existing
+RAM bypass is a useful storage-path comparison, but its changed operation timing
+and unavailable exact temporary patch limit an assertion of perfect isolation.
+Probe bookkeeping itself shares a cross-core lock, so callback/cache timings
+can be perturbed; it did not introduce the earlier uninstrumented flash.
+
+The next precise lead is SDK temporary-buffer allocation: a non-main-DRAM read
+destination, including a valid internal RTC-RAM task stack, requires a scratch
+buffer. The SDK first walks internal heap blocks to find the largest free block,
+even for a 32-byte read, while holding the heap's critical-section lock. The
+8 KiB Save stack could occupy RTC RAM under the measured pressure, but its
+placement is not yet observed. The next small diagnostic records destination
+classification and the nested heap-walk duration within the existing NVS-read
+scope. No production allocation, driver, save or display policy is changed.
+The extended build passes (17,217,584 bytes, 18% partition free; SHA-256
+`d9fe4d043c9da9c082ea96734582dc04343cc9788a91d3aad811ae2b968d9781`).
+Parent source/ELF checks confirm the SDK temporary-buffer allocator reaches the
+wrapped largest-block lookup, with required probe helpers/state internal and
+original arguments/return values retained. The extension adds 320 fixed bytes;
+production audio reconstruction remains unchanged. All 15 rebuilt audio checks
+pass in 1.38 seconds. Application-only write verification and normal startup
+pass, with zero display priorities, the temporary black marker and ordinary
+Visual Crossing weather success (`200`, `queryCost=1`). The matched 22.11-second
+Rain-volume run again has dark flashes and continuous audio. Its longest 32-byte
+read takes 8,625 microseconds; the destination is `0x50109c3c`, confirmed RTC RAM
+rather than main DRAM. One nested largest-block lookup takes 7,987 microseconds,
+versus a 90-microsecond host read and 17-microsecond command poll. That confirms
+the slow-read mechanism in the SDK's temporary-buffer path. It does not yet
+prove the complete chain to visible display starvation. Frame baseline is
+9,240 microseconds, maximum 20,348; first-fill DMA-capable free/largest is only
+1,831/176 bytes, then 39,187/27,648 after Stop. The measured placement is consistent
+with a late Save stack using RTC RAM; destination classification alone does not
+establish every allocation's ownership. New evidence uses `heap-walk-*` in the
+existing local board directory.
+
+The next disclosed one-variable comparison changes the existing SDK internal
+reserve from 32 KiB to 64 KiB in `sdkconfig.defaults` and the active generated
+configuration. This aims to leave room for the late 8 KiB Save stack without
+the RTC-buffer scratch/heap-walk path. It preserves immediate volume and ordinary
+saving, tasks, codec buffers, priorities, display rate and driver code. The
+tradeoff is changed ordinary allocation placement/fragmentation, potentially
+using more PSRAM; the reserve is not a hard guarantee. Its added 32 KiB is a
+comparison budget, not yet an accepted permanent requirement. Acceptance needs
+main-DRAM NVS destinations, absent nested heap walks, shorter reads, no observed
+display flashes, continuous audio and healthy weather/network behavior. Do not
+select it merely because aggregate free memory improves. The firmware build
+passes (17,217,584 bytes, 18% app partition free; SHA-256
+`f23de22b65712077b74face502fcbea44654319da16ffa2a4145757cf4f501ec`).
+The generated configuration confirms 65,536 reserved bytes and production audio
+is unchanged. The earlier full 44-test pass and latest rebuilt 15 audio checks
+are retained; native tests do not execute SDK memory placement. Application-only
+write verification and normal boot pass; startup prints the 64 KiB reserve,
+original zero display priorities and ordinary Visual Crossing success (`200`,
+`queryCost=1`). The matched volume check and an ordinary weather refresh during
+playback are requested and remain pending. Evidence uses `reserve-64-*` in the
+existing board directory. No driver fork, allocator ABI override, extra storage
+worker or new source file is added. The comparison and all diagnostic probes
+remain provisional until their effects and normal-firmware behavior are verified.
+
+The 64 KiB reserve comparison failed: the user still observes dark volume flashes
+and continuous audio, then reports failed weather during the longer playback.
+The first run lasts 123.64 seconds, with first-fill DMA free/largest 9,663/6,912
+bytes. The largest block is still smaller than the 8,192-byte Save stack; NVS
+destination `0x5010bc94` remains RTC RAM, with a 6,939-microsecond heap lookup in
+an 8,588-microsecond read and a 19,182-microsecond maximum frame interval.
+The subsequent 697-second playback crosses 18 repeats, but TLS requests fail
+certificate-signature verification with `0x4290`: the SDK's RSA-public error
+plus a big-integer allocation failure. This is not evidence of a bad provider
+certificate or daily quota. CPU-0 idle watchdogs and, after Stop, an AES alignment
+allocation failure are captured. The longer audio write interval reaches 120 ms;
+the user's continuous-audio answer for the volume check does not verify every
+part of the later weather run. Source and generated configuration revert to
+the original 32 KiB reserve; the physical board remains on the failed trial until
+the next load. Evidence uses `reserve-64-result.json` and adjacent logs.
+
+The next disclosed comparison changes only the ordinary allocation preference
+threshold from 16 KiB to 2 KiB at the original reserve. Allocations larger than
+2,048 bytes prefer PSRAM; smaller ones remain internal-preferred, with the SDK's
+existing fallback behavior. Concrete sizes justify this boundary: MP3 input
+2,048 and PCM 1,764; compiled SPIFFS descriptors 240, cache 1,400 and work 512
+bytes for five 256-byte pages. The 4,608-byte decoded buffer and larger ordinary
+codec allocations instead prefer PSRAM. This targets software memory pressure
+without intentionally moving the flash-read cache out of main RAM. It adds one
+existing SDK configuration value, with no helper, ABI override, driver change or
+new source path; volume/save behavior remains. More PSRAM/cache traffic and
+possible allocation fallback require measurement. Parent ELF structure checks
+independently verify those filesystem sizes. The firmware build passes
+(17,217,584 bytes, 18% app partition free; SHA-256
+`becaf5bd49ae8312b478cee3aaa469fb93b4b7ff921e4bf0b24bde6db4da3022`).
+Generated configuration verifies the 2,048-byte threshold and original 32,768-byte
+reserve. Production audio reconstruction remains unchanged; preceding native
+evidence is retained because host tests do not exercise this SDK allocation
+preference. The application-only load is hash-verified and the board boots with
+the original 32 KiB reserve; its first Visual Crossing request returns HTTP 200.
+The serial capture remains active (PID 99162). NVS placement/scan, visible
+flash, audio and weather overlap checks remain pending. TLS allocation placement
+remains unchanged; its separate SDK option is not part of this trial.
+
+The 2 KiB comparison improves the measured volume-save path. The user reports
+the short test seems to work correctly. Its 99.45-second capture shows the
+longest NVS read at 809 microseconds, destination `0x4ff35944` in main DRAM,
+and zero nested largest-free-block lookups. Display intervals average 9,239
+microseconds and peak at 9,279 rather than the earlier roughly 20,000.
+The subsequent 533.91-second Rain run crosses 14 repeats with a 9,292-microsecond
+maximum frame interval; a 34,175-microsecond NVS erase also occurs without a
+measured frame delay. The remaining probes and changed allocation preferences
+still require removal and normal-firmware verification before closure.
+
+Weather overlap remains unsuccessful. A request made while playback is Stopped
+returns HTTP 200, but the following request during Rain fails to allocate AES
+output transfer descriptors. A retry after Stop fails an AES start-alignment
+buffer allocation. Neither reaches an HTTP quota response. First-fill DMA
+free/largest values are 35,563/27,648 bytes, and closed values 41,091/27,648;
+these are snapshots outside the failed handshake, not proof of adequate memory
+at its peak. The raw AHB-descriptor capability totals of zero are not evidence
+that no descriptor memory exists: the SDK translates that capability into DMA
+when allocating, while these raw heap-statistics calls do not. Actual AES
+allocations request DMA-capable internal memory. Exact peak pressure remains
+unmeasured. Evidence uses `prefer-2k-result.json` and the active runtime log.
+
+The user's question about excluding the 32 KiB RTC area was checked without
+changing that setting. IDF's existing `ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP`
+switch controls whether it contributes to dynamic allocation. Disabling it
+would remove the current 32,608-byte RTC heap and prevent RTC task-stack
+placement, but would not add DMA capacity; ordinary buffers could instead
+fall back to PSRAM or internal-only allocations could fail. This is a supported
+option, not an implemented fix or proof that the weather failure is resolved.
+
+The next disclosed comparison retains the 2 KiB ordinary preference and original
+32 KiB reserve, changing only the SDK TLS allocation choice from Internal to
+External. The compiled connection allocates 16,717-byte input and 4,429-byte
+output buffers plus 948 bytes of initial handshake objects, before certificate,
+key, cipher and allocator costs. Moving TLS software allocations to PSRAM
+targets demonstrated hardware-buffer allocation failures without changing
+content limits, certificate checks, crypto selection, audio ownership, settings
+saves or weather retry timing. AES transfer descriptors still need internal DMA
+memory; aligned data buffers follow their source memory placement. This is an
+existing SDK option, not a custom allocator or new source file. More external
+memory/cache traffic must be tested. Acceptance requires ordinary weather
+success during Rain, stable live-volume display timing and responsive continuous
+playback. Exact peak pressure and the final production configuration remain
+unverified; the comparison must not be treated as a completed fix.
+
+The external-TLS comparison builds successfully with ESP-IDF 5.5.5
+(17,217,584 bytes, 18% application partition free; SHA-256
+`ea3d23275dfe4e46a897ccf7495a7713a8b6d39d6215ae17a8bd76369948a8a2`).
+Generated configuration confirms External TLS, the 2,048-byte ordinary
+preference and 32,768-byte reserve. Parent ELF inspection confirms the TLS
+allocation function requests PSRAM and byte-accessible memory. Production audio
+and configuration-owner hashes remain unchanged. Native checks retain their
+earlier recorded results because they do not execute this hardware allocation
+choice. Application-only flashing is hash-verified; startup and the first
+Visual Crossing request pass (HTTP 200). Capture PID 18202 remains active.
+Playback/volume and ordinary weather-overlap checks are pending; evidence uses
+`tls-external-*` in the existing board review directory.
+
+The user confirms the two later software restarts on the 2 KiB-only comparison
+were intentional. On the external-TLS comparison the short volume check looks
+correct, and the 834.09-second Rain run crosses 21 repeats and the next ordinary
+weather request. That request returns HTTP 200 with no recorded allocation
+failure. Short-test display intervals peak at 9,278 microseconds, with a main
+DRAM NVS destination and zero nested heap scans. The longer run has one
+17,091-microsecond maximum frame interval near weather-request startup; no
+separate visible result was supplied for that moment. Do not claim universally
+uninterrupted rendering from these measurements. The board result and limits
+are in `tls-external-result.json`.
+
+Removed all temporary audio/cache/flash/HAL/heap/display measurements, their
+linker wraps and temporary dependencies, the diagnostic display fallback-color
+write and clock-cadence instrumentation. Retained only the established core-1
+audio placement, same-file repeat reopening, fixed one-second heartbeat and the
+two SDK memory-placement choices. RTC heap inclusion and the original 32 KiB
+internal reserve remain unchanged. Parent hashes independently match production
+audio and its normal CMake file; scoped independent review finds no consequential
+defect or added owner/allocator/storage mechanism. The existing configuration
+files own the settings, with rationale in the architecture.
+
+After removal, all 44 native checks pass in 17.98 seconds and ESP-IDF 5.5.5
+builds normal firmware (17,202,672 bytes, 18% application partition free;
+SHA-256 `9745ce89cad0ddcdd67d9a4e9cc2bc82c1e2ad101a6fcab07c72d6f2e72f4df9`).
+Normal firmware is now loaded with application flash hash verification, and
+its first Visual Crossing request succeeds (HTTP 200). Serial capture PID 35796
+remains active. The final Analog/audio/live-volume/weather-overlap check remains
+pending. Diagnostic results do not substitute for that retest.
+Rain loudness and broader Sound Machine sound/timer/fade/navigation/priority
+checks remain separate; no gain or asset change is included in this correction.
+
+On normal firmware the user reports Analog/Rain repeats, live volume changes,
+hands and touch appear to work. The separate 30-second White Noise check was
+questioned rather than performed; it remains unverified. The next ordinary
+weather request returns HTTP 200 with no allocation failure, watchdog or
+restart, but the user thinks Rain cuts out around that update. Weather/audio
+overlap therefore remains open. A successful response is not evidence of
+continuous speaker output. The 32 KiB RTC heap remains enabled; no exclusion
+was approved or implemented during the user's questions.
+
+Review found a remaining older weather resource-measurement helper, outside
+the removed audio/main probes. Each download queries the largest free blocks
+in Internal and PSRAM twice, totaling four heap walks. The SDK holds a critical
+heap lock during each walk, delaying local interrupt service and potentially
+other users of that heap. This is a credible candidate under the reported
+cutout, not a measured cause: the scan's core/duration and queued audio at
+that moment are unknown. The next disclosed cleanup removes only this helper,
+its two calls and its otherwise-unused includes from `weather_client.c`.
+Normal provider/status/result logging, download/decoding, retries, settings,
+audio buffering and priority remain. Affected native weather checks, the
+firmware build and another Rain/ordinary-weather overlap check are required;
+the redundant short White Noise/navigation test is skipped for now.
+
+This cleanup removes 25 source lines and adds no source path, task, queue or
+allocator. Parent diff inspection verifies that the normal provider/status log
+and all weather operations remain. The affected native weather-service check
+passes (0.78 seconds), and the ESP-IDF 5.5.5 build passes (17,202,272 bytes,
+18% application partition free; SHA-256
+`b4a3451b5aabc48962d292253843ffe0462d7b1be2e1ed3d9c62c1e788af52a2`).
+The preceding full 44-check result remains recorded separately; host checks
+do not establish interrupt timing or continuous audio. Load and the matched
+Rain/ordinary-weather check are pending, with evidence under `no-weather-scans-*`.
+
+The no-weather-scans image is application-flash hash verified; startup weather
+returns HTTP 200, with capture PID 46203 active. The user then reports that the
+clock stops updating during weather sync and its second hand jumps several
+seconds. Whether this refers to that image's startup or the preceding ordinary
+refresh is being clarified, along with whether audio was playing. It is a
+reported defect, not a passed overlap result.
+
+Read-only tracing finds no direct wait for weather HTTP completion in the
+heartbeat. Weather requests/decoding occur outside the runtime-state mutex;
+publication copies the completed payload. Time-owner locks are short state
+copies with RTC I/O outside them. The heartbeat nevertheless skips an update
+if its once-per-second drawing-lock attempt fails after 250 milliseconds.
+Consecutive missed attempts can produce a multi-second hand jump. This is a
+concrete possible mechanism, not evidence that it caused the observed event.
+Message snapshot retrieval also has an unbounded owner-lock wait, without a
+demonstrated connection to this weather event. Do not label it the cause.
+
+The next bounded measurement adds temporary tagged timing lines only to the
+existing `main.c` heartbeat. It records scheduled-versus-actual wake, configuration
+copy, owner-snapshot, drawing-lock outcome and UI-update durations, plus monotonic
+interval and UTC steps. Log only exceptional updates after releasing the drawing
+lock; there are no heap scans, driver wraps, new tasks or source paths. Preserve
+scheduling, the lock timeout, rendering and product behavior. Exact removal
+reconstructs the pre-measurement source hash recorded in `ui-wait-checkpoint.json`.
+Preparation is not a board result; the measurement still needs a build and a
+matched event. Remove it after diagnosis, and distinguish object-update timing
+from physical frame completion.
+
+The user confirms the hand stall was during an ordinary refresh, with sound
+probably stopped. The no-weather-scans capture also records a successful second
+ordinary request without speaker-open messages; no audible or display result
+for that precise logged request is otherwise inferred. The 18 tagged heartbeat
+timing lines build successfully. Their exact removal is verified against normal
+`main.c` SHA-256 `4e96a4d2d42bb7df54bacfb47a3ea2283426dd59814a4c3e5964a881a93284a6`.
+They do not change task priority, scheduling, lock timeout or UI operations.
+Firmware loading and a matched ordinary-refresh clock observation remain pending.
+
+The user authorizes unattended testing and iteration until the clock/audio
+interference is explained, instead of repeated manual setup and ten-minute
+waits. The standalone heartbeat trace is already flash-verified, with capture
+PID 51982; it will be superseded by the automatic sequence before its matched
+test. No source/priority/lock/rendering fix is inferred from its startup logs.
+
+The automatic diagnostic uses the existing weather worker and audio Play/Stop
+commands: four real weather attempts, with a temporary one-minute successful
+refresh interval. The first two run Stopped; after the second successful attempt
+and ten seconds of settling, Rain starts automatically. The next two test
+playback overlap, and the fourth attempt submits Stop and returns to the
+ordinary cadence. Existing failed-request retry timing remains. The diagnostic
+opens Analog without saving over the Home Screen preference, and forces only
+the audio worker's temporary local Sound Machine values to Rain/50%/Continuous;
+stored sound, volume and timer remain unchanged. Alarm/preview priority remains.
+These are disclosed test-only behavior changes, not approved product changes.
+
+Minimal worker timing records will measure preparation, codec writes and feeding
+gaps, printing after playback closes rather than during sample feeding. Heartbeat
+timings distinguish missed scheduling and data/drawing waits. They can detect
+late software feeding and missed clock updates without the user; they do not
+record acoustic output or establish exact panel pixels. No new task, generic
+test manager, SDK hook or source path is introduced. Strip all tagged diagnostic
+lines after identifying and verifying the actual correction; exact removal
+hashes remain the closure check. Current work is the unattended investigation;
+manual board prompts are deferred while these measurements run.
+
+Automatic diagnostic preparation is complete. All 17 affected audio,
+weather-worker and alarm-command native checks pass in 1.67 seconds, and the
+firmware build passes. Parent removal checks independently reconstruct normal
+main/audio sources. The audio timing state occupies 104 fixed bytes and uses
+no per-chunk logging, allocation or shared lock; only the worker updates it.
+The automatic controls are hardware-build-only, so native production checks
+retain their original behavior. Load and the bounded four-attempt run are
+pending; evidence uses `automatic-*` in the existing board review directory.
+The sequence opens Analog only for the diagnostic boot; preferences are retained.
+
+The unattended run is flash-hash verified and completes all four attempts
+(HTTP 200 each), with audio inactive for the first two and active for the next
+two. It starts and stops itself as designed. The actual saved preferences
+reported by the worker are Analog, Rain and 32% volume; the diagnostic plays
+Rain at 50% locally and does not rewrite that saved 32% value.
+
+This run reproduces a 1,073,834-microsecond speaker-write call during the third
+weather request. The maximum write-start interval is 1,073,992 microseconds;
+preparation peaks at 27,152 microseconds at another time, and the largest gap
+from one write's end to the next start is 27,164 microseconds. Thus the largest
+delay is inside the codec write, including possible task preemption, rather than
+recording preparation. All 5,537 writes complete through the current API without
+an audio error being published. Driver waiting versus delayed scheduling still
+needs distinguishing; an API success does not prove uninterrupted speaker output.
+
+The ordinary stopped/Rain heartbeat records show short snapshot/lock waits
+(at most 72/18 microseconds in the exceptional reports), no drawing-lock failure
+and roughly 247 milliseconds of screen-object work on each new payload. The
+largest reported ordinary applied interval is 1.085 seconds; no multi-second
+software-update stall is reproduced in this bounded run. The startup three-second
+UTC step is distinct. These are software timings, not physical-frame captures.
+An inherited UI diagnostic forces owning-screen layout and multiple object-bound
+reports while holding the drawing lock on each new weather payload; its cost is
+a separate measured-boundary candidate, not yet an established cause.
+Audio write waiting and the reported physical clock stall remain under
+investigation. Current evidence and timestamps are in `automatic-checkpoint.json`.
+
+The next unattended comparison samples the persistent audio worker's task state
+from the existing 250 ms clock-control loop only while a speaker write exceeds
+100 ms. Fixed bounded records distinguish waiting in the driver from delayed
+processor scheduling; no new task or priority change is introduced. It also
+measures the inherited weather object-log/layout call separately from total UI
+work. Existing `main.c`, `audio.c` and `ui.c` contain temporary tagged probes;
+removal hashes are recorded in `automatic-state-checkpoint.json`. Software
+measurements do not capture acoustic output or physical frames.
+
+Installed codec/driver source has no codec-layer retry. Its 1,000 ms timeout
+applies separately to each driver wait, so the successful 1.07-second call
+does not prove a timeout. The current two-core scheduler time-slices equal
+priority tasks; equal priority by itself is not an established cause. No driver,
+managed dependency, task priority, speaker-retention or product behavior change
+is justified by these source findings alone.
+
+The task-state comparison completes four successful real requests and stops
+without intervention. Weather runs on core 0 in this boot. Its second stopped
+request delays the UI wake by 619 ticks; the fourth Rain request delays it by
+827 ticks and produces a 2.008-second applied clock interval. The clock-control
+sampler's largest interval is 1.213 seconds. Rain's largest write is 42.629 ms
+and its largest start interval is 56.434 ms; no write exceeds the 100 ms sampling
+threshold, so no task-state conclusion is available. This differs from weather
+on core 1 in the first run, when audio stalled over a second and UI timing stayed
+short. Weather placement correlates with which consumer stalls; the responsible
+operation still needs measuring. Inherited weather object logs/layout take
+90.3–91.1 ms per publication within 249–292 ms total UI work. Affected native
+checks (17) and the UI-shell check pass; build and flash hash are verified.
+
+The next diagnostic places only the existing weather worker on core 1 to
+reproduce the audio delay while the existing clock-control observer can run
+on core 0. This is temporary controlled test placement, not a production fix.
+Saved settings, task count and priority remain unchanged. Separate clock-control
+work timing will distinguish a slow control operation from a late task wake.
+
+The core-1 comparison reproduces a 1.059-second codec write during connection
+setup, before the first connected event. Five bounded samples show audio Ready,
+CPU 1 executing weather, and weather's effective priority 18 despite its configured
+priority 4. Four samples span the same long write. Clock-control work has no
+>100 ms reports; its largest call interval is 417 ms. All four requests succeed.
+This identifies scheduling starvation rather than an unavailable speaker buffer:
+audio is runnable while a boosted weather worker occupies its core.
+
+Parent and independent SDK review verify the FreeRTOS rule: inherited priority
+is restored only after a task releases its last held mutex. The application
+holds its weather request mutex across HTTP, decoding and cleanup, so a boost
+from a short inner SDK mutex can persist through the remaining request. lwIP's
+shared protection mutex and priority-18 TCP/IP task provide a credible donor;
+the exact donating acquisition is unobserved. The measured high priority and
+Ready audio establish the harmful behavior independently of that donor identity.
+
+The bounded correction changes only the existing request serialization to a
+static binary semaphore, made available once at initialization. Keep the same
+whole-request scope and all admission/return paths; quota state and overlapping
+validation requests remain serialized. This avoids counting a held mutex through
+slow work, without resetting priorities, changing worker priorities or adding
+workers/locks. Existing native support gains only the binary creation substitute
+needed for the real overlap test; its pthread model does not verify RTOS
+priority. Test the same controlled core-1 sequence before accepting the fix,
+then core 0 to verify clock behavior. A future higher-priority caller would not
+boost an active request; current weather/settings-save callers both use priority 4.
+Preparation is not a passing result.
+
+The request-gate correction passes all 44 native checks in 16.62 seconds and
+the firmware build. Its controlled core-1 run completes four successful requests
+with no >100 ms audio-write samples; the largest write is 47.626 ms. The earlier
+1.059-second scheduling stall does not recur. Ordinary clock intervals remain
+under 1.096 seconds in exceptional reports. One 83.903 ms feeding interval
+occurs outside either Rain/weather request, with 55.745 ms preparation; it
+cannot be presented as verified continuous output.
+
+The next comparison places weather on core 0 and uses the public speaker
+completion callback to count all-zero transmitted PCM blocks during established
+Rain playback. The existing `audio.c` contains a temporary attach-before-enable
+wrapper, linked by one removable line in existing `main/CMakeLists.txt`; BSP,
+codec, PCM, buffers and priorities are unchanged. The BSP clears completed
+buffers after the callback, so it can inspect their content before clearing.
+Exclude startup priming and report only after close. This detects silent digital
+output blocks, not acoustic quality. Registration failure must be reported and
+cannot be counted as coverage. The callback adds a small SDK cache synchronization
+per completion; treat it as a measurement limit and remove it after diagnosis.
+
+The corrected core-0 run completes four HTTP-200 requests. All ordinary
+reported clock samples retain one-second UTC steps, zero wake lateness and no
+drawing-lock failures, with a largest reported interval of 1.087 seconds. The
+startup UTC correction is separate. Speaker registration and enable both succeed;
+coherent counters cover 19,890 completed 512-byte buffers after priming, with
+zero all-zero blocks and no skipped buffers across two real weather requests
+and approximately three Rain repeats. Largest preparation/write intervals are
+27.120/48.024 ms; largest write-start interval is 53.312 ms. These counters
+exclude wholly silent output in this run, not partial interruption, acoustic
+quality or physical frame rendering. The corrected core-1 comparison removed
+the earlier scheduling starvation; both placements now have bounded evidence.
+
+The final unattended overlap run restores ordinary task placement and the
+production ten-minute weather cadence. Startup weather runs Stopped; after it
+succeeds and settles ten seconds, temporary local Rain/50%/Continuous starts.
+The next ordinary attempt ends playback and the test. Preference writes remain
+absent. This checks sustained repeats and the actual refresh spacing rather
+than only the accelerated comparison. Remove probes and load normal firmware
+after this result; no new permanent source path or test framework is introduced.
+
+While the ten-minute board run continues on its verified diagnostic image,
+normal source is restored and all five removal hashes match: main/UI/audio
+return to their pre-measurement contents, CMake loses the temporary wrap, and
+weather retains only the request-gate correction and prior diagnostic-log
+cleanup. All 44 normal native checks pass in 16.73 seconds and IDF 5.5.5 builds
+without the probes. The current diagnostic ELF is kept temporarily for decoding
+a failure during this still-active board run; discard it after successful
+closure. Normal loading waits for that run's result.
+
+The ordinary ten-minute run completes both requests successfully and stops
+automatically. The regular refresh keeps one-second clock steps with no reported
+wake lateness or drawing-lock failure; the earlier scheduling stall does not
+recur. The transmitted-PCM measurement nevertheless finds 13 wholly silent
+512-byte buffers among 102,076 inspected buffers, with a longest group of three
+(about 17 milliseconds). These occur away from the weather request. They keep
+the audio investigation open; the clock/weather correction is not evidence that
+every playback gap is closed.
+
+The retained Rain recording has no silent 256-sample blocks when decoded with
+mpg123, including after applying the diagnostic 50% gain. Its longest exact-zero
+run is three samples at that gain. This excludes ordinary recording silence
+as the explanation for whole silent buffers, subject to the different native
+decoder. The next bounded measurement compares actual driver refills with the
+silent output buffers and their nearby preparation/write times. It uses temporary
+probes in existing `audio.c`, `main.c` and CMake only, with automatic Play/Stop
+and no preference writes. Driver/SDK code, priorities and buffer settings remain
+unchanged. Remove the probes after the cause and correction are verified.
+
+The matched-refill diagnostic passes 17 affected native checks in 1.11 seconds
+and the firmware build. Independent source review and parent ELF checks confirm
+bounded interrupt-side reads, internal code/data placement and no interrupt-side
+logging, allocation or waiting. Its six buffer records and first 16 silent-event
+records occupy about 2.7 KiB. The observation includes partial-copy cache
+synchronization and generation checks; stable record coverage alone does not
+establish a completed full refill or physical transmitted bytes. Automatic
+Rain/50%/Continuous and ordinary ten-minute weather spacing preserve stored
+preferences. The image and removal hashes are in `refill-checkpoint.json`; board
+results are pending.
+
+The matched-refill run completes two HTTP-200 requests and records 11 wholly
+silent buffers among 102,089, with all six DMA addresses covered and no skipped
+sizes or unmatched syncs. Each silent event's last stable, nonzero task sync
+belongs to the preceding buffer generation: that buffer was not fed during its
+latest observed reuse cycle. Several read-stage intervals, including file read
+and lookahead, cross the refill deadline. Other events have old read/decode
+landmarks and require a more precise current-stage/task observation. Buffer
+alignment is not established as the cause. The UI completes 614 updates, with
+a largest interval of 1.345 seconds including startup; this run alone does not
+establish visible-frame timing or every displayed second. The next small probe
+adds current playback stage and interrupted-task identity to the existing silent
+records, plus clock-second anomalies during active playback. No buffer, priority,
+driver or persistence behavior changes are proposed from these data alone.
+
+The task/stage run stops after five silent records among 23,174 completed
+buffers. One record directly observes LVGL running on core 1 while
+audio's last checkpoint is its gain loop; source confirms LVGL's configured
+priority 6 exceeds audio's priority 4. Other records show audio decoding or
+the idle task while the driver waits following missed feeding. All 154 submitted
+clock updates during the run have no active-playback repeated/skipped UTC seconds,
+with a largest interval of 1.083 seconds. This is software-update evidence, not
+a physical video or acoustic capture.
+
+Source inspection finds that the BSP's default LVGL task has no core affinity;
+the earlier audio-on-core-1 correction therefore did not ensure drawing stayed
+on core 0. The UI heartbeat is also unpinned and shares LVGL's inherited-priority
+display mutex. The disclosed bounded correction selects core 0 for both existing
+display tasks: use the public BSP configuration with the same rotation, triple
+partial buffering, touch flags, adapter defaults and priorities, and pin the
+existing heartbeat with ordinary task creation. Both startup paths use that
+configuration. Audio remains on core 1; weather and clock placement remain.
+No helper, task, driver fork, buffer enlargement or file cache is added. Test
+the same automatic Rain workload and normal weather spacing before accepting
+this placement correction; file-read spans can include preemption and do not
+yet justify a separate streaming change.
+
+The matched core-placement comparison completes on October 14. Automatic
+Rain/50%/Continuous runs for 591.41 measured seconds, crossing about 15 repeats
+and the next ordinary ten-minute weather request. Both startup and ordinary
+requests return HTTP 200 on core 1. Of 101,845 inspected completed 512-byte PCM
+buffers, none is wholly silent; all six DMA addresses are covered, with no
+unmatched cache-sync observation, unexpected buffer size/address or dropped
+record. All 613 submitted UI updates have a largest interval of 1.094 seconds,
+including startup; active playback has no repeated or skipped submitted UTC
+seconds. This closes the measured audio-feeding and clock/weather scheduling
+failures for this workload. The callback inspects buffer memory rather than
+speaker output and adds cache writeback; it cannot exclude every partial glitch,
+repeated nonzero audio sample or physical display delay.
+
+All temporary measurement and automatic playback/stop code is removed. Normal
+source hashes match the removal checkpoint while retaining the binary weather
+gate, core placement and earlier established fixes. The first native pass has
+43 successes and a 15-second UI-shell timeout while a firmware build runs
+concurrently; that unchanged UI check then passes alone in 11.74 seconds, and
+the complete 44-check suite passes alone in 16.51 seconds. No timeout or test
+expectation was relaxed. ESP-IDF 5.5.5 builds normal firmware (17,202,400 bytes,
+18% application partition free; binary SHA-256
+`d22814ffef16e3ca301674d0964a84c468d6ab081b8f35e878acb739d26033f5`).
+The application load is hash-verified; its boot ELF identity matches the normal
+build, display/touch initialization succeeds, and Visual Crossing returns HTTP
+200 with live weather published. Startup remains Stopped, without diagnostic
+preference changes. Physical acoustic output and touch presses were not retested
+after that final normal load.
+
+The retained board-debug changes, measured against the saved initial Sound
+Machine software checkpoint, reduce runtime C source by three lines, add six
+SDK configuration lines and add 55 native-test/helper lines: 58 net source/config
+lines in total, excluding the feature implementation and documentation. No new
+source path, application task, queue, allocator, driver fork or playback cache
+is added. All diagnostic probes are removed, including 190 tagged lines in the
+last measurement variant; task-owned temporary ELF/WAV outputs are retired.
+The [local full accounting](../.reviews/sound-machine-sprint-2026-10-13/board/timing-closure.md)
+records causes, retained changes, costs, rejected experiments and verification
+limits. Rain loudness and the remaining whole-feature acceptance checks stay
+separate. No commit or push was performed.
+
+The earlier `frame-trace-runtime.log` capture, after its playback stopped,
+records ordinary weather TLS failures allocating AES transfer descriptors/alignment buffers and a nonfatal
+CPU-1 idle watchdog during a subsequent connection attempt. No HTTP quota
+response is received. Lazy audio initialization/mounting retains resources;
+the internal free total falls from 93,211 after startup weather to 77,195 after
+audio closes, while closing returns 37,332 bytes of playback allocations.
+Source review confirms that the reported 31,744-byte largest internal block
+does not establish DMA availability: RTC RAM lacks DMA capability. Fixed
+diagnostics also reduce headroom but cannot alone explain the within-image
+drop. Attribution, recovery and normal-firmware weather/audio overlap remain
+unverified. Do not change speaker retention, weather retry behavior or TLS
+placement from these totals alone; reduce disposable history and measure the
+appropriate memory capability first. The failed-request and watchdog evidence
+is retained with the frame trace.
+
+Independent SDK review rules out assuming that NVS occupies the PSRAM's external
+bus: this P4 has independent flash and PSRAM interfaces. The selected flash path
+also keeps cache/interrupt access enabled. The display driver nevertheless
+restarts its DMA transfer in software after every frame. The new measurement
+will check those intervals and whether mapped flash-cache invalidation actually
+occurs; elapsed storage-call time alone cannot identify the blocking operation.
+The user's acceptance remains no observed flash during normal saves, including
+a single save, rather than merely fewer flashes or a different fallback color.
+
+An independent review initially proposed a shared interrupt-dispatch lock between
+display DMA and audio DMA. Parent source and compiled-code verification rejected
+that claim: the audio driver's shared-interrupt flag is conditional and is not
+enabled on P4. The audio allocation uses `0x80e` (or `0xc0e` with IRAM), without
+the `0x100` shared flag; it does not use that shared handler. This lead is
+withdrawn. A separate common cache-operation lock remains a possible coupling,
+without evidence that it causes the flashes. The display's default shared
+interrupt priority is inferred from source and remains unconfirmed on the
+running board. Choose a subsequent measurement or intervention from the current
+frame results rather than treating another priority change as an established fix.
+
+Read-only review identifies two credible remaining paths: the heartbeat's
+one-second schedule is not aligned with clock-second boundaries, so small
+sampling variation can repeat one second and skip the next; a failed 250 ms
+display-lock attempt also skips that update. Neither has been measured on this
+board. The existing capture contains no display-lock-failure log. A temporary
+anomaly-only timing probe is prepared in existing `main.c`: it records submitted
+UTC steps, the sample's fractional second and age, snapshot/lock/object-update
+times and schedule overruns. Logs run after releasing the display lock. These
+are object-update measurements, not proof of visible-frame completion. No new
+task, faster full-screen polling or source path is introduced. The firmware
+build passes (`0x10697c0`, 18% application partition free), and rebuilt native
+touch-recovery/alarm-command checks both pass; those checks do not execute the
+heartbeat probe. This cadence-only image was not loaded. The next comparison
+combines this measurement with the corrected color-marker apply step described
+above. Measure the hand with playback stopped and collect matched Rain-volume
+results before choosing a correction. Remove all temporary probes after diagnosis.
+
+The user also reports a weather-update failure followed by recovery on October
+14. A fresh passive serial capture is opened without resetting the board or
+requesting extra weather. No earlier failed HTTP response was captured, so the
+cause of that event is unknown. The later ordinary refresh and subsequent
+comparison startup both return `200` with `queryCost=1`; there is no current
+quota-failure evidence. Weather behavior remains unchanged.
+Earlier successful Visual Crossing requests report `queryCost=1`; normal
+ten-minute polling amounts to about 144 of these requests per day. That is not
+account-wide usage evidence. The provider's current
+[cost guidance](https://www.visualcrossing.com/resources/documentation/weather-api/what-is-the-querycost-parameter/)
+confirms forecast cost one, while its
+[error guidance](https://www.visualcrossing.com/resources/documentation/weather-api/http-error-codes/)
+requires the response body to distinguish daily exhaustion from other `429`
+limits. No key, account allowance or retry policy was changed for this report.
+
+Full-file native decoding shows Rain's average signal energy about 26.65 dB below
+generated White Noise at the same setting. Current asset hashes and recorded
+peaks were independently matched. Thunder limits a safe shared gain increase;
+raising it cannot materially close that level gap without clipping louder files.
+This is signal/source evidence, not measured acoustic output. No gain, default,
+curve, recording-level or alarm-audio change has been applied. A separate bounded
+level adjustment remains to be proposed under the user's loudness request. The
+previous absence of normalization is preparation history, not a requirement to
+preserve accidental level differences. Preserve the chosen recordings/blends and
+existing alarm behavior while distinguishing any proposed level adjustment.
+
+All-sound, repeat, timing/memory, timer/fade, priority, restart and Day/Night
+checks remain pending. Further general board testing waits for the cutout and
+blue-flash investigation; flash verification does not establish those results.
+
+Local logs, image hashes and the settings baseline are under
+`.reviews/sound-machine-sprint-2026-10-13/board/`. No commit, browser-release fix,
+push or publication was made. The adversarial report's Minor browser-preparation
+omission does not affect this complete USB installation.
 
 ### Implementation slices
 
@@ -1356,13 +2634,1109 @@ Completed so far:
 
 The approved fixes from the YAGNI/MECE review are closed. F8's unnecessary browser-adaptation task was corrected earlier. Approved unfinished development and declined choices are listed below.
 
-## Current work — reconciled October 13, 2026
+## Round enclosure STEP prototype — October 13, 2026
+
+The round enclosure prototype is exported as a main body, magnetic rear
+cover and two-solid STEP assembly, with separate STLs in the requested print
+orientations. The installed envelope is approximately 140 mm wide, 70 mm deep
+and 133.8 mm high. The user accepted cable fit and waived further cable
+measurements. The [prototype notes and actual CAD views](../.reviews/enclosure-concept-2026-10-13/round-prototype.md)
+identify the hardware inputs, construction and verification limits.
+
+The current draft incorporates the user's selected lower RTC with the
+centered cable above it. The PCB seat is now 8 mm below its initial position,
+leaving 6.3 mm under the battery holder. The latest revision lowers the RTC
+another 4 mm from the preceding draft. The cable opening is about 8 mm below
+its initial position and remains
+14 × 8 mm; its corners now have a 2 mm radius. The full measured plug
+outline clears the rounded opening in the CAD check. The STEP assembly,
+separate parts, print-oriented STLs and actual CAD preview are updated together.
+
+The speaker post-to-arm junction matches the latest modified Classic case
+while retaining the longer wall links. The current aligned STEP comparison
+found zero added or missing material versus Classic within the speaker outline
+over the full post depth. Checks against the preceding round draft show that
+the latest body changes are confined to the RTC supports and the cover changes
+to the cable opening. The user confirmed straight rearward cell removal;
+the lower approach and a rearward corridor at holder height clear the body.
+
+STEP reimport, solid validity and body/cover clearance checks passed. Both
+printable meshes are closed and connected with consistent winding; independent
+mechanical review found no current geometry defect. Physical speaker corner
+fit, RTC cell removal, printed tolerances and magnet retention remain prototype
+checks. Face-up printing still needs slicer inspection for internal supports.
+No enclosure was printed, and no firmware source, build or board load was
+changed by this CAD work.
+
+October 14 follow-up: the user printed the case and reports good appearance,
+a flat bottom and less resistance to tipping than the Classic case. The user
+selected two Classic-style legs with the 8° backward tilt retained, and asked
+for a mockup before STEP implementation. The [legs concept and prompt notes](../.reviews/enclosure-concept-2026-10-13/round-legs-concept.md)
+show that proposal. Leg dimensions and stability are not yet verified. The
+existing flat-bottom STEP/STL files remain the unchanged reference version;
+no legs have been implemented in CAD. No firmware source or board state changed.
+
+For comparison, the user also requested a [Classic-case visual concept](../.reviews/enclosure-concept-2026-10-13/classic-tilt-inset-back-concept.md)
+with the 8° backward tilt, revised legs and a thinner, inset rear cover. That
+mockup preserves the Classic's slimmer front rim and cylindrical profile.
+Both case references remain unchanged; cover dimensions, hardware clearance
+and any CAD implementation are still pending.
+
+The subsequent [detailed Classic interior mockup](../.reviews/enclosure-concept-2026-10-13/classic-interior/layout-notes.md)
+proposes a uniform 4.7 mm wall, a narrow rear seating lip and four local magnet
+pads rather than the thick rear band. A 3 mm flat cover sits 1 mm inside the
+rear rim. Speaker and RTC move 4 mm forward; the RTC remains horizontal with
+its holder below and rearward cell access. The temporary solid model is valid
+and shows no checked body/cover collisions, with 2 mm behind the speaker,
+4.48 mm behind the RTC and approximately 6.1 mm beneath the holder. The rounded
+14 × 8 mm passage clears the measured plug proxy and sits above the RTC.
+Independent geometry and visual review agreed. Speaker corners and wiring are
+schematic; printed fit, battery handling, magnet retention and leg stability
+remain physical checks. All 17 checked Classic/Round reference STEP/STL files
+were unchanged by hash comparison. No revised STEP/STL, maintained source file,
+firmware build or board load was produced by this mockup work.
+
+Pad revision, approved October 14: the mockup now uses 10 mm pads and 8 mm
+wide wall connections with true 2 mm radius rounds at their inside corners.
+It leaves 2.35 mm around each 5.3 mm pocket and retains the prior 6.5 mm pad
+depth and 4.3 mm floor. Both existing detailed views were updated and an
+enlarged pad section was added. The revised body is one valid solid; new checks
+find no pad overlap with the speaker, RTC, mainboard or cover. Component
+positions, cover and prior clearances are unchanged. Independent review agreed
+with the geometry and views. STEP/STL export is still pending the user's next
+instruction, and printed strength and retention remain unverified.
+
+RTC tilt revision, approved October 14: the interior mockup now tilts the
+RTC, mounting seats, posts and screws 8° with the case while keeping the
+mounting row fixed. The battery exits rearward along the case axis. The
+revised body and cover remain valid single solids; battery and power-cable
+corridors show zero checked overlaps. The holder has approximately 7.38 mm
+vertical floor clearance, the RTC has 4.46 mm to the cover, and the power
+corridor stays at least 5.43 mm above the components measured perpendicular
+to the PCB. The battery corridor clears the rear lip by 5.06 mm radially
+and its nearest post by 1.59 mm. Independent transformation, geometry and
+visual checks agreed. The cable corridor is a conservative clearance box;
+actual bends, connectors and physical cell handling remain unverified.
+All 17 reference STEP/STL hashes remain unchanged. No STEP/STL revision,
+maintained source change, firmware build or board load was produced.
+
+Front-down finish constraint: the user requires an even front appearance and
+reports visible perimeter-versus-fill differences on a lightly textured
+plate. A shallow front-ring print with perimeter-filled/concentric paths and
+the actual Tinmorry PETG-GF is proposed before committing to a full front-down
+print. This is an unperformed finish trial, not a confirmed printing result;
+no coupon, profile, enclosure geometry or STEP/STL change was made.
+
+The user then requested the 3 mm front-ring STL. The
+[finish-test file and settings](../.reviews/enclosure-concept-2026-10-13/classic-interior/layout-notes.md#front-down-surface-finish)
+are now available: 125 mm outside diameter, 115.6 mm inside diameter and
+3 mm thickness. The exported STL is closed, consistently wound and one
+connected mesh with verified dimensions; a delivery copy is in Downloads.
+The saved X1 Carbon/Tinmorry 3MF was inspected read-only. The trial recommends
+six walls, concentric bottom paths and both first-layer speeds at 30 mm/s,
+with the selected spool's working temperature and calibrated flow retained.
+Manufacturer guidance was verified separately. All 17 case STEP/STL
+reference hashes remain unchanged; no existing profile, 3MF or maintained
+source was edited. Slicing and physical surface evaluation remain pending.
+
+Wall-count clarification: four walls are now recommended for the front-ring
+trial, matching the saved case profile. Six were an optional way to occupy
+more of the rim with wall paths, not a strength requirement. Concentric bottom
+fill and both 30 mm/s first-layer speeds remain recommended. Instructions
+were updated; the STL and all case geometry are unchanged. No print result
+has been established.
+
+Rear-leg correction, October 14: the user's marked screenshot prompted a
+cover-removal check. The earlier mockup cleared the installed cover but had
+two small inside leg corners behind the rim that intersected rearward removal.
+The mockup now continues the circular clearance through the rearward legs.
+The full-disc sweep and the actual cover at checked offsets have zero overlap;
+the body and both feet remain valid connected solids. Both full 13 × 79.5 mm
+sole footprints and the leg-to-shell joining volume are preserved, as checked
+independently. Interior/back views and a new enlarged section show the fix.
+The RTC, magnet pads, cover and battery/cable clearances remain unchanged.
+No case STEP/STL or front-ring finish-test STL was changed. Printed fit and
+leg strength remain unverified, and the ring-print result is still pending.
+
+The user then requested a view with the cover installed. The
+[installed-cover mockup](../.reviews/enclosure-concept-2026-10-13/classic-interior/Classic-Back-Cover-Installed-Mockup.png)
+shows the assembled rear and an enlarged leg-to-rim junction using the same
+corrected geometry. Rebuilt parameters/checks and independent visual review
+agree with the preceding model. No geometry, STEP/STL, profile or firmware
+change was made for this additional view.
+
+Integral-leg rethink, October 14: the user rejected a separate printed stand
+and requested a new one-piece mockup with the 8° tilt retained. The
+[preceding curved-leg proposal](../.reviews/enclosure-concept-2026-10-13/classic-interior/layout-notes.md#earlier-curved-leg-proposal)
+shows the back installed and removed, an enlarged connection and a side view.
+The proposed legs widen from 13 mm to 16 mm while retaining the full 79.5 mm
+sole length. Curved connections end 15.5 mm forward of the rear rim; lower
+heels retain the rearward stance. Model checks find one valid connected body,
+complete sole contact areas, clear cover removal and unchanged interior
+hardware positions and clearances. Printed strength and tipping resistance
+remain unverified. The user reports visible imperfections in the first ring's
+concentric underside and is testing front-down printing on a more textured
+plate. The second finish result is pending. No enclosure STEP/STL, ring STL,
+profile, maintained source or firmware change was made for this mockup.
+
+Straight-leg follow-up, October 14: the user rejected the curved full-depth
+side panels as still the same basic leg structure and a printability concern.
+The [preceding candidate](../.reviews/enclosure-concept-2026-10-13/classic-interior/layout-notes.md#earlier-short-straight-leg-proposal)
+uses two short 12 × 14 mm rectangular legs above flat 16 × 79.5 × 6 mm feet.
+The case and legs remain one piece at 8°. Actual shell connections span case
+depth 20.70–36.90 mm, ahead of the rear rim. The installed-cover and side
+views show this structure; blue lines identify downward faces needing print
+supports in the front-down orientation. Model checks find one valid connected
+body, complete sole contact areas, clear cover removal, approximately 7.01 mm
+clearance to the rear shell band and unchanged interior checks. This is a
+proposal, with slicing, printed joint strength and tipping resistance still
+unverified. STEP/STL files, the ring test and firmware are unchanged.
+
+Front-face constraint, October 14: the user requires no support contact on
+the visible front face. A [printing-orientation diagram](../.reviews/enclosure-concept-2026-10-13/classic-interior/Classic-Front-Down-Print-Orientation.png)
+shows the full front ring flat on the plate, with the entire model rotated
+from its assembled pose. Solid checks find no material below that plane,
+leg material starting 0.33457 mm behind it and a complete first 0.20 mm ring
+layer. The 8° assembled tilt remains built into the case-to-foot relationship.
+Support needs on leg/foot faces are distinct from the visible front ring.
+No geometry, STEP/STL, slicer profile or firmware change was made; slicing
+and the more-textured-plate test result remain pending.
+
+Solid-leg follow-up, October 14: the user rejected the thin legs and requires
+substantial integral legs, straight case intersections, a flat front on the
+print bed and no awkward rear overhangs. The
+[updated mockup](../.reviews/enclosure-concept-2026-10-13/classic-interior/layout-notes.md#current-solid-leg-proposal)
+uses 16 mm wide solid legs with four straight junction lines across the full
+case depth. Their fronts share the front ring's plane. Flat soles are now
+80.681 mm long, extending the front toe by 1.18 mm to meet that plane; the
+8° tilt and 90.42 mm overall stance width remain. Roots end flush with the
+rear plane, and lower heels clear the rear shell by approximately 3.335 mm.
+Parent and independent geometry checks agree on one valid connected body,
+complete sole contact, zero volume below the print bed, no downward-facing
+exterior faces above it and clear rear-cover removal. Shared hardware,
+battery and cable dimensions and clearances are unchanged. Front/rear
+views with the installed cover and a side/print-section detail were reviewed.
+All 17 case references and both ring-test copies retain their hashes. This
+is a mockup only: interior features still need supports; slicing, printed
+strength, stability and physical fit remain unverified. STEP/STLs, profiles,
+maintained source and firmware are unchanged. The textured-plate trial
+result remains pending.
+
+STEP/STL export, October 14: the current solid-leg Classic geometry is now
+exported as an assembly, separate body/cover STEP parts and front-down body /
+outer-face-down cover STLs. The
+[files and checks](../.reviews/enclosure-concept-2026-10-13/classic-interior/layout-notes.md#step-and-stl-files)
+preserve all saved mockup parameters and checks. STEP reimport yields a valid
+single body, single cover and two-solid assembly, with negligible adaptive
+volume differences and zero checked hardware/service interference. Both STLs
+are closed, consistently wound, connected meshes with no boundary, nonmanifold
+or degenerate elements; volume differences are below 0.03%. The body front ring
+and both leg fronts contact Z = 0, with an approximately 125 × 139.24 mm print
+footprint and 79.90 mm height. The cover prints 3 mm high with pockets up.
+Independent export review agrees on the key dimensions, mount geometry and
+print orientations. Five distinct delivery copies are in the user's Bambu Lab
+clock directory; all 17 prior case references and both ring copies are preserved.
+This export does not establish sliced supports, printed fit, joint strength,
+tipping resistance, magnet retention or physical cell removal. The textured-plate
+trial result remains pending. No maintained source, firmware build, board load
+or printer profile was changed.
+
+Naming follow-up, October 14: the user selected **Orbit Case**. The five newly
+copied STEP/STL files in the Bambu Lab working directory now use the
+`Orbit-Case` prefix. Hash checks confirm unchanged contents; original reference
+files and project evidence filenames are preserved.
+
+Flush-rear Orbit revision, October 14: the user selected rear foot ends
+directly below the upper rear cabinet rim and a flat cut from the desk-contact
+bottoms to preserve the original end thickness. Rear Y changes from −70 to
+−58.706856 mm. Removing 1.587148 mm from both flat soles, then lowering the
+whole assembly equally, retains the upper heel profile and 6.582315 mm rear
+thickness. The soles are now 16 × 69.164901 mm; the 8° tilt and 90.42 mm
+overall stance width remain. Hardware positions inside the case and all
+checked battery, cable and cover clearances are preserved. Parent and
+independent reopened-STEP comparisons find exactly the two requested cuts,
+with zero unplanned added or missing volume. Valid body/cover solids,
+two-solid assembly, complete front-bed contact, straight joins and closed,
+connected STLs pass their checks. The
+[updated files and preview](../.reviews/enclosure-concept-2026-10-13/classic-interior/layout-notes.md#current-solid-leg-proposal)
+are saved, and all five Orbit files in the Bambu Lab working directory are
+updated. Current project filenames now also use Orbit. Working Bambu exports
+were replaced; the existing long-foot project exports and images remain
+evaluation references for comparing stability while this prototype is tested.
+No new backup copies were created. All 17 original case references and both
+ring-test copies retain their hashes.
+The body print envelope is approximately 125 × 137.64 × 68.49 mm. Slicing,
+physical fit, printed strength, tipping resistance and the textured-plate trial
+remain unverified. No firmware, maintained source or printer profile changed.
+
+Drawing refresh, October 14: the complete current Orbit set now includes
+exterior/side views, populated interior, installed cover and leg junction,
+back/magnet attachment, pad dimensions, exposed mounts/rear clearance and
+whole-body front-down print orientation. All eight sheets use the shorter
+feet and current table height; six previously missing current sheets were
+rerendered. Independent visual review checked dimensions, RTC tilt, mounting
+labels, clearances and bed contact. The
+[current drawing index](../.reviews/enclosure-concept-2026-10-13/classic-interior/layout-notes.md#current-drawings)
+links the sheets, and all eight PNGs are copied to the Bambu working directory.
+Geometry parameters/checks and both copies of all five STEP/STL files are
+unchanged. Earlier drawings remain clearly labeled comparisons. Slicing and
+physical fit, strength and stability remain unverified; no firmware or printer
+profile changed.
+
+## Review follow-up: visual diagnostics and browser recordings — October 14, 2026
+
+The user approved removing the inherited visual diagnostics and correcting the
+weather header, fixing the review's F1 browser-packaging omission, and retaining
+the UI stack monitor. Removed object/asset geometry, startup-hand and initial
+angle logs, their renderer declaration/calls, diagnostic-only UI fields and
+weather-change bookkeeping. Actual drawing, hand calculations, valid/last-good
+weather handling, navigation, warnings and alarm behavior remain. The UI
+stack-monitor source in main.c is unchanged. The weather header now describes
+the existing binary request gate.
+
+The existing browser-preparation helper now copies the generated storage image
+with bootloader, partition table and application. Its manifest includes that
+image at the current storage offset. Prepared the four-image bundle locally
+and updated its installer name/text and user guides to describe the actual
+current application and recordings. The existing version value remains;
+no version/release machinery, publication or flash was added. Architecture owns
+the retained-monitor, retired-visual-log and recording-package decisions.
+
+The first native pass reports 43/44 with the existing 15-second UI-shell timeout,
+without an assertion failure. That unchanged test passes alone in 12.04 seconds;
+the final full suite passes 44/44 in 29.61 seconds, including UI-shell at 12.20
+seconds. No test timeout or assertion was relaxed. The computer was also running
+other CPU-intensive processes; this observation does not prove the cause of the
+timeout. Forecast 53/53, location 3/3, Conditions 40/40 and messaging checks pass.
+ESP-IDF 5.5.5 builds the application at 17,200,320 bytes with 18% application
+partition free. All four staged hashes and offsets match the generated USB
+images and binary partition table, including the 11 MiB storage image built
+from exactly the nine approved recording files. Browser flashing and physical
+appearance after this cleanup remain untested; the board retains the previous
+loaded firmware.
+
+Independent review finds no credible defect or unnecessary new mechanism.
+Removed 198 UI source lines; packaging adds one copy step and one manifest entry.
+No new source file, task, queue, storage scheme or renderer abstraction is added.
+The only new bundle file is the ordinary generated recordings image. Existing
+services, stack monitor, audio and alarm-recovery source hashes are preserved.
+See [local closure evidence](../.reviews/main/post-timing-review-cleanup-2026-10-14/closure.md).
+F1 is closed for source and local package preparation; publication and board
+tests are separate actions. Other Sound Machine acceptance checks remain open.
+
+## Brown Noise cutout investigation — October 14, 2026
+
+The generator correction below is superseded by the subsequently approved
+[source-equation restoration](#noise-source-equation-restoration--october-14-2026).
+Its waveform and timing measurements describe the former generator, not the
+restored source equations.
+
+The user reported brief cutouts while leaving Brown Noise untouched. Inspection
+found that its generator limited the returned sample but allowed the stored
+integrator to exceed that limit. Ordinary random excursions then held the output
+constant while the hidden excess recovered. This is a proven waveform defect
+and a plausible explanation for quiet intervals, not yet a confirmed explanation
+of the user's listening result.
+
+Bounded the stored value at the existing limit and returned it, replacing three
+lines in the existing audio owner with no net firmware lines. Kept the random
+source, filter coefficients, gain, sample rate, chunk size, retained state and
+single audio worker. No task, buffer, priority, persistence or alarm-recovery
+change was added. Brief repeated values at the hard limit remain possible; Brown
+Noise itself does not require a flat waveform. The fix prevents stored overshoot
+from prolonging those repetitions.
+
+For each of two normal seeds, the existing native test generates two million
+samples. The firmware seed's longest Brown flat run falls from 33.878 ms to
+0.635 ms; the other seed falls from 39.365 ms to 0.454 ms. Stored state remains
+within the output bound. Brown's total RMS falls by approximately 0.65–0.67 dB,
+with approximately retained adjacent-sample energy; those calculations do not
+establish speaker loudness. White and Pink results remain unchanged. Added 17
+net lines to the existing test for the additional seed and regression checks;
+the one-millisecond margin is a software guard, not an acoustic threshold.
+
+An authorized automatic 90-second board run played Brown at temporary 50% volume
+and Continuous without saving those choices. Across 4,501 chunks, maximum
+generation/scaling was 284 microseconds, about 1.42% of each 20 ms playback
+interval. Maximum blocking codec write was 24.022 ms and maximum write-start
+interval 24.142 ms. The run included startup Wi-Fi and successful live weather;
+no panic or watchdog was captured. It did not measure transmitted silence,
+underflows, physical touch, an ordinary ten-minute refresh or audible output.
+These results weigh against slow Brown generation as the reported cause, without
+claiming every operating workload has been covered.
+
+Removed all temporary automatic-play and timing blocks, restoring the recorded
+normal audio/main source hashes exactly. Main and the retained UI stack monitor
+are unchanged by this slice. All 44 normal native checks pass in 17.74 seconds;
+ESP-IDF 5.5.5 builds at 17,200,320 bytes with 18% application partition free.
+All four staged browser images match the generated USB images and offsets.
+Loaded the normal application with written-hash verification and matching boot
+ELF identity, followed by successful display/touch initialization and live
+weather. This load also includes the preceding visual-log removal and packaging
+cleanup; browser installation remains untested and unpublished.
+
+Independent source/evidence review finds no consequential defect in this bounded
+fix. On corrected normal firmware, the user reports possibly hearing one very
+brief cutout. A subsequent automatic 720-second Brown/50%/Continuous run crosses
+an ordinary weather refresh; both startup and ordinary requests succeed.
+Generation/scaling reaches 308 microseconds, blocking write 23.908 ms and
+write-start interval 24.060 ms. A temporary completion callback inspects 61,930
+512-byte buffers over the final 719 seconds: no wholly silent or constant
+buffers, all six addresses covered, and no bad-size or extra-address observations.
+The longest zero run is two PCM samples (0.091 ms); longest equal run is 16
+(0.726 ms). Coverage matches the expected mono sample count. The callback adds
+interrupt work and an SDK cache writeback; this is instrumented buffer-memory
+evidence, excluding the first second, rather than electrical or acoustic capture.
+It weighs against sample starvation in that workload, without closing the user's
+possible residual cutout. Temporary probes and link option are removed, and the
+normal sources/image reproduce their earlier verified hashes. Final normal
+firmware is restored with written-hash and boot-identity verification, successful
+display/touch initialization and live weather. Task-owned diagnostic ELF files
+are removed. Other Sound Machine acceptance checks remain open. See the
+[local investigation and limits](../.reviews/main/brown-noise-2026-10-14/closure.md).
+
+Front-finish feedback, October 14: the user reports that the textured plate
+hides the extrusion lines but leaves a surface too rough for the desired
+appearance. A finer satin build surface is suggested for another existing-ring
+trial; a Bambu-compatible manufacturer example and its comparison photos are
+linked in the [finish notes](../.reviews/enclosure-concept-2026-10-13/classic-interior/layout-notes.md#front-down-surface-finish).
+The exact Tinmorry PETG-GF combination is untested and no plate purchase or
+profile change is approved. This report establishes a surface result, not
+full-case fit or stability. Geometry, STEP/STL files and drawings are unchanged.
+
+## Noise source-equation restoration — October 14, 2026
+
+The user identified soundmachine.app as the intended source and approved
+restoring its White, Pink and Brown calculations, removing our generator
+clipping and retaining the existing output gain. The proposed -20 LUFS
+normalization was explicitly withdrawn. The website's current `noiseBuffer`
+source was compared directly; the earlier implementation had halved White,
+clipped Pink and changed Brown's coefficients as well as clipping it.
+
+Restored the equations in the existing audio owner. Retained the uniform
+pseudorandom input, single-precision implementation, 22,050 Hz/441-sample chunks,
+continuous filter state, existing output gain/volume/fade and final PCM conversion
+guard. The website creates 32,000 Hz buffers; its mixer, finite loops and sound
+gains are outside this slice. Generated peaks increase as discussed with the
+user. No audio worker, buffer, task priority, settings or alarm behavior changes.
+The specification owns the approved generation rule and source reference.
+
+All 44 native checks pass in 17.38 seconds. Frozen external-source samples cover
+ordinary Pink/Brown excursions above the former limit and unscaled Brown state;
+two million samples for each noise and seed check complete retained-state chunks,
+finite values, mean, RMS and source-appropriate high-frequency separation.
+The parent also executes the actual website JavaScript with the same input and
+confirms the frozen samples. Observed raw peaks are White 1.000, Pink .932–.951
+and Brown .973–.984; these sequences do not establish all future peaks or physical
+distortion. Existing gain, playback, recording and alarm checks remain intact.
+
+Independent review finds no credible consequential defect or unnecessary new
+mechanism. Only five audio lines are replaced, with no net firmware lines; the
+existing test adds 32 net lines. Source hashes confirm preservation outside the
+audio/test/documentation scope. ESP-IDF 5.5.5 builds at 17,200,192 bytes, with 18%
+application partition free; all four staged images match the generated images.
+Authorized app-only flash verifies the written hash and boot ELF identity. Normal
+display/touch initialization and live weather succeed, without a captured crash
+during startup and its settling interval. No settings erase or test preference
+write is performed. The user confirms all three restored noises are continuous
+and clear in the prompted roughly 30-second-per-noise listening check at their
+usual volume. The previous cutout is not reported in this check. This does not
+establish long-run peak/distortion limits, physical stopping or worst-case board
+timing under all activity; the former Brown measurements do not establish them.
+See [local restoration evidence](../.reviews/main/noise-source-restoration-2026-10-14/closure.md).
+
+## Recorded-sound playback gain — October 14, 2026
+
+Status: implemented and verified in software by Development Orchestration on
+October 14, 2026. Flashed under the user's subsequent explicit authorization;
+startup verification and the requested board listening checks pass.
+
+The user approved fixed on-clock gain for the nine existing mono recordings,
+using one common boost for seven sounds and two exceptions set by peak headroom.
+The authoritative values and implementation rules belong in the
+[recorded-sound gain specification](architecture.md#recorded-sound-playback-gain).
+Original and prepared MP3 files remain unchanged. The separate -20 LUFS exports
+are listening previews, not selected production replacements or a normalization
+requirement. Generated noise retains its restored equations and existing gain.
+
+The existing audio owner's gain calculation now combines the fixed recording
+boost once per chunk, before its existing sample loop and conversion guard.
+Only this production calculation changes: seven lines replace four, for three
+net firmware lines. The existing test adds 54 net lines. No new source file,
+runtime task, processing pass, configuration setting or persistence is added.
+The volume curve, timer fade, repeats, playback priority, error behavior and
+codec output setting are preserved. The restored noise equations and gain,
+alarm paths and all original/prepared MP3 bytes are unchanged.
+
+All 15 audio checks pass, followed by all 44 native checks. Independent
+dB-derived expectations cover all nine recording selections and unchanged noise
+gain, zero/partial/full volume, timer bounds, and recording worker output through
+live volume changes, fades and two repeats. These worker checks use simulated
+decoder PCM; they do not execute the target decoder. An independent review finds
+no credible defect or unnecessary mechanism within this slice. ESP-IDF 5.5.5
+builds successfully at 17,200,336 bytes, with 18% application partition free
+(144 bytes more than the noise-restoration build).
+
+An independent complete host decode of all nine prepared MP3s matches the retained
+sample counts and peaks; all 18 original/prepared file hashes match before and
+after. The maximum-volume PCM conversion simulation reaches its guard zero
+times. The smallest reconstructed peak margin is 3.614 dB at PCM output, or
+0.115 dB after the estimated codec gain. This narrow latter margin is a computer
+estimate, not measured analog clearance or proof of distortion-free board
+playback. The host measurements alone do not verify actual target decoding or
+physical output. The board and staged browser-install images remain at the
+previous noise-restoration firmware at the software checkpoint. The subsequent
+authorized application-only flash loads the verified recording-gain build with
+a matching written hash and boot ELF identity (`e6601b3c4…`). Display/touch
+initialization and the first live weather request succeed, with no captured
+panic, abort or watchdog failure during startup and the settling interval.
+Saved settings, bootloader, partition table and MP3 storage are not rewritten.
+The staged browser-install images still contain the prior noise-restoration
+build; no commit, push or merge occurred. The user confirms all nine recordings
+sound good with no distortion or cutouts in the requested brief listening check
+at their usual volume, including maximum-volume checks of Rain, Thunder, Campfire
+and Singing Bowl. This closes the gain slice's requested listening checkpoint;
+it does not measure acoustic levels or establish every long-run workload.
+Subsequent listening feedback identifies a separate balance issue: Night and
+Campfire sound soft relative to the other recordings, while White/Pink/Brown
+Noise are still too loud. Clarity/cutout acceptance remains recorded; relative
+loudness needs adjustment.
+Complete-file host RMS measurements support the level difference, but are not
+perceived-loudness targets. Night has substantial estimated peak clearance;
+Campfire's isolated peaks leave only about 0.115 dB after estimated codec gain
+at maximum volume in the first build.
+
+The user subsequently approves trying the larger output boost for both Night
+and Campfire, plus the proposed noise-output reductions. The current values and
+accepted Campfire clipping tradeoff are in the
+[gain rules](architecture.md#recorded-sound-playback-gain); the earlier values
+and listening acceptance above describe the preceding build. The adjustment
+changes only the existing gain selection, with three net firmware lines and
+34 net test lines. MP3 files, generator equations, volume curve, fade, alarms,
+codec setting, final PCM guard and playback ownership remain unchanged. No new
+source path, setting, state, task or processing pass is added.
+
+All 15 focused audio checks and all 44 native checks pass. Independent dB-derived
+expectations cover all 12 choices and the existing volume/fade checks; constructed
+loud Campfire samples verify positive/negative saturation without integer
+wraparound while quieter samples retain their scaling. Read-only independent
+review finds no actionable defect or unnecessary mechanism. ESP-IDF 5.5.5 builds
+at 17,200,352 bytes, with 18% partition free, 16 bytes above the preceding build.
+Full signed16 host decodes at maximum volume reach the final guard for 63 of
+Campfire's 1,454,328 samples (about 0.0043%); the other eight recordings reach it
+zero times. This numerical result does not determine whether the crackles sound
+distorted or measure physical output. The ongoing listening experiment's
+application-only comparison flash verifies its written hash and boot ELF identity
+(`515463814…`). Display/touch initialization and live weather status 200 succeed,
+with no captured panic, abort or watchdog failure through the post-weather
+settling interval. No settings, MP3 storage, bootloader or partition table is
+rewritten. The staged browser-install images remain at the earlier noise-source
+restoration build. The user confirms the balance is better for Night, Campfire
+and all three generated noises in the requested same-volume comparison, and
+Campfire sounds acceptable at 100% in the requested high/lower-volume check.
+This closes the balance-adjustment listening checkpoint; it does not establish
+measured acoustic levels or absence of clipping. No commit, push or merge is
+performed. Evidence belongs in
+[the balance check](../.reviews/main/sound-level-balance-2026-10-14/closure.md).
+See [relative-level evidence](../.reviews/main/recorded-playback-gain-2026-10-14/relative-levels.json).
+See [slice verification](../.reviews/main/recorded-playback-gain-2026-10-14/closure.md)
+and its linked peak evidence.
+
+The earlier gain-only demos and computer peak checks are retained under
+`.reviews/sound-machine-gain-demos-2026-10-14/`; they do not establish board
+playback or analog-output behavior. The retained demo settings predate the final
+common-gain simplification; follow the authoritative architecture values.
+
+## Clock shortcut spacing — October 14, 2026
+
+The user's board photo shows the speaker crowding the start of Wednesday on
+the Analog clock. The backup-clock warning uses a mirrored fixed position and
+has the matching risk on the right. The existing shortcut test uses Friday and
+checks coordinates without measuring clearance from the longer weekday text.
+The bounded correction moves both shortcuts outward equally, preserving the
+weekday/date fonts and positions, vertical icon alignment, 88×80 tap-area sizes,
+alarm shortcut and navigation. No new layout mechanism, source path or asset is
+needed. Firmware and the official mockup now move both shortcuts outward by
+24 pixels. The new text-bound assertion reproduces the overlap on the old layout
+and passes for all 28 weekday/face/appearance combinations after the correction.
+Wednesday measures 201 pixels wide, with minimum remaining icon clearances of
+16 pixels for the speaker and 13 for the warning. Date labels remain clear;
+warning and stopped/playing speaker icon taps reach their expected screens
+without settings writes. Unavailable-time positions follow the same horizontal
+shift, with their existing vertical placement preserved.
+
+Parent verification passes all 44 native checks in 17.47 seconds. ESP-IDF 5.5.5
+builds at 17,200,352 bytes, with 18% partition free and no size increase from
+the audio-balance build. All 11 inline mockup script blocks parse and both source
+positions match firmware; browser rendering was not checked. The production
+change replaces two coordinate values, with no new source file or runtime
+mechanism. The existing UI test adds 72 net lines to cover actual text bounds
+and navigation. The subsequently authorized application-only flash verifies
+written-data hash and boot ELF identity (`de829d797…`). Display/touch
+initialization and live weather status 200 succeed, with no captured panic,
+abort or watchdog failure through the post-weather settling interval. Saved
+settings, MP3 storage, bootloader and partition table are not rewritten. The
+official mockup's two saved positions were rechecked after the user's reminder
+and match firmware for both faces and appearances. The user confirms the spacing
+looks good and icon taps work in the requested Analog Wednesday check, with the
+warning included when visible. This closes that basic physical checkpoint; it
+does not establish every face/appearance or independently confirm that a warning
+was present in the check. Staged browser-install images still hold the earlier
+noise-source-restoration build. No commit, push or merge occurred. See
+[local spacing evidence](../.reviews/main/clock-shortcut-spacing-2026-10-14/closure.md).
+
+## Routine clock footer removal — October 14, 2026
+
+The user approved removing routine Wi-Fi and weather-fetching messages from the
+clock display while preserving meaningful weather and clock warnings. The
+[earlier inventory](../.reviews/main/footer-status-inventory-2026-10-14/report.md)
+records the inherited messages before this change; it is historical evidence.
+The bounded edit removes their startup seed and weather-worker publications in
+`main/main.c`, rather than adding a display filter. Setup feedback still comes
+from connectivity/settings, and operational logs and all network/retry schedules
+remain. The initial empty-weather presentation is unchanged.
+
+The existing publication helper now retains warning text when a connection
+update supplies no text. Losing Wi-Fi with retained weather marks it stale and
+uses the existing weather-failure notice. A retry no longer replaces a warning
+with Fetching live weather; only a successful download clears it. Existing
+clock/Forecast/Conditions warning wording, positions, Night visibility, storm
+warnings, Clock paused, Waiting for sync and backup-clock notices remain.
+There is no new module, source path, task, queue or storage. The official mockup
+already omits these routine footers, so no mockup edit is needed.
+
+Verification passes all 44 native checks in 16.97 seconds. The existing worker
+checks now cover quiet setup and connection waits, retained warnings during
+requests/retries and Wi-Fi loss, successful clearing, retained weather and
+unchanged scheduling. Existing LVGL checks retain weather/clock warning rendering
+and navigation. These are controlled inputs, not live network observations.
+ESP-IDF 5.5.5 builds successfully at 17,199,856 application bytes, with 18% of the
+application partition free. An independent gpt-6.1-sol/high review found no
+credible defect or needed structural addition and independently reran the worker
+test successfully. Source inspection confirms the eight removed Wi-Fi/setup/fetch
+text values are absent from the weather worker; only the two existing weather
+failure texts remain. The source-path check and `git diff --check` pass. Build
+and test logs are retained under `.reviews/main/quiet-clock-status-2026-10-14/`.
+No new source file, commit, flash or published browser-image update is part of
+this slice; physical rendering remains unverified on this build.
+
+## Notification walkthrough — October 15, 2026
+
+The approved firmware items below are now implemented and verified in the
+[notification sprint](#sprint-approved-notification-changes--authorized-october-15-2026).
+Their earlier pending statements record the decision-by-decision checkpoint.
+
+The user requested a fresh comparison of implemented notices against the official
+mockup, with keep/remove/change decisions made one at a time. Earlier proposed
+alarm-failure pop-ups are not approved or implemented. Firmware changes are being
+collected for later implementation; this walkthrough updates the mockup and
+records the approved decisions.
+
+Approved firmware changes:
+
+- **First weather download on Analog and Digital — approved; firmware pending.**
+  Apply the [waiting presentation](architecture.md#weather-contract) during failed
+  attempts before any weather arrives, removing the additional failure footer.
+  The official mockup now uses that waiting layout for both its waiting and
+  failure preview states on the two clock faces. This approval did not change
+  Forecast or Conditions. The current firmware source and loaded board
+  have not received this change.
+- **Failed refresh on Analog and Digital — approved; firmware pending.**
+  Apply the [retained-weather notice rule](architecture.md#weather-contract),
+  replacing the long bottom failure footer with the actual age or stale notice
+  in the existing weather area. The official mockup's age-unavailable wording
+  is now `Weather data stale`. Its age-known example and both notice positions
+  are retained. Firmware still needs the age calculation, fallback selection,
+  placement and removal of the additional footer; the current source and board
+  have not received these changes. This approval did not change Forecast or
+  Conditions.
+- **Forecast before the first successful download — approved; firmware pending.**
+  Apply the [Forecast waiting rule](architecture.md#weather-contract), replacing
+  `Updating…` with `Waiting for weather…` and removing the separate first-download
+  failure notice. Preserve the existing firmware's unknown provider dates and
+  temperature placeholders, hidden icons, frames, retries and Day/Night waiting
+  visibility. The official mockup now reflects this rule, including `--` instead
+  of sample day names while waiting. The current source and board remain
+  unchanged; retained Forecast weather and Conditions are separate decisions.
+- **Forecast retained-weather notice placement — approved; firmware pending.**
+  Move the [retained-weather notice](architecture.md#weather-contract) directly
+  above the primary forecast's day heading, using the approved comparison's
+  y120 instead of y48. The official mockup now reflects this placement. Keep the
+  22px font, colors, existing Night hiding and all other forecast positions and
+  behavior. This approval covers placement; the existing `Weather data stale`
+  wording is unchanged, and the elapsed-age wording shown as an alternative in
+  the comparison has not been separately approved for Forecast. The current
+  firmware source and loaded board have not received the placement change.
+- **Conditions before the first successful download — approved; firmware pending.**
+  Apply the [Conditions waiting rule](architecture.md#weather-contract): change
+  the curved heading to `Waiting for weather…` and remove the separate bottom
+  failure notice. The official mockup now uses this presentation for both its
+  waiting and first-download failure preview states. Preserve the existing
+  compass, column icons, unavailable readings, heading size/colors, Day/Night
+  heading visibility and retries. Retained Conditions weather remains a separate
+  decision. The current firmware source and loaded board are unchanged.
+- **Conditions retained-weather notice wording — approved; firmware pending.**
+  Apply the [retained-weather age/fallback rule](architecture.md#weather-contract)
+  below the three Conditions readings. The official mockup now uses the shared
+  age-known example (`Weather updated 2h ago`) or `Weather data stale` when time
+  is unreliable. Keep its existing position, 22px font, colors, Night hiding,
+  retry behavior and clearing after a successful download; use no ending period.
+  Actual age tracking and selection remain pending firmware work. No current
+  firmware source or loaded-board behavior changed with this approval.
+- **Backup-clock Dismiss failure diagnostic — approved; firmware pending.**
+  Apply the [log-only failure rule](architecture.md#time-and-rtc): remove the
+  on-screen `Dismiss failed (...)` diagnostic and retain the technical detail
+  in logs. Preserve the warning, pending/acknowledgment handling and ability to
+  retry; a failed submission must not dismiss the notice. The official mockup
+  already has no diagnostic line, so no mockup edit is needed. The firmware
+  source and loaded board remain unchanged.
+- **Alarm action submission diagnostic — approved; firmware pending.**
+  Apply the [alarm command feedback rule](architecture.md#execution):
+  remove `Action not sent. Try again.` from the screen and retain the existing
+  technical log. Preserve rejection handling, the actual alarm state, pending
+  rules, retry controls and restart recovery. The official mockup already omits
+  this diagnostic; no mockup edit is needed. Firmware implementation remains
+  pending, with the source and loaded board unchanged. This decision does not
+  cover execution, storage or audio errors.
+- **Alarm action execution diagnostic — approved; firmware pending.**
+  Apply the [alarm command feedback rule](architecture.md#execution): remove
+  `Action not applied. Try again.` from the screen and retain the existing
+  technical logs. Preserve completion matching, rejection handling, the actual
+  alarm state, pending rules, retry controls and restart recovery. The official
+  mockup already omits this diagnostic; no mockup edit is needed. Firmware
+  implementation remains pending, with the source and loaded board unchanged.
+  This decision does not cover storage or audio errors.
+- **Alarm operating-record storage captions — approved; firmware pending.**
+  Apply the [alarm storage feedback rule](architecture.md#alarm-and-snooze): remove both
+  `Could not save alarm state.` and `Alarm storage error.` from the alarm
+  surfaces and retain their technical details in logs. Preserve live alarm
+  actions, read/write failure handling, stored records and restart recovery.
+  Alarm On/Off and settings-save feedback are outside this decision. The
+  official mockup already omits both captions; no mockup edit is needed.
+  Firmware implementation remains pending, with the source and loaded board
+  unchanged. Audio failures remain a separate item.
+- **Alarm audio failure caption — approved; firmware pending.**
+  Apply the [alarm audio feedback rule](architecture.md#execution): remove
+  `Alarm audio unavailable.` from the ringing screen and log playback failures.
+  Add the missing application logging for runtime playback failures; existing
+  startup and lower-level driver logs do not cover every playback failure.
+  Preserve audio failure/retry handling, live alarm state, Snooze, Dismiss and
+  restart recovery. Preview and Sound Machine editor feedback is outside this
+  decision. The official mockup already omits this caption; no mockup edit is
+  needed. Firmware implementation remains pending, with the source and loaded
+  board unchanged.
+
+Approved unchanged notices:
+
+- **Clock paused — approved to keep unchanged.** Preserve the existing
+  [time warning](architecture.md#time-and-rtc). Its text, icon, position,
+  appearance and behavior already match the official mockup; no mockup or
+  firmware edit is needed for this decision.
+- **Waiting for sync — approved to keep firmware unchanged.** Preserve the
+  existing [backup-time notice](architecture.md#time-and-rtc). The official
+  mockup's clock-notice icon now uses stroke 2, matching the firmware icon's
+  source geometry; the override is limited to the clock-notice row. Other icons,
+  wording, layout, colors and behavior are unchanged. No firmware work is
+  required for this decision.
+- **Time unavailable — approved to keep firmware unchanged.** Preserve the
+  existing unavailable-time screen and behavior. The official mockup's `--:--`
+  now uses the firmware font's glyph pixels at the firmware's spacing and
+  vertical position; its Day/Night text color still follows the existing theme.
+  The small mask is embedded in the existing mockup assets, with no new asset
+  file. Wording, other controls, and firmware are unchanged. No firmware work is
+  required for this decision.
+- **Backup Clock Lost Time / Check Battery — approved to keep unchanged.**
+  Preserve the existing [backup-clock warning](architecture.md#time-and-rtc)
+  and its Dismiss behavior. The official mockup already represents this notice;
+  no mockup or firmware edit is required for this decision.
+- **Backup Clock Unavailable / Check Connection — approved to keep unchanged.**
+  Preserve the existing [backup-clock warning](architecture.md#time-and-rtc)
+  and its Dismiss behavior. No mockup or firmware edit is required for this
+  decision.
+- **Missed Alarm — approved to keep unchanged.** Preserve the existing
+  [missed-alarm notice](architecture.md#alarm-and-snooze), its appearance and
+  tap-to-dismiss behavior. Dismissing it clears the pending notice while
+  leaving the recurring schedule enabled. No mockup or firmware edit is
+  required for this decision.
+- **Startup settings-storage failure — existing firmware preserved; mockup added.**
+  The user approved adding this existing screen to the official mockup without
+  changing firmware behavior. The `Startup Storage Failure` preview now shows
+  its current title, detail, fixed startup colors and centered layout. Its
+  error code is explicitly illustrative; no storage failure is being claimed
+  on the board. This completes the reference addition, not a firmware change.
+
+Mockup verification after the third approval: all ten executable scripts parse.
+Eight Forecast weather-state/appearance outputs pass checks for the single
+waiting message, ten unknown day/temperature labels, hidden icons, retained
+frames and unchanged populated/stale presentations. Sixteen clock-face outputs
+also pass; the earlier thirty-two home checks covered the approved age fallback
+and notice positions, and those builders are unchanged by this Forecast edit.
+The reference font measures the new waiting text at 350px within the existing
+400px area. Each edit was limited to its approved builder or wording; the
+separate browser messaging preview is unchanged. `git diff --check` passes.
+These are source-level checks; browser rendering and board appearance were not
+tested. No firmware source, build, flash or commit is part of this walkthrough.
+
+Verification after the Forecast placement approval: all ten executable mockup
+scripts parse, and eight Forecast state/appearance outputs pass the y120 notice
+placement, retained data, first-download waiting and Night-hiding checks. The
+decoded edit changes only the retained Forecast notice's y coordinate; all other
+builders and the separate browser messaging preview are unchanged. The next,
+unapproved Conditions first-download comparison uses native firmware font pixels
+and source positions for its current panel and the unchanged official Conditions
+builder for its reference panel. Both Day/Night outputs pass checks for the
+curved heading, compass, three empty columns and Day-only failure footer. An
+independent read-only source check confirmed that invalid weather retains the
+Conditions construction layout, including `-- mph`; it does not take the later
+populated-weather update path. `git diff --check` passes. These are source-based
+reconstructions, not board captures; no new Conditions decision or firmware
+implementation is recorded.
+
+Verification after the Conditions waiting approval: all ten executable mockup
+scripts parse, and sixteen Conditions weather-state/appearance/storm outputs
+pass the single curved waiting message, preserved compass/icons/placeholders,
+removed first-download footer and unchanged retained-weather notice checks.
+The edit is confined to the Conditions builder; the separate browser messaging
+preview is unchanged. The next retained-weather comparison passes both Day and
+Night, using firmware font pixels and source positions with illustrative weather
+values alongside the official builder. Its existing `Weather data stale` wording
+and bottom position remain unchanged. The proposed elapsed-age wording for
+Conditions is unapproved; no firmware implementation, build, board test, flash
+or commit is included. `git diff --check` passes.
+
+Verification after the Conditions retained-weather approval: all ten executable
+mockup scripts parse, and thirty-two Conditions state/appearance/time-trust
+outputs pass age selection, stale fallback, the unchanged position and Night
+hiding, and the approved first-download waiting layout. Forecast remains at its
+approved position with its existing stale wording. The next `Clock paused`
+comparison shows notice details only; its four face/appearance combinations
+pass. Independent source inspection confirms matching text, muted colors,
+28px font, warning-icon pixels, 10px gap, row positions and Night visibility.
+The existing keep decision is preserved; no new Clock-paused change is proposed.
+These are source-based comparisons, not board captures. No firmware source,
+build, flash or commit is included; `git diff --check` passes.
+
+After the explicit `Clock paused` keep approval, that decision is recorded above
+without changing the already-matching mockup or firmware. The next `Waiting for
+sync` notice-detail comparison passes all four face/appearance combinations.
+It uses the native 28px font and actual 28x28 clock alpha image alongside the
+official reference's CSS and Lucide clock. Independent read-only inspection
+confirms the RTC/network-time meaning, clearing and priority, and the matching
+wording, positions and muted colors. The firmware clock outline uses stroke 2;
+the reference uses 1.6. Keeping the firmware notice and matching the reference's
+icon weight to it is a proposal awaiting approval. No official mockup, firmware
+source, build, board test, flash or commit is changed by this next comparison.
+Browser rendering remains unverified; `git diff --check` passes.
+
+After the `Waiting for sync` approval, its keep decision and scoped mockup icon
+update are recorded above. All ten executable official scripts parse, and four
+clock-face/appearance checks preserve the sync notice text and row geometry.
+The scoped stroke-2 override leaves other icons at their existing stroke weight
+and the separate browser preview unchanged. The next `Time unavailable`
+comparison passes four Day/Night and saved-Alarm On/Off variants, using native
+font pixels for the current panel and the unchanged official screen markup.
+It includes no missed-alarm notice; that existing variant is a separate item.
+The current placeholder uses the tight digit font and -2px spacing, while the
+reference uses ordinary browser text metrics and zero spacing. Keeping firmware
+unchanged and aligning that reference placeholder is an unapproved proposal.
+No firmware source, build, board test, flash or commit is included. Browser
+rendering remains unverified; `git diff --check` passes.
+
+After the `Time unavailable` keep approval, the mockup's placeholder uses the
+native glyph mask (767 embedded PNG bytes), with the same 247px text width,
+104px line box and placement as the firmware. All ten executable official
+scripts parse, and eight Day/Night, Alarm On/Off and missed-notice variants
+preserve captions and button positions. Other markup and the separate browser
+preview are unchanged. The next `Backup Clock Lost Time / Check Battery.`
+dialog-detail comparison passes both appearances with native font pixels for
+the current panel and unchanged reference markup. Independent read-only review
+confirms the wording, layout, colors, lost-time evidence and dismissal behavior;
+it is not a battery-voltage measurement. Keeping this notice unchanged remains
+a proposal awaiting the user's decision. No firmware source, build, board test,
+flash or commit is included. `git diff --check` passes.
+
+After approval to keep `Backup Clock Lost Time / Check Battery.` and its Dismiss
+behavior, that unchanged decision is recorded above. The next `Backup Clock
+Unavailable / Check Connection.` comparison passes both Day/Night appearances,
+using the same source-verified dialog layout and native title/detail fonts.
+The 422px title and 269px detail fit their existing 460px areas. Wording, colors
+and Dismiss layout agree with the official reference. Keeping this connection
+notice and its existing Dismiss behavior is a proposal awaiting approval.
+The official mockup and firmware are unchanged; these are source-based dialog
+details, not board captures. No build, board test, flash or commit is included.
+`git diff --check` passes.
+
+After approval to keep `Backup Clock Unavailable / Check Connection.` and its
+Dismiss behavior, that unchanged decision is recorded above. The next comparison
+shows the separate `Dismiss failed (ESP_ERR_TIMEOUT).` diagnostic using an
+explicitly illustrative error, not an observed board failure. Both appearances
+pass native text-fit and geometry checks; the official dialog has no error line.
+Read-only review confirms that production errors here concern submitting the
+Dismiss request, not RTC access or settings storage. The existing test injects
+the timeout through a stub; it does not establish a production failure.
+Removing the on-screen diagnostic, retaining technical detail in logs, and
+preserving acknowledgment/pending/retry behavior is an unapproved proposal.
+The official mockup and firmware remain unchanged. No build, board test, flash
+or commit is included; `git diff --check` passes.
+
+After approval to remove the backup-clock Dismiss failure diagnostic, its
+log-only rule and pending firmware change are recorded above. The official
+mockup already omits that diagnostic and remains unchanged. The next comparison
+shows `Action not sent. Try again.` in the ringing screen's lower section,
+alongside the official `Alarm ringing` footer. It uses native firmware font
+pixels and source geometry; the rejected Snooze is illustrative, not a board
+observation. Both Day/Night outputs pass content and placement checks, and all
+ten official executable scripts still parse. Independent read-only review
+confirms that the existing technical log, unchanged owner state and enabled
+retry controls cover submission rejection; no ordinary UI trigger for a full
+queue was established. Removing this alarm submission diagnostic from the
+screen is a proposal awaiting the user's decision, separate from later action,
+storage and audio errors. No firmware implementation, build, board test, flash
+or commit is included. Browser rendering remains unverified; `git diff --check`
+passes.
+
+After approval to remove `Action not sent. Try again.` from the screen, its
+log-only rule and pending firmware change are recorded above. The official
+mockup already omits this diagnostic and is unchanged. The next comparison
+shows the separate `Action not applied. Try again.` completion diagnostic
+against the official `Alarm ringing` footer. Both Day/Night outputs, restored
+preview state and footer placement pass checks. Native font measurements and
+LVGL's wrapping rules put the 417px wording on two lines in the existing 400px
+ringing footer; the comparison preserves that layout. Independent read-only
+review confirms this concerns an accepted command rejected during execution,
+including protection against an action for an occurrence no longer current.
+The illustrated failure is not an observed board fault. Removing this visible
+diagnostic while retaining logs, completion matching, actual alarm state and
+retry controls is a proposal awaiting approval; storage and audio errors remain
+separate items. No firmware source, build, board test, flash or commit is
+included. Browser rendering remains unverified; `git diff --check` passes.
+
+After approval to remove `Action not applied. Try again.` from the screen, its
+log-only rule and pending firmware change are recorded above. The next
+comparison covers alarm operating-record storage feedback: `Could not save
+alarm state.` after a completed action and the broader `Alarm storage error.`
+fallback. Removing only the first wording would expose the fallback after a
+genuine save error; the fallback also covers loading and other operating-record
+writes. Both are shown as selectable illustrative variants in the Snoozed
+screen's lower section against the official `Repeating alarm stays on` caption.
+Four wording/appearance outputs, restored preview state, native font fit and
+source placement pass checks; the current official footer, font and background
+assets match the comparison, and all ten official executable scripts parse.
+Independent read-only review confirms that Snooze/Dismiss take effect before
+their record is saved, while a failed save can leave older restart information.
+No such storage failure has been established on the board. Keeping these
+technical storage details in logs rather than on the alarm surfaces is an
+unapproved proposal; its loss of on-screen warning about restart information
+does not change the existing storage or recovery behavior. Alarm On/Off and
+settings-save feedback, and audio failures, are outside this storage-notice
+proposal. No firmware source, build, board test, flash or commit is included.
+Browser rendering remains unverified; `git diff --check` passes.
+
+After approval to remove both alarm operating-record storage captions, their
+log-only rule and pending firmware change are recorded above. Live alarm
+actions, storage behavior and restart recovery remain unchanged; settings-save
+feedback is outside that decision. The next comparison shows `Alarm audio
+unavailable.` against the official `Alarm ringing` footer. Both Day/Night
+outputs, restored preview state and placement pass checks; the native 354px
+wording fits the 400px footer. The current official footer, font and background
+assets match the comparison, and all ten official executable scripts parse.
+Independent read-only review confirms that the caption reports not-ready or
+error audio status during ringing, below the existing action/storage errors
+in display priority. A previous preview/Sound Machine error can briefly carry
+over until a new playback attempt updates that shared status. The illustrated
+failure is not an observed board fault. Keeping this audio warning and adding
+its failure variant to the official mockup is an unapproved recommendation.
+Application logging currently covers audio startup failure but does not cover
+every runtime playback failure; removal cannot be described as simply keeping
+complete existing runtime logs. No firmware source, official mockup, build,
+board test, flash or commit is changed by this comparison. Browser rendering
+remains unverified; `git diff --check` passes.
+
+The approved removal of `Alarm audio unavailable.` and addition of playback-
+failure logging supersede the preceding unapproved keep recommendation. The
+pending firmware list and architecture now record that decision; playback
+handling, alarm behavior and recovery are unchanged. The official mockup
+already omits the caption and needs no edit for this approval.
+
+The next comparison is `Missed Alarm`, using an explicitly illustrative
+previous-day occurrence. Native font and icon pixels show the current notice
+alongside the official `missedNotice()` builder, with matching row bounds,
+font/icon sizes, colors and dismissal meaning. Four face/appearance outputs,
+restored preview state and source bounds pass checks; the native 380px sample
+fits its 428px text area. The reference builder/font match the current official
+mockup, and all ten official executable scripts parse. Independent read-only
+inspection confirms that an unhandled ordinary occurrence more than 30 minutes
+overdue creates one retained missed notice; tapping it clears that notice while
+preserving the recurring schedule. This is not a timeout for unanswered ringing
+or an expired snooze. Keeping this notice and its behavior is an unapproved
+recommendation. Firmware and official mockup are unchanged by this comparison;
+no build, board test, flash or commit is included. Browser rendering and the
+previously deferred long-outage board case remain unverified.
+`git diff --check` passes.
+
+The user approved keeping `Missed Alarm` and its dismissal behavior unchanged;
+that decision is recorded above. The remaining items in the original clock-
+notice inventory were checked without treating existing features as new
+approval requests. Weather-warning and unread/important-message edge
+indicators retain their approved purpose, placement and behavior. Weather-arc
+alpha pixels and Day/Night colors match the official embedded artwork exactly;
+the firmware's pulse is not animated in the static reference. The message
+indicator has small Night-tint and pulse-preview differences, with no practical
+problem established or firmware change recommended.
+
+The existing startup `Settings storage unavailable` screen was absent from the
+official mockup at the final inventory check. It explains startup being stopped
+after a real settings-storage failure, as already required by the architecture.
+The user subsequently approved the reference addition recorded below, without
+removing or redesigning the screen. No additional firmware change is recommended
+for these remaining items. This closes the remaining
+clock/Forecast/Conditions notice inventory at the source-review level; it is
+not a review of every editor or messaging-page failure message. Approved
+firmware implementation remains pending. No additional mockup comparison,
+source edit, build, board test, flash or commit is part of this final check.
+`git diff --check` passes.
+
+The authorized startup-screen reference addition is complete. The official
+mockup now has a `Startup Storage Failure` preview entry, using the existing
+preview routing and text styling. The illustrative `ESP_ERR_NVS_NO_FREE_PAGES`
+sample uses the firmware's native four-line detail wrapping, 32px/24px fonts,
+35px/27px line heights and centered positions. Its fixed Day colors remain
+independent of saved appearance; Night and Time preview controls are hidden for
+this startup state and restored when leaving it. The screen has no clock art,
+buttons or new behavior. No asset, source file, preview framework or firmware
+mechanism was added.
+
+All ten executable official scripts parse. Four Night/time combinations pass
+the screen-content and navigation checks using the actual new builder, render
+function and preview-click branch with a substituted document. Native source
+geometry and font layout were also inspected. Reversing the five scoped
+mockup edits exactly restores the prior decoded preview; the separate browser
+messaging preview and outer document are unchanged. Independent
+gpt-6.1-sol/high source review found no issue and confirmed wording, layout,
+colors and reachability. `git diff --check` passes. Browser rendering and board
+pixels were not tested. Firmware source, firmware behavior and loaded board are
+unchanged by this documentation-only addition; no firmware build, flash or
+commit is included.
+
+## Sprint: approved notification changes — authorized October 15, 2026
+
+Implement the approved [notification walkthrough](#notification-walkthrough--october-15-2026),
+update its completion record and any affected instructions, verify the official
+mockup, build, flash and test autonomously. The user authorizes this firmware
+load and unattended testing. Preserve the dirty checkout and unrelated work;
+no commit, push or merge is included.
+
+The behavior changes are limited to the approved waiting/stale/age presentation,
+Forecast notice placement and log-only backup/alarm diagnostics. Preserve
+downloads, retries, alarm state and recovery, Dismiss/Snooze actions, Night
+visibility, retained weather, and the existing notices/indicators selected to
+remain. The existing startup storage-failure screen stays unchanged; its
+reference addition is already complete. Separate Radar and weather-provider
+work is not implementation scope for this notification sprint.
+
+Bounded implementation and acceptance:
+
+1. **Weather publication and presentation.** Permitted existing files:
+   `main/main.c`, `main/app_runtime.h`, `main/ui/ui.c`,
+   `main/ui/clock_views.c`, `main/ui/weather_views.c`, `main/ui/ui_private.h`,
+   `tests/test_weather_service.c`, `tests/test_ui.c` and the existing test
+   `CMakeLists.txt` extraction list, all under
+   `targets/esp32-p4/`. Reuse the download timestamp and owner snapshots for
+   actual age with a conservative stale fallback; remove obsolete failure
+   footers/status text if no consumer remains. Verify waiting and retained-data
+   states, both appearances, age/fallback selection, provider dates and unchanged
+   retries, plus approved notice positions and absence of duplicate footers.
+2. **Log-only diagnostics.** The same UI files plus existing `main/audio.c`
+   and `tests/test_audio.c` may change. Preserve command matching, pending and
+   retry behavior and alarm recovery while removing the approved diagnostic
+   captions and unused rendering state. Add narrow playback-failure logging in
+   the existing worker; verify accepted/rejected actions and error transitions.
+3. **Integration and documentation.** Update `docs/work.md` and affected
+   existing architecture/test instructions; verify `mockups/alarm-design.html`
+   against the approved states, changing it only if an approved item remains
+   missing. No new source path, module, task, queue, persistence mechanism or
+   test framework is planned. Run affected native checks and the full existing
+   suite, build with ESP-IDF 5.5.5 and independently review correctness and
+   necessity before loading.
+4. **Unattended board verification.** Identify the board, preserve saved
+   preferences, load the verified application and inspect boot identity,
+   runtime/log and display state through existing serial/debug facilities.
+   Exercise supported states without requiring the user to set up or time the
+   tests, restore any temporary changes, and retain evidence locally. Report
+   physical/acoustic/visual claims only to the extent actually measured.
+
+### Completion and verification
+
+**Completed October 15.** Implemented the approved waiting/retained-weather
+presentation, age/stale fallback, Forecast notice placement and log-only
+backup/alarm diagnostics. The worker stamps the existing download time only
+when network time is usable; the UI formats it without another clock or weather
+owner. Removed the raw footer field, obsolete publication/text helpers, UI error
+buffers and backup error label; reused the two clock waiting labels with one
+rendered-visibility flag. No new source file, module, task, queue, persistence
+mechanism or library was added. Alarm actions, storage/recovery behavior, retry
+schedules and settings-save feedback are preserved.
+
+All 44 native checks pass (18.03 seconds), including age boundaries/fallbacks,
+waiting/stale transitions, Night visibility, positions, action failures and alarm
+recovery. Existing weather/location/Conditions parity checks pass. ESP-IDF 5.5.5
+build passes at 17,200,192 bytes with 18% of the application partition free.
+Independent gpt-6.1-sol/high correctness and YAGNI/ownership review found no
+credible defect or needed structural addition. Source-path and whitespace checks
+pass. The existing official mockup already includes every approved change and
+the startup storage-failure reference; independent gpt-6-luna/xhigh source review
+and syntax checks of all eight executable inline scripts pass. No additional
+mockup edit was necessary.
+
+The authorized application-only flash verifies its written hash, and boot/running
+identity matches ELF `8c63caa7f56b2f31cbd8b338e2cd44d42a383e4776bc4d92f91cdb7b4a011162`.
+NVS and recorded-sound storage were not flashed. Autonomous board checks pass
+26 states: eight first-download waiting states across Day/Night; twelve retained
+weather age/fallback/Night states; and six backup/ringing presentation states.
+A debugger-forced first-download timeout follows the actual twenty-second retry;
+the next real Visual Crossing request returns HTTP 200 and restores live weather.
+Other error cases change only temporary display snapshots, not service owners.
+Applied-preference and alarm operating-record hashes match before/after the
+completed sequences. Normal Digital Day, fresh weather and idle alarm/audio are
+restored, and final UI clock samples advance three seconds. All task-owned serial
+and debugger processes have ended.
+
+These board checks inspect real LVGL objects, not physical pixels, touch feel or
+sound quality. A full framebuffer read timed out and was abandoned after resuming
+the board. An invalid post-download-to-empty Conditions probe was replaced by a
+proper fresh-boot check; a button/child-label inspection was corrected. These test
+method limits, raw evidence and closure are in the
+[local sprint report](../.reviews/main/notification-sprint-2026-10-15/closure.md).
+No new power-cut or listening test, browser-image update, commit, push or merge
+was included. The existing browser bundle and unrelated work remain preserved.
+
+## Checkpoint commit — authorized October 15, 2026
+
+The user authorized a local commit after the notification sprint closed.
+The checkpoint includes completed Sound Machine playback and its measured
+memory/scheduling corrections, subsequent approved sound/icon changes,
+the notification sprint, tests and accumulated approved documentation/mockups
+since `2ca209a`. The latest source passes the software and autonomous board
+checks recorded in the [notification closure](#completion-and-verification).
+
+Include the previously prepared four-image browser installer bundle and its
+recordings image. That bundle remains the October 14 preparation documented
+above; its application is older than the October 15 board image and was not
+regenerated for this commit. Local `.reviews/`, scratch output and editor
+configuration remain uncommitted. No push, merge, tag or additional firmware
+load is included.
+
+## Current work — reconciled October 15, 2026
 
 This is the current work list. Dated entries above retain the observations and
 limits at their own checkpoints; their old remaining-work statements do not
 reopen checks subsequently closed. Startup and inherited-screen cleanup remains
 the priority under [AGENTS.md](../AGENTS.md#current-checkout-and-retained-material).
-No new firmware or board work was performed during this documentation audit.
+The Sound Machine investigation above includes the October 14 firmware and
+unattended board comparisons; other checkpoints retain their stated limits.
+The approved [routine footer removal](#routine-clock-footer-removal--october-14-2026)
+is included in the completed, flashed and autonomously checked
+[notification sprint](#sprint-approved-notification-changes--authorized-october-15-2026).
 
 ### Approved work still unfinished
 
@@ -1370,15 +3744,66 @@ No new firmware or board work was performed during this documentation audit.
   [implementation sprint](#prepared-sound-machine-sprint) was sent to
   Development Orchestration, including efficient noise generation.
   [Preference storage](#preference-storage-checkpoint--october-13-2026) is implemented
-  and verified in software; audio commands, playback, timer integration, controls
-  and board verification remain pending. Preserve the existing weather
+  and the [full source checkpoint](#sound-machine-source-checkpoint--october-13-2026)
+  passes software integration and review. The October 14 board investigation
+  closes the measured volume-save scan, recording-repeat delay, TLS allocation
+  failures and weather/drawing scheduling stalls within the recorded workloads.
+  The final matched Rain run crosses repeats and an ordinary ten-minute weather
+  refresh: zero wholly silent buffers among 101,845 inspected, and no repeated
+  or skipped submitted clock seconds during playback. Retained changes use
+  existing memory-placement settings, same-file reopening, a fixed heartbeat,
+  one binary weather gate and explicit drawing-core-0/audio-core-1 placement.
+  Temporary playback timing probes are removed; UI stack monitoring is retained.
+  Normal firmware passes 44 native checks/build and is
+  loaded with written-hash and boot-identity verification, working display/touch
+  initialization and successful live weather. See the
+  [full accounting and verification limits](../.reviews/sound-machine-sprint-2026-10-13/board/timing-closure.md).
+  The subsequent approved [review follow-up](#review-follow-up-visual-diagnostics-and-browser-recordings--october-14-2026)
+  removes inherited visual logging, corrects the gate comment and closes F1
+  browser-image preparation with a verified four-image local bundle. That
+  source/bundle passes software checks and independent review. Its application
+  changes are included in the subsequent Brown Noise load; browser installation
+  remains untested and unpublished. The UI stack monitor stays in place.
+  The [Brown Noise investigation](#brown-noise-cutout-investigation--october-14-2026)
+  records the retired generator's measured behavior; the user may still have
+  heard one very brief cutout with that former generator. The approved
+  [noise source-equation restoration](#noise-source-equation-restoration--october-14-2026)
+  supersedes that generator correction, removes our clipping and preserves output
+  gain. Its source verification, 44 native checks, independent review and build
+  pass. The authorized app-only flash has verified written/boot identity and
+  normal display/touch initialization and weather. The user confirms all three
+  restored noises are continuous and clear in the prompted short listening check.
+  The approved [recorded-sound gain slice](#recorded-sound-playback-gain--october-14-2026)
+  now passes implementation review, 44 native checks, firmware build and complete
+  host-decoded peak checks. Retained MP3 files and generated-noise output gain
+  are unchanged. The subsequently authorized application-only flash verifies
+  written/boot identity and normal display/touch initialization and weather.
+  The user confirms all nine boosted recordings sound good with no distortion or
+  cutouts in the requested brief check, including the four maximum-volume checks.
+  Later listening identified Night/Campfire as soft and the generated noises as
+  too loud. The approved
+  output-only balance adjustment passes all 44 native checks, independent review
+  and firmware build. Its application-only comparison flash verifies written/boot
+  identity, display/touch initialization and weather. The user confirms better
+  balance for all five adjusted sounds and acceptable Campfire at 100%, closing
+  this balance listening checkpoint.
+  These software/buffer observations do not establish every acoustic or physical
+  rendering case. The remaining sound/timer/fade/navigation/priority
+  checks remain open. These bounded results do not close the whole feature.
+  The ADPCM comparison has not changed the approved MP3 format. Preserve the existing weather
   implementation work. Requirements belong in the
   [specification](architecture.md#sound-machine-playback).
 - **Radar:** RainViewer and the custom palette are selected under the
   [radar specification](architecture.md#radar-source-and-palette). The refined
-  screen design is selected and integrated into the official mockup's Radar
-  preview. Define the remaining map coverage and service behavior before a
-  firmware implementation slice. No live radar firmware exists yet.
+  screen design is selected and integrated into the official mockup's Weather Radar
+  preview. Five-minute checks and fixed 50-mile coverage are approved. The
+  [prepared radar sprint](#prepared-weather-radar-sprint--october-15-2026) is held
+  unsent at the user's request. Its first step verifies the production background
+  and labeled 50-mile view. The sprint now replaces the device Conditions page
+  with Radar, retaining Conditions code/assets/tests and its mockup page while
+  removing access through the device UI. It also removes falling
+  pressure from storm-alert triggers while preserving shared weather data and
+  the remaining alert behavior. No live radar firmware exists yet.
 - **Immediate Alarm Settings On/Off:** development checks and firmware build pass
   in the October 13 slice above. It is included in the weather sprint's firmware
   loads, with its physical check still unreported. Its remaining checkpoint is the physical check
@@ -1391,6 +3816,10 @@ No new firmware or board work was performed during this documentation audit.
 - **Physical layout and settings behavior:** basic Day controls/typing, initial
   keyboard pages, Night settings readability, Weather's new four rows and
   Messaging guidance/Done clearance have passed within their recorded limits.
+  The [clock shortcut spacing correction](#clock-shortcut-spacing--october-14-2026)
+  passes native checks/build and its authorized app-only flash verifies
+  written/boot identity, display/touch initialization and weather. The user confirms
+  corrected spacing and icon taps in the prompted Analog Wednesday check.
   Remaining checks concern exact approved positions/typography/colors; separately
   unreported appearances and all Night keyboard pages; noon/midnight AM/PM
   crossings; validation/error/empty/pending and real connection-phase states;
@@ -1426,7 +3855,6 @@ No new firmware or board work was performed during this documentation audit.
   while it serves an identified current evaluation or recovery need.
 
 ### Deferred or unapproved work
-
 - Visual Crossing and mapping implementation is now authorized and underway in
   the [current weather sprint](#sprint-visual-crossing-and-approved-weather-mappings--authorized-october-13-2026).
   Provider-credit placement and real availability of rare provider IDs remain

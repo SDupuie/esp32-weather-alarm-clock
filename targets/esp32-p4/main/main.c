@@ -19,7 +19,6 @@
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "cJSON.h"
-
 #include "bsp/esp32_p4_wifi6_touch_lcd_xc.h"
 
 #include "app_runtime.h"
@@ -116,58 +115,19 @@ static void log_device_clock(const char *context)
   ESP_LOGI(TAG, "%s: local=%s utc=%s", context, local_buf, utc_buf);
 }
 
-static void copy_text(char *dest, size_t dest_size, const char *src)
-{
-  if (dest == NULL || dest_size == 0) {
-    return;
-  }
-
-  if (src == NULL) {
-    dest[0] = '\0';
-    return;
-  }
-
-  snprintf(dest, dest_size, "%s", src);
-}
-
-static void runtime_state_seed(const device_config_t *config)
-{
-  memset(&s_runtime_state, 0, sizeof(s_runtime_state));
-  copy_text(
-    s_runtime_state.weather_status,
-    sizeof(s_runtime_state.weather_status),
-    !config->wifi_ready
-      ? "No Wi-Fi profile found. Tap 'Set Up Wi-Fi' to connect."
-      : (config->location_ready
-          ? "Stored Wi-Fi profile found. Connecting for time sync and live weather..."
-          : "Stored Wi-Fi profile found. Finish location setup for local weather.")
-  );
-}
-
 static void runtime_state_update(
   const app_weather_snapshot_t *weather,
-  bool mark_weather_stale,
-  const char *status_text
+  bool mark_weather_stale
 )
 {
-  if (s_runtime_mutex == NULL) {
-    return;
-  }
-
+  if (s_runtime_mutex == NULL) return;
   if (xSemaphoreTake(s_runtime_mutex, pdMS_TO_TICKS(RUNTIME_LOCK_TIMEOUT_MS)) != pdTRUE) {
     ESP_LOGW(TAG, "Timed out waiting for runtime state lock");
     return;
   }
-
-  if (weather != NULL) {
-    s_runtime_state.weather = *weather;
-  }
-
-  if (mark_weather_stale && s_runtime_state.weather.valid) {
+  if (weather != NULL) s_runtime_state.weather = *weather;
+  if (mark_weather_stale && s_runtime_state.weather.valid)
     s_runtime_state.weather.stale = true;
-  }
-
-  copy_text(s_runtime_state.weather_status, sizeof(s_runtime_state.weather_status), status_text);
   xSemaphoreGive(s_runtime_mutex);
 }
 
@@ -205,23 +165,6 @@ static void runtime_state_snapshot(app_runtime_state_t *out_runtime, const devic
   wac_night_solar_times(&out_runtime->solar);
   wac_alarm_copy(&out_runtime->alarm);
   wac_audio_copy(&out_runtime->audio);
-}
-
-static bool runtime_state_has_valid_weather(void)
-{
-  bool has_valid_weather = false;
-
-  if (s_runtime_mutex == NULL) {
-    return false;
-  }
-
-  if (xSemaphoreTake(s_runtime_mutex, pdMS_TO_TICKS(RUNTIME_LOCK_TIMEOUT_MS)) != pdTRUE) {
-    return false;
-  }
-
-  has_valid_weather = s_runtime_state.weather.valid;
-  xSemaphoreGive(s_runtime_mutex);
-  return has_valid_weather;
 }
 
 static esp_err_t request_clock_warning_dismiss(wac_time_warning_t warning)
@@ -361,10 +304,13 @@ static void ui_heartbeat_task(void *arg)
   (void) arg;
 
   const TickType_t delay_ticks = pdMS_TO_TICKS(1000);
+  TickType_t wake_tick = xTaskGetTickCount();
   uint32_t reported_stack_min = UINT32_MAX;
 
   while (true) {
-    vTaskDelay(delay_ticks);
+    /* Include work in the period, and do not replay missed updates after a stall. */
+    if (xTaskDelayUntil(&wake_tick, delay_ticks) == pdFALSE)
+      wake_tick = xTaskGetTickCount();
 
     /* Static, not on this task's stack: the runtime state carries the
      * full weather snapshot including the conditions summary. Only this
@@ -440,11 +386,6 @@ static void weather_service_task(void *arg)
         reported_missing_wifi_profile = true;
       }
 
-      runtime_state_update(
-        NULL,
-        false,
-        "No Wi-Fi profile found. Tap 'Set Up Wi-Fi' to connect."
-      );
       vTaskDelay(retry_delay_ticks);
       continue;
     }
@@ -453,20 +394,10 @@ static void weather_service_task(void *arg)
 
     if (!connectivity_started) {
       ESP_LOGI(TAG, "Initializing Wi-Fi station for SSID '%s'", config.wifi_ssid);
-      runtime_state_update(
-        NULL,
-        false,
-        "Connecting to Wi-Fi..."
-      );
-
       esp_err_t err = connectivity_init(&config);
       if (err != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi init failed: %s", esp_err_to_name(err));
-        runtime_state_update(
-          NULL,
-          true,
-          "Wi-Fi setup failed. Retrying..."
-        );
+        runtime_state_update(NULL, true);
         vTaskDelay(retry_delay_ticks);
         continue;
       }
@@ -476,20 +407,12 @@ static void weather_service_task(void *arg)
 
     if (!connectivity_is_wifi_connected()) {
       ESP_LOGI(TAG, "Waiting up to %u ms for Wi-Fi connection", WIFI_CONNECT_TIMEOUT_MS);
-      runtime_state_update(
-        NULL,
-        true,
-        "Connecting to Wi-Fi..."
-      );
+      runtime_state_update(NULL, true);
 
       esp_err_t err = connectivity_wait_for_wifi(wifi_timeout_ticks);
       if (err != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi connect timeout: %s", esp_err_to_name(err));
-        runtime_state_update(
-          NULL,
-          true,
-          "Still trying to join Wi-Fi..."
-        );
+        runtime_state_update(NULL, true);
         vTaskDelay(retry_delay_ticks);
         continue;
       }
@@ -512,11 +435,6 @@ static void weather_service_task(void *arg)
     }
 
     if (!config.location_ready) {
-      runtime_state_update(
-        NULL,
-        false,
-        "Set your location to enable local weather."
-      );
       vTaskDelay(retry_delay_ticks);
       continue;
     }
@@ -528,7 +446,6 @@ static void weather_service_task(void *arg)
       continue;
     }
 
-    runtime_state_update(NULL, false, "Fetching live weather...");
     ESP_LOGI(
       TAG,
       "Requesting live weather for %s,%s (%s units)",
@@ -540,15 +457,8 @@ static void weather_service_task(void *arg)
     app_weather_snapshot_t weather_snapshot = {0};
     esp_err_t weather_err = weather_client_fetch(&config, &weather_snapshot);
     if (weather_err != ESP_OK) {
-      bool had_previous_weather = runtime_state_has_valid_weather();
       ESP_LOGW(TAG, "Weather refresh failed: %s", esp_err_to_name(weather_err));
-      runtime_state_update(
-        NULL,
-        true,
-        had_previous_weather
-          ? "Weather refresh failed. Showing last update until retry."
-          : "Weather request failed. Retrying..."
-      );
+      runtime_state_update(NULL, true);
       next_weather_attempt_us = esp_timer_get_time() + (int64_t) WEATHER_RETRY_INTERVAL_MS * 1000;
       quota_due = weather_client_next_allowed_us(&config);
       if (quota_due > next_weather_attempt_us) next_weather_attempt_us = quota_due;
@@ -556,7 +466,13 @@ static void weather_service_task(void *arg)
       continue;
     }
 
-    runtime_state_update(&weather_snapshot, false, "");
+    /* A timestamp taken before network time is known must not later appear
+     * to be a measured weather age after the clock synchronizes. */
+    wac_time_snapshot_t download_clock;
+    wac_time_snapshot(&download_clock);
+    weather_snapshot.updated_at = download_clock.usable
+      && download_clock.source == WAC_TIME_SOURCE_NETWORK ? download_clock.utc_now : 0;
+    runtime_state_update(&weather_snapshot, false);
     ESP_LOGI(
       TAG,
       "Live weather updated (%d°, H:%d° L:%d°)",
@@ -571,6 +487,14 @@ static void weather_service_task(void *arg)
 
 void app_main(void)
 {
+  /* Keep drawing off the audio core; preserve the BSP's display defaults. */
+  bsp_display_cfg_t display_config = {
+    .lv_adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG(),
+    .rotation = ESP_LV_ADAPTER_ROTATE_0,
+    .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_TRIPLE_PARTIAL,
+    .touch_flags = {0},
+  };
+  display_config.lv_adapter_cfg.task_core_id = 0;
   /* Set once before JSON users start. Small response nodes must not consume
    * internal task/driver memory while the board's PSRAM is available. */
   cJSON_Hooks json_hooks = { .malloc_fn = json_alloc, .free_fn = heap_caps_free };
@@ -582,7 +506,7 @@ void app_main(void)
   }
   if (storage_err != ESP_OK) {
     ESP_LOGE(TAG, "Settings startup failed: %s", esp_err_to_name(storage_err));
-    if (bsp_display_start() != NULL) {
+    if (bsp_display_start_with_config(&display_config) != NULL) {
       if (bsp_display_lock(INITIAL_UI_LOCK_TIMEOUT_MS) == ESP_OK) {
         app_ui_show_storage_error(storage_err);
         bsp_display_unlock();
@@ -612,7 +536,6 @@ void app_main(void)
     ESP_LOGE(TAG, "Failed to allocate runtime mutex");
     return;
   }
-  runtime_state_seed(&config);
   s_clock_commands = xQueueCreate(2, sizeof(clock_command_t));
   if (s_clock_commands == NULL) {
     ESP_LOGE(TAG, "Failed to allocate clock command queue");
@@ -634,7 +557,7 @@ void app_main(void)
     config.device_id
   );
 
-  lv_display_t *display = bsp_display_start();
+  lv_display_t *display = bsp_display_start_with_config(&display_config);
   lv_indev_t *input = bsp_display_get_input_dev();
   if (display == NULL) {
     ESP_LOGE(TAG, "Display start failed");
@@ -674,13 +597,14 @@ void app_main(void)
 
   ESP_LOGI(TAG, "Display ready, touch %s", touch_ready ? "detected" : "not detected");
 
-  BaseType_t ui_task_ok = xTaskCreate(
+  BaseType_t ui_task_ok = xTaskCreatePinnedToCore(
     ui_heartbeat_task,
     "rwd_ui_heartbeat",
     6144,
     NULL,
     4,
-    NULL
+    NULL,
+    0
   );
   if (ui_task_ok != pdPASS) {
     ESP_LOGW(TAG, "Failed to start UI heartbeat task");

@@ -66,6 +66,7 @@ idf_component_register(
   EMBED_TXTFILES
     "web/messages.html"
   REQUIRES
+    espressif__esp_audio_codec
     espressif__esp_codec_dev
     espressif__esp_lcd_touch_gt911
     nvs_flash
@@ -78,4 +79,24 @@ idf_component_register(
     json
     lwip
     mbedtls
+    spiffs
 )
+
+# The pinned codec adds an unquoted search path that breaks project paths with
+# spaces. Its imported archive targets already supply the exact library paths.
+idf_component_get_property(audio_codec_lib espressif__esp_audio_codec COMPONENT_LIB)
+idf_component_get_property(audio_codec_dir espressif__esp_audio_codec COMPONENT_DIR)
+set(audio_codec_search_flag "-L ${audio_codec_dir}/lib/${IDF_TARGET}")
+foreach(link_property LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+  get_target_property(audio_codec_links ${audio_codec_lib} ${link_property})
+  if(audio_codec_links)
+    list(REMOVE_ITEM audio_codec_links "${audio_codec_search_flag}"
+      "$<LINK_ONLY:${audio_codec_search_flag}>")
+    set_property(TARGET ${audio_codec_lib} PROPERTY ${link_property} "${audio_codec_links}")
+  endif()
+endforeach()
+
+# Only the approved prepared loops are packaged; source recordings stay off-board.
+spiffs_create_partition_image(storage
+  "${CMAKE_CURRENT_LIST_DIR}/../../../shared/assets/sounds/clock"
+  FLASH_IN_PROJECT)

@@ -45,6 +45,7 @@ typedef pthread_mutex_t StaticSemaphore_t;
 #define portMAX_DELAY UINT32_MAX
 SemaphoreHandle_t xSemaphoreCreateMutex(void);
 SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *);
+SemaphoreHandle_t xSemaphoreCreateBinaryStatic(StaticSemaphore_t *);
 BaseType_t xSemaphoreTake(SemaphoreHandle_t, TickType_t);
 BaseType_t xSemaphoreGive(SemaphoreHandle_t);
 /* Observe an actual blocked native mutex caller, without timing sleeps. */
@@ -64,7 +65,11 @@ BaseType_t xQueueSend(QueueHandle_t, const void *, TickType_t);
 BaseType_t xQueueReceive(QueueHandle_t, void *, TickType_t);
 
 typedef void *TaskHandle_t;
+typedef void (*TaskFunction_t)(void *);
+typedef uint32_t configSTACK_DEPTH_TYPE;
 BaseType_t xTaskCreate(void (*)(void *), const char *, uint32_t, void *, UBaseType_t, TaskHandle_t *);
+BaseType_t xTaskCreatePinnedToCore(TaskFunction_t, const char * const, const configSTACK_DEPTH_TYPE,
+                                  void * const, UBaseType_t, TaskHandle_t * const, const BaseType_t);
 void vTaskDelete(TaskHandle_t);
 void esp_restart(void);
 const char *esp_err_to_name(esp_err_t);

@@ -1,6 +1,6 @@
 # Weather alarm clock architecture and product specification
 
-Revised October 13, 2026. This is the main authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. Detailed weather condition mappings and their decision status are maintained in [weather.md](weather.md). Neither document is an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
+Revised October 15, 2026. This is the main authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. Detailed weather condition mappings and their decision status are maintained in [weather.md](weather.md). Neither document is an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
 
 Build the weather alarm clock for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C using the existing ESP-IDF application. Only ESP32-P4 is supported. There is no requirement to maintain Raspberry Pi behavior, another firmware implementation, or backward compatibility with their settings or interfaces.
 
@@ -105,7 +105,7 @@ Keep one pending missed-alarm notice across restarts, including the missed alarm
 
 Use ordinary storage operations and error reporting for the snooze deadline, dismissal state, and pending missed-alarm notice. Do not introduce backup snapshots, a journal, migration, or a separate recovery coordinator for this feature. These operating-state writes do not authorize background rewriting of user settings. Operating-state persistence not explicitly approved in this document remains undecided.
 
-Apply Snooze, Dismiss and missed-notice transitions in memory even if their operating-record write returns an error. Snooze defers the sound and Dismiss stops it without waiting for a successful save. Report the storage failure and retain the new state for the current run. A later restart may recover an older stored deadline, dismissal or missed notice; an alarm may ring again or a notice may reappear. This is an accepted limitation of failed operating-record saves. Settings Save follows the separate [editing and saving rules](#editing-and-saving-user-settings).
+Apply Snooze, Dismiss and missed-notice transitions in memory even if their operating-record write returns an error. Snooze defers the sound and Dismiss stops it without waiting for a successful save. Log alarm operating-record read/write failures without replacing the on-screen alarm state with storage captions, and retain live transitions for the current run. A later restart may recover an older stored deadline, dismissal or missed notice; an alarm may ring again or a notice may reappear. This is an accepted limitation of failed operating-record saves. Settings Save follows the separate [editing and saving rules](#editing-and-saving-user-settings).
 
 ### Sound Machine recording decisions
 
@@ -118,6 +118,9 @@ reverting. Keep both sets in the project: originals in
 `shared/assets/sounds/clock/`. Use only the playback set when packaging clock
 recordings. Preparation results belong in
 [work.md](work.md#sound-machine-recording-conversion--october-13-2026).
+Keep the retained original and prepared MP3 files unchanged for the approved
+[recorded-sound playback gain](#recorded-sound-playback-gain); apply that gain
+on the clock rather than re-encoding or replacing the recordings.
 
 The recordings are intended for repeating playback. Blend each ending into its
 beginning with the selected constant-power curve, gradually fading one out as
@@ -125,9 +128,11 @@ the other fades in. The overlap shortens each repeat interval by two seconds.
 Prepare the blend in the recording, so playback does not need to mix two copies.
 The player must remove MP3 encoder delay and end padding rather than play that
 extra space, and keep audio buffered across each repeat to avoid adding a pause.
+Package the selected playback files in the existing storage partition. USB and
+prepared browser installations include its generated image with the application.
 This records the audio-asset and loop decisions. The approved controls are
-defined below; firmware integration
-remains unimplemented.
+defined below; implementation and verification status belong in
+[work.md](work.md#prepared-sound-machine-sprint).
 
 ### Sound Machine controls
 
@@ -152,6 +157,8 @@ reference, using the existing settings controls and Day/Night styles.
 
 Both clock faces show a speaker shortcut in playing and stopped states, mirrored
 from the RTC warning and centered vertically between the weekday and date.
+Both icons stay clear of every weekday name without moving or shrinking the
+weekday/date text.
 Keep the existing alarm shortcut positions and tap areas. Both clock headers
 use title case for weekday and month, with matching weekday-to-date spacing.
 Tap-area outlines remain diagnostic previews and are not part of the device UI.
@@ -164,8 +171,8 @@ a recommendation, not an approved change to the clock's touch handling.
 
 ### Sound Machine playback
 
-The user approved these operating rules on October 13, 2026. Firmware remains
-unimplemented; the prepared sprint is recorded in
+The user approved these operating rules on October 13, 2026. Implementation and
+verification are recorded in
 [work.md](work.md#prepared-sound-machine-sprint).
 
 First-use defaults are Rain, 30% volume, a 30-minute sleep timer and Stopped.
@@ -199,7 +206,7 @@ recordings and noise does not reset the remaining time.
 Generate the three noises efficiently in short audio chunks, using a lightweight
 pseudorandom source and small, fixed filter/integrator state. Keep that state
 across chunks so boundaries do not introduce discontinuities. Prepare filter
-coefficients outside the sample loop and use efficient integer or single-precision
+coefficients outside the sample loop. Use efficient integer or single-precision
 arithmetic. Do not allocate memory, perform file/network I/O, log, or wait on
 shared locks for each sample. Generation must finish with headroom inside each
 chunk's playback interval so it does not cause audible hiccups or leave the
@@ -208,6 +215,18 @@ playback on the board during representative normal weather, network, display and
 touch activity; host timing or listening to a short sample does not establish
 that result. Retain the existing single audio worker rather than adding a noise
 worker to compensate for inefficient generation.
+
+Use the White, Pink and Brown equations from soundmachine.app's
+[`noiseBuffer` source](https://soundmachine.app/playback.js), with no additional
+generator clipping or limits on their internal state. Retain the board's existing
+uniform pseudorandom input, 22,050 Hz stream and continuous state across chunks;
+the website's 32,000 Hz buffered mixer and looping machinery are not imported.
+For these generated noises, use the fixed playback-output reductions below,
+retaining the squared volume control and timer fade. Recording boosts do not apply.
+No loudness normalization is added. The existing final 16-bit PCM conversion
+guard remains outside the generator. Removing the former half-level White output
+and Pink/Brown clipping raises peaks; unchanged output gain does not promise a
+fixed peak ceiling or distortion-free playback at every level.
 
 Ringing and alarm-sound previews take priority and stop Sound Machine, leaving
 it Stopped. There is no automatic resume after preview completion, Snooze or
@@ -223,6 +242,42 @@ returned-error policy. A failed Sound Machine playback attempt ends in Stopped
 with an error; an explicit later Play may retry an open/read/decode/write attempt
 when the retained speaker is usable. A failed speaker creation remains unavailable
 until restart, as for current alarm audio. Do not add automatic retry or resume.
+
+#### Recorded-sound playback gain
+
+Apply these fixed playback boosts to the existing prepared mono MP3 recordings,
+as approved on October 14, 2026:
+
+| Recording | Additional playback gain |
+|---|---:|
+| Rain, Ocean, Wind, Forest, Stream | +5.49 dB |
+| Campfire, Night | +15.49 dB |
+| Thunder | +1.12 dB |
+| Singing Bowl | +2.80 dB |
+
+The user approved a further +10 dB for Campfire and Night after the initial
+board comparison, producing the total +15.49 dB boost above. Campfire's large
+crackles may exceed the available range at higher volume; testing this louder
+output is an accepted tradeoff. Keep the existing final PCM conversion guard,
+without adding a limiter, compressor or changes to the MP3 files.
+
+These fixed values do not target equal LUFS or RMS levels. Fixed gain does not
+avoid clipping when boosted peaks exceed the
+existing output range. Apply these boosts only to recordings. The three noises
+retain their source equations, with these approved reductions at playback output
+relative to their former output gain: White Noise −12 dB; Pink/Brown Noise −6 dB.
+Do not change their internal state or add generator clipping.
+
+Fold the selected recording's fixed multiplier into the existing Sound Machine
+volume, output-headroom and sleep-fade calculation once per audio chunk, before
+the final 16-bit PCM conversion. Keep the existing conversion guard and codec
+output setting. Use the existing audio owner and sample loop, with no additional
+sample-processing pass, worker, module, setting or storage. Do not add automatic
+loudness measurement, normalization, compression or limiting for this boost.
+The volume control, final fade, gapless repeat handling, alarm priority and
+playback error behavior otherwise retain their existing rules. Implementation
+and verification status belong in
+[work.md](work.md#recorded-sound-playback-gain--october-14-2026).
 
 ### UI and visual reference
 
@@ -308,6 +363,8 @@ When the running clock uses trustworthy backup-clock time and has not yet accept
 
 Do not persist RTC warnings or their acknowledgments across restarts. Keep a detected warning in memory for the current run, including after network time corrects the RTC, until the user dismisses it. At each startup, check the RTC again and report problems detected then; do not restore an earlier warning from storage.
 
+If a backup-clock Dismiss request cannot be submitted, keep the technical failure in logs rather than showing a diagnostic in the dialog. Preserve the existing warning, retry opportunity and acknowledgment behavior; do not treat a failed request as a successful dismissal.
+
 Inspect the RTC for lost-time evidence before correcting it, distinguish lost time from failed access, and clear the hardware stop flag only after successful correction. If RTC initialization fails, end that attempt before reading its calendar; report failed access and retry through the existing correction schedule. Lost-time inspection waits until initialization succeeds and still precedes correction. Correcting the RTC must not depend on saving a warning.
 
 Retain the inherited `Clock paused` warning with its existing 135-second threshold. It reports that the displayed minute has stopped changing while UI updates continue.
@@ -320,10 +377,19 @@ Retain the inherited `Clock paused` warning with its existing 135-second thresho
 - Refresh interval: every 10 minutes
 - Weather downloads require Wi-Fi and a saved location, independently of usable clock time or network-time synchronization. Failed weather downloads retry after 20 seconds, except for the confirmed daily-quota pause below. Network-time startup failures also retry after 20 seconds without preventing weather downloads; successful startup leaves synchronization and its transport retries running in the background.
 - Until live weather data arrives, use the approved waiting presentation, with `--` for any visible unavailable measurements; do not present fallback pictures or preview sample values as actual weather on the clock or Forecast screens.
-- If live weather fails:
+- On Analog and Digital, keep `Waiting for weather…` in the existing weather area during the initial download and failed retries before the first successful download. Hide weather values and artwork, and show no additional download-failure footer. Preserve the existing Night hiding of this weather presentation.
+- On Forecast, show `Waiting for weather…` in the existing central waiting area before the first successful download, including failed retries. Show `--` for all five day labels and temperatures, hide the five weather icons, and retain the background and forecast frames. Keep this waiting presentation visible in both Day and Night using the existing colors. Show no additional failure notice at the top or bottom. Replace the waiting presentation with provider-dated forecasts when data arrives.
+- On Conditions, show `Waiting for weather…` along the existing top curve before the first successful download, including failed retries. Preserve the compass, column icons and unavailable readings, and remove the separate bottom failure notice. Keep the existing heading size, colors and Day/Night visibility; automatic retries are unchanged.
+- Keep routine Wi-Fi connection, setup/location reminders and weather-download progress off the normal clock, Forecast and Conditions screens. Setup pages retain their connection and validation feedback, and operational logs remain available.
+- If a download fails after earlier weather was received:
   - continue serving the last known good payload when available
-  - show `Weather updated <age>` or `Weather data stale`
-- On Forecast and Conditions, a failed refresh with retained weather shows `Weather data stale`; a failed request before the first payload shows `Weather update failed.` Preserve their existing Night hiding, automatic retries and separate setup/network progress notices. This presentation does not add an elapsed-age calculation or change storm warnings.
+  - on Analog, Digital and Conditions, show `Weather updated <age> ago` using the actual elapsed age since the last successful download when reliable; otherwise show `Weather data stale`
+  - age is measured from a download timestamp captured with usable network time; show `just now` below one minute, whole minutes below one hour, whole hours below one day, then whole days. Use the stale fallback if that timestamp is missing, current network time is unavailable, or the clock is earlier than the timestamp
+  - place that clock-face notice between temperature and High/Low on Analog, and below current weather and above the forecast strip on Digital; remove the additional failure footer
+  - use no ending period on these short weather notices, and preserve their existing Night hiding
+  - retain the failure/stale notice during retries until a successful download clears it; Wi-Fi loss still marks retained weather stale
+- On Forecast, a failed refresh with retained weather shows `Weather data stale` directly above the primary forecast's day heading (`Tomorrow` when applicable). Preserve the notice's existing font, colors and Night hiding, the rest of the forecast layout and automatic retries. This notice does not calculate elapsed age.
+- On Conditions, keep the retained-weather age/stale notice below the three condition columns, preserving its existing position, font and colors. The separate clock/backup-clock warnings retain their wording, appearance and visibility rules; storm warnings are unchanged.
 - Current condition rendering includes:
   - current temperature
   - high/low temperatures
@@ -400,8 +466,12 @@ retry interval. See the [provider's error guidance](https://www.visualcrossing.c
 - Alerts consider now through the next 3h:
   - `thunder`: reported thunder according to the [weather classification](weather.md#thunder-classification)
   - `gusts`: gusts >= 40 mph / 64 km/h, else `wind`: sustained >= 25 mph / 40 km/h
-  - `pressure`: 3h change <= -3 hPa
   - `precip`: >= 7.6 mm in an hour (`Heavy snow` if snowfall, else `Heavy rain`)
+- Falling pressure is not a storm-alert trigger. The user removed it on
+  October 15, 2026 because it was too sensitive. Pressure changes alone must
+  not activate the clock's storm indicator or storm-first navigation. Keep
+  pressure measurements/trend and any non-alert explanatory use; the thunder,
+  wind/gust and heavy-precipitation thresholds above are unchanged.
 - `summary.headline` / `summary.detail`: the first alert as a sentence with
   its timing (`now` or `by <hour>`), the second alert (or the pressure
   meaning) as the detail.
@@ -492,24 +562,61 @@ shows original colors on the left and the approved palette on the right, with
 a background map and town labels. It is a palette reference, not an approved
 clock screen layout or a location default.
 
-Radar belongs in the same horizontal weather-screen row as Forecast and
-Conditions, reached and left with the existing left/right swipe navigation.
-It is not a settings/menu page and has no return button. Its exact position in
-that row remains to be selected. Preserve the existing
-Conditions-first ordering during a storm alert.
+Weather Radar replaces the Conditions screen on the working clock for this
+pass, as selected on October 15, 2026. The weather row contains Forecast then
+Radar normally, and Radar then Forecast during a storm alert, using the existing
+left/right swipes and row order retained for the current visit. The storm
+indicator remains active and its first weather destination becomes Radar.
+Radar is not a settings/menu page and has no return button.
+
+Keep Conditions available in the official mockup as a retained design reference.
+Retain its existing implementation, required assets and useful tests in their
+current source locations, as explicitly requested on October 15. Remove it from
+user navigation and other user-accessible routes while Radar occupies that slot.
+Do not create inactive Conditions display objects solely to keep the code, or
+add a fallback route, settings switch, alternate build mode or backup copy.
+The device consequently loses that page's wind, pressure and outlook display;
+this is an approved reduction in visible information. Preserve current weather
+data, calculations and storm detection used by the clock, Forecast and alert
+indicator. Removing the Conditions page does not disable those shared functions.
 
 Use a dark background map that blends into the surrounding clock surface,
 with subdued but clearly visible roads and terrain, and legible town labels.
 Keep the selected radar colors distinct. Fade the map and radar gradually into
 that background, keeping enough definition that the map does not look overly
 soft. On October 13, 2026 the user selected the refined design in the
-[official visual reference](../mockups/alarm-design.html), using its Radar
+[official visual reference](../mockups/alarm-design.html), using its Weather Radar
 preview: curved heading and frame timestamp, charcoal map with clearer roads
-and terrain, enlarged town labels, an 88-pixel eased edge fade on the 800-pixel
+and terrain, enlarged town labels, a 48-pixel eased edge fade on the 800-pixel
 screen, and the selected palette with a strength legend and visible source
 credits. Use this as the working radar screen design. The northern Colorado
 frame is recorded reference data, not a location default or live radar.
-Production map coverage and the background provider remain to be selected.
+The production background provider remains to be selected.
+The October 15 follow-up capitalizes Radar in the screen heading and carries
+over the tighter fade selected in the preview.
+
+The first version uses a fixed map **50 miles across** (about 80.5 km), centered
+on the saved weather location: 25 miles (about 40.2 km) from the center to the
+map's circular edge before its visual fade. This is a ground-distance coverage
+requirement, not a provider zoom-level number. Keep this coverage when units or
+latitude change. Use a small marker for that location, automatic updates and a
+visible frame timestamp. The marker represents the resolved weather location, not the
+clock's precise physical position. Show only the latest image; no animation,
+timeline, zoom or pan controls are introduced. Preserve the selected appearance,
+town labels, legend and source credits. After a failed update, keep the last
+image with its original timestamp and clearly mark it as old. If no image has
+been received, show “Radar unavailable.” These first-version choices were
+approved on October 15, 2026; they do not establish a completed implementation.
+
+Check RainViewer for a newer frame every **five minutes** after the initial
+attempt when Wi-Fi and the saved location are ready. Download replacement radar
+imagery only when needed for a newer frame, the current location or a retry of
+an incomplete image; an unchanged frame is not a download failure and does not
+make its timestamp newer. The displayed time is the provider's frame timestamp,
+not the time this clock checked for updates. This interval does not change
+forecast/current-condition refresh, retry or quota behavior. The fixed coverage
+and interval were selected on October 15, 2026. They are built-in values; no
+radar settings or zoom slider are introduced for this pass.
 
 Use green below 35 dBZ, yellow from 35 through 44 dBZ and red at 45 dBZ and
 above. dBZ measures radar echo strength; these colors are not a direct rainfall
@@ -547,8 +654,7 @@ two hours of past frames at ten-minute intervals, a maximum zoom of 7 and
 100 requests per IP per minute; future radar frames are unavailable. These
 detailed limits take precedence over the main API page's older FAQ statements.
 
-Exact screen order, geographic extent, background-map source, animation,
-refresh timing and unavailable/stale presentation remain undecided. This choice
+The background-map source remains undecided. This choice
 does not introduce new radar settings, source paths or task ownership; those
 depend on the eventual implementation design. Implementation status belongs in
 [work.md](work.md#radar-source-and-palette-decision--october-13-2026).
@@ -626,7 +732,7 @@ UI screen assignments follow the [approved visual reference](#ui-and-visual-refe
 | `solar_times.c/.h` | Solar-event calculations and unavailable-event results. `night` decides their effect on appearance. |
 | `ui/ui.c` | UI lifetime, active view and navigation, including return destinations, gestures and first-use entry; overlays, alarm preemption, input routing and presentation selection. Touch actions go to the correct feature owner; feature decisions remain with those owners. |
 | `ui/clock_views.c` | Rendering and object handles for analog/digital faces, unavailable time, ringing/snoozed clock surfaces, next alarm, missed alarm, clock status and backup-clock indicator/notice. Active-view and navigation state belong to `ui.c`. |
-| `ui/weather_views.c` | Rendering and private object handles for forecast, conditions and storm treatment; messages and empty/important styling; weather status and warnings. Consumes supplied snapshots and presentation inputs without retaining another weather/message model or active-view state. Navigation, retained display snapshots, displayed-message identity and dismissal completion decisions belong to `ui.c`; message operations belong to `message_service`. Clock-edge objects remain with `clock_views.c`. |
+| `ui/weather_views.c` | Rendering and private object handles for Forecast, Radar replacing Conditions, and storm treatment; retained Conditions rendering code without an active user route; messages and empty/important styling; weather status and warnings. Conditions also remains available in the mockup under the radar decision above. Consumes supplied snapshots and presentation inputs without retaining another weather/message model or active-view state. Navigation, retained display snapshots, displayed-message identity and dismissal completion decisions belong to `ui.c`; message operations belong to `message_service`. Clock-edge objects remain with `clock_views.c`. |
 | `ui/settings.c` | Rendering and controls for Settings entry; Device Setup; Display settings and Messaging; Weather; Wi-Fi list, credentials and progress; Alarm, Time, Repeat, Sound and Snooze editors; Night Shift mode, fixed/solar schedule, offsets and brightness. Owns drafts, nested editing, immediate Sound Machine controls, validation/save/lookup presentation and submission of user changes. Applied settings belong to `device_config`. |
 | `ui/controls.c` | Shared LVGL rows/buttons, styling, time input and keyboard helpers; no saved settings, active-view state, feature decisions/state or navigation authority. |
 
@@ -635,6 +741,12 @@ A copied value is a snapshot for a consumer, not another authority. Runtime fiel
 Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. Clock object handles remain private to `clock_views.c`; its private interface receives display inputs and callbacks from `ui.c` without exporting the shell's state or retaining another service/configuration model. Forecast, Conditions, message and weather-status object handles remain private to `weather_views.c`; the shell supplies current drawing inputs and visibility, without directly manipulating those objects. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
 
 ### Execution
+
+The existing weather request gate uses a static binary semaphore to serialize
+whole requests and their quota-state updates. It does not retain a temporary
+SDK mutex priority boost across the remaining HTTP and decoding work. Current
+request callers are background workers; preserve serialization without forcing
+task priorities or adding a second request owner.
 
 Initialize cJSON's allocation hooks once in `main.c`, before application JSON
 users start. Allocate JSON nodes and strings in the board's PSRAM so downloaded
@@ -645,10 +757,31 @@ ends before decoding, so request buffers and Conditions formatting do not occupy
 the same task stack together. Verify both weather-worker and Settings activation
 paths on hardware rather than relying on native stack behavior.
 
+Use ESP-IDF's existing memory-placement settings to keep larger software
+allocations and TLS working data in PSRAM, preserving internal memory for task
+stacks and hardware transfers. The ordinary allocation preference is 2,048
+bytes, keeping the MP3 input and smaller filesystem buffers internal-preferred;
+the SDK may still fall back when its preferred region cannot satisfy a request.
+TLS selects external software allocation while its hardware transfer descriptors
+remain internal. Keep these choices in `sdkconfig.defaults`, without a custom
+allocator or driver fork. They preserve save behavior and weather validation
+and retries; physical verification and its limits belong in the work record.
+
 Retain the existing network/message workers, LVGL task, and UI heartbeat. Add two long-lived tasks:
 
 - A clock-control task, started by `main.c`, runs time maintenance, alarm evaluation, and Night Shift updates by ordinary calls to their owners. It never waits for the display lock, network requests, or audio streaming. Evaluate due alarms before other optional work. RTC calls use finite timeouts; brightness fades advance in steps, not a sleep loop.
 - The existing audio worker owns all playback. Ringing takes priority over alarm previews; both stop Sound Machine under its [operating rules](#sound-machine-playback). Stop/snooze remains responsive during playback. The current alarm implementation uses a 6 KB stack; measure decoder stack use and adjust this same worker allocation only for a demonstrated need.
+
+Create the existing audio worker on core 1 at its existing priority, keeping
+its execution and lazy speaker completion handling separate from the drawing
+work on core 0. Set the existing LVGL worker and UI heartbeat to core 0 through
+the public BSP display configuration and ESP-IDF task creation facilities;
+retain the other BSP defaults and task priorities. This prevents an unpinned
+display task or the P4's floating-point pinning from placing drawing on the
+audio core. Recording repeats close and reopen the same retained filename,
+using SPIFFS's cached lookup rather than a backward seek through the partition;
+retain decoder reset, exact sample counts and joined tail/head chunks. Failed
+reopens follow the existing Stopped/error and explicit-retry rules.
 
 Start audio after ordinary BSP display/bus initialization. Its worker reads the
 alarm owner's copied phase and applied sound/volume between short PCM writes;
@@ -706,8 +839,15 @@ The UI keeps one action pending across navigation; its completion remains with
 `main.c` until the heartbeat obtains the display lock. Refresh the displayed
 alarm state before handling that completion. The clock owner decides the action
 and its storage result; `ui.c` decides whether returning to home or the snoozed
-page still belongs to the user's current view. Errors reuse the current alarm
-row, page footer or unavailable-time caption.
+page still belongs to the user's current view. Log rejected alarm submissions
+and actions that cannot be applied without replacing the on-screen alarm state
+with a diagnostic. Preserve the actual alarm state, completion matching and
+retry controls; do not show an unaccepted or unapplied action as successful.
+Alarm operating-record storage feedback follows the [alarm contract](#alarm-and-snooze).
+Log audio playback failures without showing an audio-failure caption on the
+ringing screen. Preserve playback failure handling, retry behavior, Snooze,
+Dismiss and alarm recovery. This does not change audio feedback inside the
+preview or Sound Machine editors.
 
 The Alarm editor previews its draft's next scheduled time through the existing
 pure `alarm_schedule` calculation using supplied usable clock time. This is
@@ -723,7 +863,14 @@ Alarm editor. No second draft or saved return route is created.
 
 For House Messages dismissal, UI submits copied displayed-message and device IDs to the existing message worker. `message_service` performs local acknowledgment or the shared-hub request and returns completion data. UI waits for successful acknowledgment before returning to the prior home view; failure retains the message and is reported. Completion must not override alarm preemption or navigate a view the user has already left. `ui.c` owns this navigation; `message_service` owns the acknowledgment and updated message snapshot. Disable duplicate dismissal while pending and report submission failure. No additional permanent worker or general job system is needed.
 
-The existing UI heartbeat gathers owner snapshots before taking the display lock. It consumes a pending message-dismissal result only after acquiring that lock, so the message owner retains the result while the display is busy. On consuming an alarm completion, refresh only its short copied owner state under that lock so an earlier frame or result cannot replace a newly resumed ring. That read performs no I/O. Only UI code under the display lock changes LVGL objects. Keep state-copy locks short; never hold them during I/O. Hardware reads and small operating-record writes can take time; this design does not promise uninterrupted real-time execution during flash operations. Measure interaction and alarm latency during implementation rather than adding speculative workers now.
+The existing UI heartbeat gathers owner snapshots before taking the display lock.
+Schedule its updates at fixed one-second intervals, including its work in that
+period. After an overrun, update current state without replaying missed frames.
+Retain the UI task's minimum-stack observation after valid weather updates,
+outside the display lock, for the measured stack-fault correction. Retire the
+visual-only object/asset/hand-angle diagnostics and their renderer interface;
+ordinary operational status and error logs remain.
+It consumes a pending message-dismissal result only after acquiring that lock, so the message owner retains the result while the display is busy. On consuming an alarm completion, refresh only its short copied owner state under that lock so an earlier frame or result cannot replace a newly resumed ring. That read performs no I/O. Only UI code under the display lock changes LVGL objects. Keep state-copy locks short; never hold them during I/O. Hardware reads and small operating-record writes can take time; this design does not promise uninterrupted real-time execution during flash operations. Measure interaction and alarm latency during implementation rather than adding speculative workers now.
 
 ### Configuration and storage integration
 

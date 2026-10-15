@@ -237,6 +237,14 @@ SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *storage)
   assert(storage && pthread_mutex_init(storage, NULL) == 0);
   return storage;
 }
+/* These checks use the binary gate only as paired request take/give calls.
+ * Model its initial empty state; native pthreads do not model RTOS priority. */
+SemaphoreHandle_t xSemaphoreCreateBinaryStatic(StaticSemaphore_t *storage)
+{
+  SemaphoreHandle_t gate = xSemaphoreCreateMutexStatic(storage);
+  assert(pthread_mutex_lock(gate) == 0);
+  return gate;
+}
 static unsigned semaphore_waiters;
 bool fake_semaphore_wait_for_waiter(void)
 {

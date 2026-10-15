@@ -14,7 +14,8 @@ typedef enum {
   WAC_SETTINGS_NIGHT, WAC_SETTINGS_NIGHT_MODE, WAC_SETTINGS_NIGHT_FIXED,
   WAC_SETTINGS_NIGHT_START, WAC_SETTINGS_NIGHT_END,
   WAC_SETTINGS_NIGHT_SOLAR, WAC_SETTINGS_SUNSET_OFFSET,
-  WAC_SETTINGS_SUNRISE_OFFSET, WAC_SETTINGS_BRIGHTNESS
+  WAC_SETTINGS_SUNRISE_OFFSET, WAC_SETTINGS_BRIGHTNESS,
+  WAC_SETTINGS_MACHINE, WAC_SETTINGS_MACHINE_SOUND, WAC_SETTINGS_MACHINE_TIMER
 } wac_settings_view_t;
 
 /* UI navigation and every LVGL call run under the existing display lock. */
@@ -27,6 +28,7 @@ void wac_settings_apply_night(bool active);
 void wac_settings_update_solar(const solar_times_t *events);
 void wac_settings_update_clock(const wac_time_snapshot_t *clock);
 void wac_settings_update_audio(const wac_audio_snapshot_t *audio);
+void wac_settings_start_machine(bool return_to_clock);
 void wac_settings_start_weather(const device_config_t *config);
 void wac_settings_render(wac_settings_view_t view);
 void wac_settings_close(void);
@@ -58,13 +60,13 @@ void wac_clock_set_visible(bool analog, bool digital, bool usable);
 void wac_clock_apply_night(bool active);
 void wac_clock_update_time(const device_config_t *config, const struct tm *local_time, bool night);
 void wac_clock_update_weather(const app_weather_snapshot_t *weather);
-void wac_clock_log_weather(const app_weather_snapshot_t *weather);
+void wac_clock_update_weather_notice(const char *notice);
 void wac_clock_update_indicators(bool unread, bool important, bool weather_alert, bool night);
 void wac_clock_build_status(lv_obj_t *parent);
 void wac_clock_update_status(const char *text, bool analog, bool waiting_for_sync);
 void wac_clock_build_backup(lv_obj_t *parent, lv_event_cb_t open_cb, lv_event_cb_t dismiss_cb);
 void wac_clock_update_backup(bool home, bool analog, bool usable,
-  wac_time_warning_t warning, bool open, bool dismiss_pending, const char *error, bool night);
+  wac_time_warning_t warning, bool open, bool dismiss_pending, bool night);
 
 /* Navigation selects a surface; the clock renderer owns only its objects. */
 typedef enum {
@@ -76,7 +78,7 @@ void wac_clock_build_alarm(lv_obj_t *parent, lv_event_cb_t action_cb,
 void wac_clock_update_alarm(const device_config_t *config,
   const wac_time_snapshot_t *clock, const wac_alarm_snapshot_t *alarm,
   wac_clock_alarm_surface_t surface, bool analog, bool night,
-  bool caption_blocked, bool pending, const char *error);
+  bool caption_blocked, bool pending);
 
 /* Weather/message rendering consumes these inputs without retaining navigation
  * or another service/configuration snapshot. Surface is a draw-time input. */
@@ -97,5 +99,8 @@ void wac_weather_update(const app_weather_snapshot_t *weather, const struct tm *
   bool time_24h);
 void wac_weather_update_message(const app_message_snapshot_t *snapshot);
 void wac_weather_set_message_dismiss_text(const char *text);
-void wac_weather_update_status(const char *status_text, const app_weather_snapshot_t *weather,
-  bool night, wac_weather_surface_t surface);
+void wac_weather_update_status(const app_weather_snapshot_t *weather,
+  bool night, wac_weather_surface_t surface, const char *retained_notice);
+
+void wac_clock_build_machine(lv_obj_t *parent, lv_event_cb_t open_cb);
+void wac_clock_update_machine(bool home, bool analog, bool usable, bool playing, bool night);

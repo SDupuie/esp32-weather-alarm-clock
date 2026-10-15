@@ -9,7 +9,6 @@
 #include "audio.h"
 #include "solar_times.h"
 
-#define APP_STATUS_TEXT_LEN 96
 #define APP_WEATHER_SUMMARY_LEN 32
 #define APP_WEATHER_ICON_NAME_LEN 24
 #define APP_FORECAST_DAYS 5
@@ -28,7 +27,7 @@ typedef struct {
 typedef struct {
   bool valid;
   bool stale;
-  time_t updated_at;
+  time_t updated_at; /* Trusted download time, or zero if time was unavailable. */
   time_t observed_at; /* Provider observation, distinct from download time. */
   int temp;
   int high;
@@ -64,7 +63,6 @@ typedef struct {
   solar_times_t solar; /* Owner's raw sunset today and sunrise tomorrow. */
   uint32_t unread_message_count;
   bool has_important_message;
-  char weather_status[APP_STATUS_TEXT_LEN];
   app_weather_snapshot_t weather;
   app_message_snapshot_t message;
 } app_runtime_state_t;

@@ -3,6 +3,10 @@
 These checks compile the actual firmware logic on the development computer.
 They do not establish touchscreen behavior, real network traffic, physical
 power-cut outcomes, RTC hardware, speaker sound or backlight behavior.
+The native semaphore substitutes check the weather gate's paired take/give
+usage and overlapping requests; they do not model ESP-IDF task-priority
+inheritance or scheduling. Board timing evidence belongs in the
+[work record](../../../docs/work.md).
 
 ## Weather and location
 
@@ -148,6 +152,45 @@ owner's separate blocked-save checks establish that its live canceled/snoozed
 phase is published before storage returns; audio tests consume controlled copies
 of that phase rather than executing actual NVS in their worker.
 
+Sound Machine checks extend the same audio target. They cover all timers and
+live changes, the final fade, preview/ring priority, no automatic resume,
+cancellation during setup/read/decode, returned failures and resource cleanup.
+Two million samples per noise and seed, including the firmware's starting seed,
+check complete retained-state chunks, finite output/state, mean, RMS and different
+high-frequency energy. Frozen results from the linked website's source equations
+check White scaling, Pink/Brown samples above the former clipping limit and
+Brown's unscaled internal state. The roughness comparison follows the restored
+equations; the retired Brown state/flat-run limits are removed. These native
+checks do not establish audible character, worst-case peaks or uninterrupted
+board playback. Recording checks parse the actual nine MP3
+headers and frame lengths against independent expected sample counts, then use
+simulated decoder PCM to exercise consumption, exact-length caps and writes
+containing both a repeat's tail and its next head. Two repeats of each recording
+check every simulated output sample and stream
+open/close accounting. Independent dB-derived expectations check the approved
+recording boosts for all nine selections, zero/partial/full volume, and the
+existing sleep fade. The same gain checks cover the approved noise-output
+reductions without changing source equations; recording worker checks cover live volume and fade
+changes without restarting decoding. Repeat reopen/close failures and Stop during reopening
+check cleanup, no automatic retry and explicit retry.
+Constructed loud Campfire decoder samples check both PCM conversion limits and
+correct scaling of quieter samples under its approved larger boost. This checks
+bounded conversion rather than establishing absence of audible clipping.
+The host includes the actual managed API headers but cannot execute the target
+decoder library. These checks
+do not prove actual decoded PCM, audible seams or board refill timing.
+
+Actual LVGL Sound Machine checks cover all sound/timer choices, list and scrollbar
+dragging, volume geometry, immediate saves and retry, pending choices surviving
+editor closure, unrelated drafts and keyboard/cursor preservation, copied audio
+status, Day/Night clock shortcuts and preserved alarm tap areas. Owner copies
+and background saves are substituted; physical rendering and touch remain board
+checks. Clock shortcut checks measure actual text bounds for all seven weekday
+names on both faces in Day/Night appearance, keeping both icons clear of the
+weekday/date labels. Pointer checks cover speaker and backup-warning actions.
+Configuration checks cover its three preferences, typed defaults/reload,
+validation, partial-save failures/retry and concurrent unrelated saves.
+
 Actual LVGL pointer checks cover copied unsaved sound/volume, Start/Stop,
 Day/Night geometry and icon/text alignment, completion/error/readiness updates
 in place, selection/navigation/close/hide cancellation, and draft preservation
@@ -216,6 +259,13 @@ date/temperature/icon pairing, missing or invalid dates, downloads without
 usable time, retained payloads after failure, ten-minute refreshes and independent
 twenty-second weather and network-time-startup retries, including slow requests
 whose retry times overlap. It also checks that a saved location is required.
+No-profile, missing-location, Wi-Fi initialization/connection failures and live
+request checks verify that routine display progress is no longer published.
+Retained payloads stay stale during the next request, including Wi-Fi loss,
+and a successful download clears that state. Download timestamps are published
+only with usable network time; unavailable and RTC-only time publish no age.
+Retained values, stale state and the existing refresh/retry timing are checked
+together.
 Both providers are exercised using retained real response data and explicitly
 constructed current/error/rare-condition supplements. Checks cover selected
 units, raw fractional amounts, observation timestamps, provider local times
@@ -430,6 +480,15 @@ object checks do not establish the quality of the scaled raster font or physical
 rendering. The unavailable screen includes the saved-alarm caption and the
 Alarm Settings shortcut, checked with actual pointer input.
 
+Notification checks cover initial waiting and failed retries on all four
+weather surfaces; retained age boundaries and missing, future or untrusted
+timestamps on the clock faces and Conditions; fixed Forecast stale wording
+directly above the primary day; Night visibility, notice positions and no
+duplicate footer. Removed backup/alarm technical captions stay absent while
+failed submissions, pending actions, live state and retry controls remain
+truthful. Playback failure tests retain stopped/error/explicit-retry behavior;
+the native logging substitute checks format arguments without capturing output.
+
 Alarm presentation checks compare Ringing and Snoozed objects against the
 approved Day/Night geometry, colors and typography, with real pointer presses
 on Snooze, Dismiss, missed notices and Alarm Settings. Captured schedule dates
@@ -470,7 +529,7 @@ weather. Forecast keeps its date/temperature layout while all five pictures are
 invisible; actual font lookup verifies that the loading ellipses exist. Failed
 requests, retained weather through failed refreshes and later success check the
 Forecast/Conditions notice wording, boxes and styling, including immediate
-repositioning during pointer swipes and preserved home/progress messages.
+repositioning during pointer swipes and preserved home weather-failure notices.
 Checks also retain provider-date pairing, the declined Night typography and
 Conditions presentation, and verify the approved AM/PM, temperature, High/Low,
 divider and Dismiss-button changes. Synthetic RTC/network snapshots check

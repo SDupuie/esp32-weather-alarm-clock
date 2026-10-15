@@ -31,6 +31,13 @@ experimental-feature gate; setting the flash size alone does not enable those
 reads. Keep the matching bootloader and application together when flashing.
 Board verification and chip-specific limits belong in the [work record](../../docs/work.md).
 
+The build also generates `storage.bin` from the nine prepared Sound Machine MP3s
+in `shared/assets/sounds/clock/`. Ordinary USB flashing includes that image in
+the existing storage partition; it does not erase NVS settings. Source recordings
+are not packaged. Playback uses the managed `esp_audio_codec` dependency pinned
+to 2.5.0 for the development board's revision 1.3; newer releases require newer
+P4 silicon. Its package retains its own license and notices.
+
 The checked-in configuration selects ESP32-P4. Use `scripts/set-target.sh` only when intentionally resetting the target configuration. See [test instructions](tests/README.md) for native checks.
 
 Artwork generators update existing outputs. When adding or retiring a generated source, update `main/CMakeLists.txt` under the [source-list rules](../../docs/architecture.md#existing-code-changes-that-matter); there is no separate generated build manifest.
@@ -60,7 +67,10 @@ After activating the environment above, run:
 targets/esp32-p4/scripts/build-release.sh
 ```
 
-This builds through the normal build helper and copies the three firmware images into `docs/firmware/`. It does not publish the website or flash a board.
+This builds through the normal build helper and copies four firmware images into
+`docs/firmware/`: bootloader, partition table, application and `storage.bin` with
+the nine Sound Machine recordings. The installer manifest includes all four at
+the current partition offsets. It does not publish the website or flash a board.
 
 For a versioned release, update the version in `docs/firmware/manifest.json` manually. The helper does not choose or change it.
 

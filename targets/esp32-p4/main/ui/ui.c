@@ -45,7 +45,6 @@ typedef struct {
   bool clock_usable;
   wac_time_warning_t clock_warning;
   bool backup_notice_open;
-  char backup_error_text[96];
   wac_time_warning_t backup_dismiss_warning;
   bool night_overlay_active;
   bool has_unread_messages;
@@ -55,15 +54,10 @@ typedef struct {
   bool message_ack_return_allowed;
   bool message_held;
   bool has_important_messages;
-  bool pending_weather_diag_logged;
   app_weather_snapshot_t weather;
-  /* Raw owner text is retained only to redraw it when navigation changes
-   * the notice's wording and position. */
-  char weather_status[APP_STATUS_TEXT_LEN];
   device_config_t config_snapshot;
   int last_displayed_minute_key;
   int64_t last_minute_advance_ms;
-  time_t last_logged_weather_updated_at;
   wac_time_snapshot_t clock;
   wac_alarm_snapshot_t alarm;
   wac_audio_snapshot_t audio;
@@ -72,7 +66,6 @@ typedef struct {
   app_alarm_action_t pending_alarm_action;
   wac_alarm_occurrence_t pending_alarm_occurrence;
   bool alarm_action_return_allowed;
-  char alarm_error_text[128];
 } app_ui_state_t;
 
 static app_ui_state_t s_ui;
@@ -199,6 +192,7 @@ static void yield_ui_bootstrap(void)
 
 static void open_settings(void);
 static void update_backup_notice(void);
+static void machine_open_event_cb(lv_event_t *event);
 static void apply_view_night_state(bool active);
 static void update_weather_status(void);
 static void update_alarm_surface(void);
@@ -528,14 +522,11 @@ static void backup_dismiss_event_cb(lv_event_t *event)
   esp_err_t error = s_clock_warning_dismiss_handler
     ? s_clock_warning_dismiss_handler(s_ui.clock_warning) : ESP_ERR_INVALID_STATE;
   if (error != ESP_OK) {
-    char text[96];
-    snprintf(text, sizeof(text), "Dismiss failed (%s).", esp_err_to_name(error));
-    snprintf(s_ui.backup_error_text, sizeof(s_ui.backup_error_text), "%s", text);
+    ESP_LOGW(TAG, "Backup-clock dismissal failed: %s", esp_err_to_name(error));
     update_backup_notice();
     return;
   }
   s_ui.backup_dismiss_warning = s_ui.clock_warning;
-  s_ui.backup_error_text[0] = '\0';
   update_backup_notice();
 }
 
@@ -546,12 +537,23 @@ static void update_backup_notice(void)
   wac_clock_update_backup(home, s_ui.current_view == APP_VIEW_ANALOG,
     s_ui.clock_usable, s_ui.clock_warning, s_ui.backup_notice_open,
     s_ui.backup_dismiss_warning != WAC_TIME_WARNING_NONE,
-    s_ui.backup_error_text, s_ui.night_overlay_active);
+    s_ui.night_overlay_active);
+  wac_clock_update_machine(home, s_ui.current_view == APP_VIEW_ANALOG, s_ui.clock_usable,
+    s_ui.audio.machine_active, s_ui.night_overlay_active);
 }
 
 void app_ui_set_clock_warning_dismiss_handler(esp_err_t (*handler)(wac_time_warning_t))
 {
   s_clock_warning_dismiss_handler = handler;
+}
+
+static void machine_open_event_cb(lv_event_t *event)
+{
+  (void)event;
+  if (alarm_ringing() || s_ui.backup_notice_open) return;
+  bool returning_to_draft = s_ui.settings_suspended;
+  open_settings();
+  if (settings_visible()) wac_settings_start_machine(!returning_to_draft);
 }
 
 static void build_night_overlay(lv_obj_t *parent)
@@ -624,7 +626,22 @@ static void update_weather_status(void)
   else if (s_ui.current_view == APP_VIEW_CONDITIONS) surface = WAC_WEATHER_SURFACE_CONDITIONS;
   else if (s_ui.current_view == APP_VIEW_MESSAGE) surface = WAC_WEATHER_SURFACE_MESSAGE;
   else if (!s_ui.clock_usable) surface = WAC_WEATHER_SURFACE_UNAVAILABLE_HOME;
-  wac_weather_update_status(s_ui.weather_status, &s_ui.weather, s_ui.night_overlay_active, surface);
+  char notice[64] = "";
+  if (s_ui.weather.valid && s_ui.weather.stale) {
+    const wac_time_snapshot_t *clock = &s_ui.clock;
+    if (!clock->usable || clock->source != WAC_TIME_SOURCE_NETWORK
+        || s_ui.weather.updated_at <= 0 || clock->utc_now < s_ui.weather.updated_at) {
+      snprintf(notice, sizeof(notice), "Weather data stale");
+    } else {
+      unsigned long age = (unsigned long)difftime(clock->utc_now, s_ui.weather.updated_at);
+      if (age < 60) snprintf(notice, sizeof(notice), "Weather updated just now");
+      else if (age < 3600) snprintf(notice, sizeof(notice), "Weather updated %lum ago", age / 60);
+      else if (age < 86400) snprintf(notice, sizeof(notice), "Weather updated %luh ago", age / 3600);
+      else snprintf(notice, sizeof(notice), "Weather updated %lud ago", age / 86400);
+    }
+  }
+  wac_clock_update_weather_notice(notice);
+  wac_weather_update_status(&s_ui.weather, s_ui.night_overlay_active, surface, notice);
 }
 
 static void update_alarm_surface(void)
@@ -642,13 +659,9 @@ static void update_alarm_surface(void)
     !page && s_ui.current_view == APP_VIEW_MESSAGE);
   bool blocked = s_ui.backup_notice_open || (s_ui.clock.usable
     && (clock_is_stale() || s_ui.clock.source == WAC_TIME_SOURCE_RTC));
-  const char *error = s_ui.alarm_error_text;
-  if (!error[0] && s_ui.alarm.storage_error != ESP_OK) error = "Alarm storage error.";
-  if (!error[0] && alarm_ringing() && (!s_ui.audio.ready || s_ui.audio.error != ESP_OK))
-    error = "Alarm audio unavailable.";
   wac_clock_update_alarm(&s_ui.config_snapshot, &s_ui.clock, &s_ui.alarm, surface,
     s_ui.current_view == APP_VIEW_ANALOG, s_ui.night_overlay_active, blocked,
-    s_ui.alarm_action_pending, error);
+    s_ui.alarm_action_pending);
   wac_settings_set_visible(settings_visible() && !alarm_ringing());
   update_night_overlay_visibility();
   update_clock_status(&s_ui.clock);
@@ -697,10 +710,7 @@ static void submit_alarm_action(app_alarm_action_t action)
     s_ui.pending_alarm_action = action;
     s_ui.pending_alarm_occurrence = *occurrence;
     s_ui.alarm_action_return_allowed = !missed;
-    s_ui.alarm_error_text[0] = '\0';
   } else {
-    snprintf(s_ui.alarm_error_text, sizeof(s_ui.alarm_error_text),
-      "Action not sent. Try again.");
     ESP_LOGW(TAG, "Alarm action submission failed: %s", esp_err_to_name(result));
   }
   update_alarm_surface();
@@ -759,12 +769,8 @@ void app_ui_complete_alarm_action(app_alarm_action_t action,
     && same_occurrence(occurrence, &s_ui.alarm.current);
   bool dismissed = action == APP_ALARM_DISMISS && s_ui.alarm.phase == WAC_ALARM_IDLE;
   if (result != ESP_OK) {
-    snprintf(s_ui.alarm_error_text, sizeof(s_ui.alarm_error_text),
-      snoozed || dismissed || (action == APP_ALARM_DISMISS_MISSED && !s_ui.alarm.missed.valid)
-        ? "Could not save alarm state." : "Action not applied. Try again.");
     ESP_LOGW(TAG, "Alarm action failed: %s", esp_err_to_name(result));
   }
-  else s_ui.alarm_error_text[0] = '\0';
   if (return_allowed && (snoozed || dismissed)) {
     set_view_mode(s_ui.last_home_view);
     s_ui.snoozed_view = snoozed;
@@ -808,6 +814,7 @@ static void build_app_shell(const device_config_t *config)
   wac_weather_build_status(s_ui.stage);
   wac_clock_build_status(s_ui.stage);
   build_night_overlay(s_ui.stage);
+  wac_clock_build_machine(s_ui.stage, machine_open_event_cb);
   wac_clock_build_backup(s_ui.stage, backup_open_event_cb, backup_dismiss_event_cb);
   wac_clock_build_alarm(s_ui.stage, alarm_action_event_cb, alarm_badge_event_cb, open_alarm_event_cb);
 
@@ -860,11 +867,9 @@ esp_err_t app_ui_update_runtime(
     s_ui.alarm_action_return_allowed = false;
     s_ui.snoozed_view = false;
     s_ui.current_view = s_ui.last_home_view;
-    s_ui.alarm_error_text[0] = '\0';
   }
   if (runtime->alarm.phase != WAC_ALARM_SNOOZED) s_ui.snoozed_view = false;
   s_ui.clock_usable = runtime->clock.usable;
-  wac_time_warning_t previous_warning = s_ui.clock_warning;
   s_ui.clock_warning = runtime->clock.warning;
   if (s_ui.clock_warning == WAC_TIME_WARNING_NONE) s_ui.backup_notice_open = false;
   /* The owner may acknowledge one warning and reveal another between UI
@@ -873,21 +878,9 @@ esp_err_t app_ui_update_runtime(
       || (s_ui.backup_dismiss_warning != WAC_TIME_WARNING_NONE
           && s_ui.clock_warning != s_ui.backup_dismiss_warning)) {
     s_ui.backup_dismiss_warning = WAC_TIME_WARNING_NONE;
-    s_ui.backup_error_text[0] = '\0';
-  } else if (previous_warning != s_ui.clock_warning) {
-    s_ui.backup_error_text[0] = '\0';
   }
-  bool weather_changed = false;
   if (runtime->weather.valid) {
-    weather_changed = !s_ui.weather.valid
-      || runtime->weather.updated_at != s_ui.weather.updated_at
-      || strncmp(
-        runtime->weather.icon_name,
-        s_ui.weather.icon_name,
-        sizeof(runtime->weather.icon_name)
-      ) != 0;
     s_ui.weather = runtime->weather;
-    s_ui.pending_weather_diag_logged = false;
   }
 
   time_t display_time = runtime->clock.usable ? runtime->clock.utc_now : 0;
@@ -904,19 +897,10 @@ esp_err_t app_ui_update_runtime(
     wac_weather_update(&s_ui.weather, time_available ? &local_time : NULL,
       wac_ui_strings_equal_ignore_case(config->time_format, "24"));
     s_ui.weather_alert_active = s_ui.weather.has_conditions && s_ui.weather.conditions.alert;
-    if (weather_changed || s_ui.last_logged_weather_updated_at != s_ui.weather.updated_at) {
-      wac_clock_log_weather(&s_ui.weather);
-      s_ui.last_logged_weather_updated_at = s_ui.weather.updated_at;
-    }
   } else {
     wac_clock_update_weather(NULL);
     wac_weather_update(&s_ui.weather, NULL,
       wac_ui_strings_equal_ignore_case(config->time_format, "24"));
-    if (!s_ui.pending_weather_diag_logged) {
-      wac_clock_log_weather(NULL);
-      s_ui.pending_weather_diag_logged = true;
-      s_ui.last_logged_weather_updated_at = 0;
-    }
   }
   refresh_message_ui_state(&runtime->message, runtime->unread_message_count, runtime->has_important_message);
   s_ui.night_overlay_active = runtime->night_active;
@@ -926,7 +910,6 @@ esp_err_t app_ui_update_runtime(
   wac_settings_update_audio(&runtime->audio);
   apply_view_night_state(s_ui.night_overlay_active);
   update_clock_status(&runtime->clock);
-  snprintf(s_ui.weather_status, sizeof(s_ui.weather_status), "%s", runtime->weather_status);
   update_weather_status();
   wac_settings_poll();
   update_alarm_surface();

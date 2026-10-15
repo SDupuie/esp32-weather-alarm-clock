@@ -34,6 +34,20 @@ esp_err_t wac_audio_stop_preview(void)
   audio_snapshot.preview_active = false;
   return ESP_OK;
 }
+static unsigned machine_plays, machine_stops;
+static esp_err_t machine_result = ESP_OK;
+esp_err_t wac_audio_sound_machine_play(void)
+{
+  ++machine_plays;
+  if (machine_result == ESP_OK) audio_snapshot.machine_pending = true;
+  return machine_result;
+}
+esp_err_t wac_audio_sound_machine_stop(void)
+{
+  ++machine_stops;
+  audio_snapshot.machine_active = audio_snapshot.machine_pending = false;
+  return ESP_OK;
+}
 void wac_audio_copy(wac_audio_snapshot_t *out) { *out = audio_snapshot; }
 
 /* Constructed responses replace only the remote weather backend. */
@@ -1236,8 +1250,7 @@ static void test_settings_foundation(void)
     wac_settings_begin(lv_screen_active(), &snapshot);
     wac_ui_settings_navigate(WAC_SETTINGS_ENTRY);
     menu_heading("Settings", night);
-    menu_row("Alarm", "Off", 212, false, night);
-    menu_switch("Alarm", false, night);
+    menu_row("Sound Machine", "Rain", 212, true, night);
     menu_row("Alarm Settings", "6:45 PM · Every Day", 320, true, night);
     menu_row("Display Settings", "Digital · 12-Hour", 428, true, night);
     menu_row("Device Setup", NULL, 536, false, night);
@@ -3180,13 +3193,14 @@ static void test_alarm_failed_save_retry_and_toggle(void)
   assert(!strcmp(value.room_name, newer.room_name));
   assert(view == WAC_SETTINGS_ENTRY && restart_count == 0);
   fake_nvs_clear_activity();
+  click("Alarm Settings");
   menu_switch("Alarm", true, false);
   tap(menu_button("Alarm", "On"));
   assert(task_count == 1 && fake_nvs_calls(FAKE_SET) == 0);
   run_task();
   value = current();
   assert(!value.alarm_enabled && value.alarm_hour == 6);
-  assert(view == WAC_SETTINGS_ENTRY && restart_count == 0);
+  assert(view == WAC_SETTINGS_ALARM && restart_count == 0);
   menu_switch("Alarm", false, false);
 }
 
@@ -3811,7 +3825,7 @@ static void test_clock_time_font(void)
 static void test_keyboard_only_on_text_editors(void)
 {
   fresh_editor();
-  for (wac_settings_view_t next = WAC_SETTINGS_ENTRY; next <= WAC_SETTINGS_BRIGHTNESS; ++next) {
+  for (wac_settings_view_t next = WAC_SETTINGS_ENTRY; next <= WAC_SETTINGS_MACHINE_TIMER; ++next) {
     /* Begin with an allocated keyboard so each nontext view must remove it. */
     wac_ui_settings_navigate(WAC_SETTINGS_DEVICE);
     unsigned index = 0;
@@ -3851,6 +3865,147 @@ static void test_keyboard_only_on_text_editors(void)
   wac_ui_settings_close();
 }
 
+static void test_sound_machine_controls(void)
+{
+  const char *names[] = {"Rain", "Thunder", "Ocean", "Wind", "Forest", "Campfire", "Stream", "Night", "Singing Bowl", "White Noise", "Pink Noise", "Brown Noise"};
+  const unsigned durations[] = {0, 15, 30, 60, 120};
+  for (unsigned night = 0; night < 2; ++night) {
+    fresh_editor(); wac_settings_apply_night(night);
+    machine_plays = machine_stops = 0; machine_result = ESP_OK;
+    menu_row("Sound Machine", "Rain", 212, true, night);
+    click("Sound Machine"); menu_heading("Sound Machine", night);
+    menu_box(menu_button("Sound", "Rain"), 140, 212, 520, 96);
+    menu_box(menu_button("Sleep Timer", "30 Minutes"), 140, 320, 520, 96);
+    operation_label("30%", 498, 452, 150, &lv_font_montserrat_32, false, night);
+    operation_label("Stopped", 150, 598, 500, &lv_font_montserrat_26, true, night);
+    unsigned slider_index = 0;
+    lv_obj_t *range = find_type(lv_screen_active(), &lv_slider_class, &slider_index);
+    menu_box(range, 175, 532, 450, 8);
+    assert(lv_slider_get_min_value(range) == 0 && lv_slider_get_max_value(range) == 100);
+    assert(lv_obj_get_style_pad_left(range, LV_PART_KNOB) == 14);
+    menu_box(menu_button("Play", NULL), 270, 676, 260, 80);
+    click("Play"); assert(machine_plays == 1 && audio_snapshot.machine_pending);
+    wac_settings_update_audio(&audio_snapshot); assert(menu_button("Stop", NULL));
+    unsigned writes = fake_nvs_calls(FAKE_SET);
+    click("Sound"); assert(audio_snapshot.machine_pending && machine_stops == 0);
+    lv_obj_t *list = lv_obj_get_parent(menu_button("Rain", NULL));
+    menu_box(list, 140, 212, 520, 420);
+    assert(lv_obj_get_scroll_dir(list) == LV_DIR_VER);
+    lv_obj_t *bar = find_box(lv_screen_active(), &lv_obj_class, 672, 212, 10, 420, NULL);
+    assert(bar && lv_obj_get_child_count(bar) == 1);
+    assert(lv_obj_get_height(lv_obj_get_child(bar, 0)) == 137);
+    assert(lv_obj_get_style_bg_opa(bar, 0) == 97);
+    assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(bar, 0), 0), lv_color_hex(night ? 0xe1b6b6 : 0x93d1ff)));
+    press(bar); pointer_data.point.y = 630; lv_tick_inc(30); lv_indev_read(pointer); release();
+    lv_obj_update_layout(lv_screen_active());
+    assert(lv_obj_get_scroll_y(list) >= 860 && lv_obj_get_y(lv_obj_get_child(bar, 0)) >= 280);
+    lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+    pointer_data.point = (lv_point_t){400, 575}; pointer_data.state = LV_INDEV_STATE_PRESSED; lv_indev_read(pointer);
+    pointer_data.point.y = 275; lv_tick_inc(30); lv_indev_read(pointer); release();
+    assert(lv_obj_get_scroll_y(list) > 250 && task_count == 0);
+    lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+    for (unsigned i = 0; i < 12; ++i) {
+      list = lv_obj_get_parent(menu_button(names[i], NULL));
+      lv_obj_t *choice = menu_button(names[i], NULL);
+      assert(lv_obj_get_x(choice) == 0 && lv_obj_get_y(choice) == (int)i * 108);
+      assert(lv_obj_get_width(choice) == 520 && lv_obj_get_height(choice) == 96);
+      lv_obj_scroll_to_y(list, i < 9 ? i * 108 : 864, LV_ANIM_OFF);
+      tap(menu_button(names[i], NULL));
+      assert(task_count == 1 && fake_nvs_calls(FAKE_SET) == writes);
+      run_task(); writes = fake_nvs_calls(FAKE_SET);
+      assert(current().sound_machine_sound == (device_config_sound_machine_sound_t)i);
+      assert(current().alarm_volume == 50 && !current().alarm_enabled);
+    }
+    click("Done"); assert(view == WAC_SETTINGS_MACHINE && audio_snapshot.machine_pending);
+    click("Sleep Timer");
+    for (unsigned i = 0; i < 5; ++i) {
+      char text[32]; if (durations[i]) snprintf(text, sizeof(text), "%u Minutes", durations[i]); else strcpy(text, "Continuous");
+      menu_box(menu_button(text, NULL), 170, 212 + i * 92, 460, 80);
+      tap(menu_button(text, NULL)); run_task();
+      assert(current().sound_machine_timer_minutes == durations[i]);
+    }
+    header_back(); assert(view == WAC_SETTINGS_MACHINE);
+    slider_index = 0; range = find_type(lv_screen_active(), &lv_slider_class, &slider_index);
+    lv_slider_set_value(range, 0, LV_ANIM_OFF); lv_obj_send_event(range, LV_EVENT_VALUE_CHANGED, NULL);
+    assert(task_count == 1);
+    lv_slider_set_value(range, 100, LV_ANIM_OFF); lv_obj_send_event(range, LV_EVENT_VALUE_CHANGED, NULL);
+    run_task(); assert(task_count == 1); run_task();
+    assert(current().sound_machine_volume == 100 && current().alarm_volume == 50);
+    assert(find_type(lv_screen_active(), &lv_slider_class, &(unsigned){0}) == range);
+    audio_snapshot.machine_pending = false; audio_snapshot.machine_active = true;
+    audio_snapshot.machine_continuous = false; audio_snapshot.machine_remaining_seconds = 61;
+    wac_settings_update_audio(&audio_snapshot);
+    operation_label("Playing · 2 min left", 150, 598, 500, &lv_font_montserrat_26, true, night);
+    audio_snapshot.machine_continuous = true; wac_settings_update_audio(&audio_snapshot);
+    assert(menu_label(lv_screen_active(), "Playing · Continuous"));
+    writes = fake_nvs_calls(FAKE_SET); click("Stop"); assert(machine_stops == 1);
+    header_back(); assert(view == WAC_SETTINGS_ENTRY && fake_nvs_calls(FAKE_SET) == writes);
+    assert(menu_button("Sound Machine", "Brown Noise"));
+    click("Sound Machine"); machine_result = ESP_FAIL; click("Play");
+    assert(menu_label(lv_screen_active(), "Could not start. Try Play again."));
+    machine_result = ESP_OK; click("Play"); assert(audio_snapshot.machine_pending);
+    click("Stop");
+    click("Sound"); fake_nvs_clear_activity(); fake_nvs_fail(FAKE_COMMIT, 1);
+    click("Ocean"); run_task();
+    assert(current().sound_machine_sound == DEVICE_CONFIG_SOUND_MACHINE_BROWN_NOISE);
+    assert(menu_button("Retry Save", NULL));
+    fake_nvs_clear_activity(); click("Retry Save"); run_task();
+    assert(current().sound_machine_sound == DEVICE_CONFIG_SOUND_MACHINE_OCEAN);
+    click("Done"); header_back();
+    /* A pending alarm draft can coexist with immediately saved machine choices. */
+    click("Alarm Settings"); click("Alarm Time"); picker_set(8, 25, true); click("Done");
+    wac_settings_start_machine(false); click("Sleep Timer"); click("15 Minutes"); run_task(); click("Done"); header_back();
+    assert(view == WAC_SETTINGS_ALARM && menu_button("Alarm Time", "8:25 AM"));
+    click("Cancel"); assert(current().alarm_hour == 7 && current().sound_machine_timer_minutes == 15);
+    click("Sound Machine");
+    slider_index = 0; range = find_type(lv_screen_active(), &lv_slider_class, &slider_index);
+    lv_slider_set_value(range, 40, LV_ANIM_OFF); lv_obj_send_event(range, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_slider_set_value(range, 75, LV_ANIM_OFF); lv_obj_send_event(range, LV_EVENT_VALUE_CHANGED, NULL);
+    header_back(); click("Back to Clock");
+    assert(view == WAC_SETTINGS_NONE);
+    run_task(); assert(task_count == 1); run_task();
+    assert(current().sound_machine_volume == 75 && current().alarm_volume == 50);
+    open_editor(); click("Sound Machine");
+    slider_index = 0; range = find_type(lv_screen_active(), &lv_slider_class, &slider_index);
+    lv_slider_set_value(range, 20, LV_ANIM_OFF); lv_obj_send_event(range, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_slider_set_value(range, 45, LV_ANIM_OFF); lv_obj_send_event(range, LV_EVENT_VALUE_CHANGED, NULL);
+    header_back(); click("Alarm Settings"); click("Alarm Time"); picker_set(9, 10, true); click("Done");
+    lv_obj_t *retained_alarm_row = menu_button("Alarm Time", "9:10 AM");
+    lv_obj_t *retained_save = menu_button("Save", NULL);
+    assert(lv_obj_has_state(retained_save, LV_STATE_DISABLED));
+    run_task(); assert(task_count == 1); run_task();
+    assert(current().sound_machine_volume == 45 && menu_button("Alarm Time", "9:10 AM") == retained_alarm_row);
+    assert(menu_button("Save", NULL) == retained_save && !lv_obj_has_state(retained_save, LV_STATE_DISABLED));
+    click("Cancel");
+    click("Sound Machine"); click("Sleep Timer"); fake_nvs_clear_activity(); fake_nvs_fail(FAKE_COMMIT, 1);
+    click("60 Minutes"); header_back(); header_back(); click("Back to Clock"); run_task();
+    open_editor(); click("Sound Machine");
+    assert(menu_button("Sleep Timer", "60 Minutes") && menu_button("Retry Save", NULL));
+    fake_nvs_clear_activity(); click("Retry Save"); run_task();
+    assert(current().sound_machine_timer_minutes == 60); header_back();
+    click("Sound Machine"); slider_index = 0;
+    range = find_type(lv_screen_active(), &lv_slider_class, &slider_index);
+    lv_slider_set_value(range, 62, LV_ANIM_OFF); lv_obj_send_event(range, LV_EVENT_VALUE_CHANGED, NULL);
+    header_back(); click("Device Setup"); click("Messaging");
+    field(0, "Unsaved machine-concurrent room");
+    lv_obj_t *room = menu_field("Room Name");
+    tap(lv_obj_get_parent(room));
+    lv_textarea_set_cursor_pos(room, 4);
+    unsigned keyboard_index = 0;
+    lv_obj_t *keyboard = find_type(lv_screen_active(), &lv_keyboard_class, &keyboard_index);
+    assert(keyboard && lv_keyboard_get_textarea(keyboard) == room);
+    run_task();
+    assert(menu_field("Room Name") == room && lv_textarea_get_cursor_pos(room) == 4);
+    assert(lv_keyboard_get_textarea(keyboard) == room && !lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN));
+    assert(!strcmp(lv_textarea_get_text(room), "Unsaved machine-concurrent room"));
+    keyboard_key(keyboard, LV_SYMBOL_OK, false); click("Done"); click("Messaging");
+    assert(!strcmp(lv_textarea_get_text(menu_field("Room Name")), "Unsaved machine-concurrent room"));
+    click("Done"); click("Cancel");
+    assert(current().sound_machine_volume == 62 && strcmp(current().room_name, "Unsaved machine-concurrent room"));
+  }
+  wac_settings_apply_night(false);
+}
+
 int main(int argc, char **argv)
 {
   lv_init();
@@ -3878,6 +4033,7 @@ int main(int argc, char **argv)
   } else {
     assert(argc == 1);
     test_settings_foundation();
+    test_sound_machine_controls();
     test_entry_saved_time_caption();
     test_leading_zero_24h_preserves_preference();
     test_display_save_scope_retry_and_replaced_editor();
@@ -4342,8 +4498,9 @@ static void assert_forecast_artwork(lv_obj_t *root, bool loaded, unsigned *count
 static void assert_data_notice(const char *text, bool conditions)
 {
   lv_obj_t *notice = find_visible_label(lv_screen_active(), text);
+  if (!notice) fprintf(stderr, "Missing %s weather notice: %s\n", conditions ? "Conditions" : "Forecast", text);
   assert(notice);
-  menu_box(notice, conditions ? 150 : 180, conditions ? 680 : 48,
+  menu_box(notice, conditions ? 150 : 180, conditions ? 680 : 120,
            conditions ? 500 : 440, -1);
   assert(lv_obj_get_style_text_font(notice, 0) == &lv_font_montserrat_22);
   assert(lv_obj_get_style_text_opa(notice, 0) == LV_OPA_COVER);
@@ -4388,6 +4545,10 @@ static unsigned assert_section_dividers(lv_obj_t *root, bool night, bool digital
   return count;
 }
 
+static void conditions_arc_objects(lv_obj_t **headline, lv_obj_t **detail);
+static void assert_conditions_arc_text(lv_obj_t *headline, lv_obj_t *detail,
+  const char *expected_headline, const char *expected_detail);
+
 static void test_weather_screen_transitions(lv_indev_t *pointer)
 {
   fake_nvs_reset();
@@ -4412,7 +4573,7 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
     lv_font_glyph_dsc_t ellipsis;
     assert(lv_font_get_glyph_dsc(waiting_font, &ellipsis, 0x2026, 0));
     assert(!ellipsis.is_placeholder && ellipsis.box_w > 0);
-    assert(find_visible_label(lv_screen_active(), analog ? "Oct 9" : "OCT 9"));
+    assert(find_visible_label(lv_screen_active(), "Oct 9"));
     assert(!find_visible_label(lv_screen_active(), "Loading Weather"));
     assert(!find_visible_label(lv_screen_active(), "Please wait"));
     assert(!find_visible_label(lv_screen_active(), "--"));
@@ -4430,14 +4591,17 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
     runtime.night_active = false;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(find_visible_label(lv_screen_active(), "Waiting for weather…"));
-    strcpy(runtime.weather_status, "Weather request failed. Retrying...");
+    /* A failed initial attempt republishes invalid weather. The service tests
+     * separately verify the attempt and retry; this checks unchanged waiting. */
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(find_visible_label(lv_screen_active(), "Waiting for weather…"));
+    assert(!find_visible_label(lv_screen_active(), "Weather request failed. Retrying..."));
     swipe(pointer, 600, 200, 300, 200);
-    assert_data_notice("Weather update failed.", false); /* Before another heartbeat. */
+    assert(!find_visible_label(lv_screen_active(), "Weather update failed.")); /* Before another heartbeat. */
     for (unsigned night = 0; night < 2; ++night) {
       runtime.night_active = night;
       assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-      lv_obj_t *updating = find_visible_label(lv_screen_active(), "Updating…");
+      lv_obj_t *updating = find_visible_label(lv_screen_active(), "Waiting for weather…");
       assert(updating);
       menu_box(updating, 200, 290, 400, -1);
       const lv_font_t *updating_font = lv_obj_get_style_text_font(updating, 0);
@@ -4449,18 +4613,25 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
       lv_obj_t *forecast = lv_obj_get_parent(updating);
       assert_forecast_artwork(forecast, false, &icons);
       assert(icons == 5);
-      if (!night) assert_data_notice("Weather update failed.", false);
-      else assert(!find_visible_label(lv_screen_active(), "Weather update failed."));
+      assert(!find_visible_label(lv_screen_active(), "Weather update failed."));
     }
     runtime.night_active = false;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     swipe(pointer, 600, 200, 300, 200);
-    assert_data_notice("Weather update failed.", true);
+    assert(!find_visible_label(lv_screen_active(), "Weather update failed."));
     assert(find_visible_label(lv_screen_active(), "N"));
+    lv_obj_t *headline, *detail;
+    conditions_arc_objects(&headline, &detail);
+    assert_conditions_arc_text(headline, detail, "Waiting for weather…", "");
+    assert(visible(headline));
+    menu_color(headline, 0xf5f8ff, false);
     assert(!visible(find_image_source(lv_screen_active(), &conditions_wind_arrow)));
     runtime.night_active = true;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(!find_visible_label(lv_screen_active(), "Weather update failed."));
+    assert_conditions_arc_text(headline, detail, "Waiting for weather…", "");
+    assert(visible(headline));
+    menu_color(headline, 0xecc0c0, false);
     runtime.night_active = false;
 
     runtime.weather.valid = true;
@@ -4468,7 +4639,7 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
     runtime.weather.temp = 63;
     runtime.weather.high = 71;
     runtime.weather.low = 41;
-    runtime.weather.updated_at = runtime.clock.utc_now;
+    runtime.weather.updated_at = 0; /* Download occurred before reliable network time. */
     strcpy(runtime.weather.icon_name, "cloudy");
     strcpy(runtime.weather.summary, "Cloudy");
     strcpy(runtime.weather.conditions.headline, "Calm and dry");
@@ -4484,7 +4655,7 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
       runtime.weather.forecast[i].low = 41 + i;
       strcpy(runtime.weather.forecast[i].icon_name, "cloudy");
     }
-    runtime.weather_status[0] = '\0';
+
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(!find_visible_label(lv_screen_active(), "Weather update failed."));
     assert(find_visible_label(lv_screen_active(), "8"));
@@ -4495,18 +4666,17 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
     assert(assert_section_dividers(lv_screen_active(), true, false) == 2);
     runtime.night_active = false;
     runtime.weather.stale = true;
-    strcpy(runtime.weather_status, "Weather refresh failed. Showing last update until retry.");
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert_data_notice("Weather data stale", true);
     assert(find_visible_label(lv_screen_active(), "8"));
     assert(find_visible_label(lv_screen_active(), "Conditions steady"));
-    swipe(pointer, 300, 200, 600, 200);
+    swipe(pointer, 300, 350, 600, 350);
     assert_data_notice("Weather data stale", false);
     assert(find_visible_label(lv_screen_active(), "71° / 41°"));
     lv_obj_t *forecast = lv_obj_get_parent(label("71° / 41°"));
     unsigned icons = 0;
     assert_forecast_artwork(forecast, true, &icons);
-    assert(icons == 5 && !find_visible_label(lv_screen_active(), "Updating…"));
+    assert(icons == 5 && !find_visible_label(lv_screen_active(), "Waiting for weather…"));
     runtime.night_active = true;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     icons = 0;
@@ -4514,22 +4684,46 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
     assert(icons == 5 && !find_visible_label(lv_screen_active(), "Weather data stale"));
     runtime.night_active = false;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    swipe(pointer, 300, 200, 600, 200);
-    lv_obj_t *home_status = find_visible_label(lv_screen_active(),
-      "Weather refresh failed. Showing last update until retry.");
-    assert(home_status && !find_visible_label(lv_screen_active(), "Weather data stale"));
-    assert(lv_obj_get_style_text_font(home_status, 0) == &lv_font_montserrat_18);
-    assert(lv_obj_get_style_text_opa(home_status, 0) == LV_OPA_70);
-    assert(lv_obj_get_style_text_letter_space(home_status, 0) == 1);
+    swipe(pointer, 300, 350, 600, 350);
+    lv_obj_t *home_status = find_visible_label(lv_screen_active(), "Weather data stale");
+    assert(home_status);
+    menu_box(home_status, 150, analog ? 582 : 464, 500, -1);
+    assert(lv_obj_get_style_text_font(home_status, 0) == &lv_font_montserrat_22);
+    menu_color(home_status, 0xa6b6cf, false);
+    if (analog) {
+      /* The temperature label reserves extra transparent drawing space. Its
+       * actual glyphs, the notice and High/Low must remain visibly separate. */
+      lv_obj_t *temp = find_visible_label(lv_screen_active(), "63°");
+      const lv_font_t *font = lv_obj_get_style_text_font(temp, 0);
+      lv_area_t temp_box, notice_box, high_low_box;
+      lv_obj_get_coords(temp, &temp_box);
+      lv_obj_get_coords(home_status, &notice_box);
+      lv_obj_get_coords(label("H: 71°  L: 41°"), &high_low_box);
+      const uint32_t glyphs[] = {'6', '3', 0xb0};
+      for (unsigned i = 0; i < sizeof(glyphs) / sizeof(glyphs[0]); ++i) {
+        lv_font_glyph_dsc_t glyph;
+        assert(lv_font_get_glyph_dsc(font, &glyph, glyphs[i], 0));
+        int bottom = temp_box.y1 + font->line_height - font->base_line - glyph.ofs_y - 1;
+        assert(bottom < notice_box.y1);
+      }
+      assert(notice_box.y2 < high_low_box.y1);
+    }
+    assert(!find_visible_label(lv_screen_active(), "Weather refresh failed. Showing last update until retry."));
+    runtime.night_active = true;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(!find_visible_label(lv_screen_active(), "Weather data stale"));
+    runtime.night_active = false;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(find_visible_label(lv_screen_active(), "Weather data stale"));
     assert(find_visible_label(lv_screen_active(), "63°"));
     swipe(pointer, 600, 200, 300, 200);
     assert_data_notice("Weather data stale", false);
     runtime.weather.stale = false;
     runtime.weather.updated_at += 600;
-    runtime.weather_status[0] = '\0';
+
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(!find_visible_label(lv_screen_active(), "Weather data stale"));
-    swipe(pointer, 300, 200, 600, 200);
+    swipe(pointer, 300, 350, 600, 350);
     assert(find_visible_label(lv_screen_active(), "63°"));
     assert(find_visible_label(lv_screen_active(), "H: 71°  L: 41°"));
     assert(!find_visible_label(lv_screen_active(), "Waiting for weather…"));
@@ -4600,12 +4794,11 @@ static void test_normal_clock_surfaces(lv_indev_t *pointer)
     strcpy(runtime.weather.conditions.headline, "Strong winds");
     strcpy(runtime.weather.conditions_alternate_headline, "Strong winds");
     snprintf(runtime.weather.icon_name, sizeof(runtime.weather.icon_name), "clear-day");
-    snprintf(runtime.weather_status, sizeof(runtime.weather_status), "Weather test status");
     assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
     assert_home_edges();
-    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
-    assert(find_visible_label(lv_screen_active(), analog ? "Oct 9" : "OCT 9"));
-    assert(find_visible_label(lv_screen_active(), "Weather test status"));
+    assert(find_visible_label(lv_screen_active(), "Friday"));
+    assert(find_visible_label(lv_screen_active(), "Oct 9"));
+
     lv_obj_t *hour = find_image_source(lv_screen_active(), &analog_hour_hand);
     lv_obj_t *minute = find_image_source(lv_screen_active(), &analog_minute_hand);
     lv_obj_t *second = find_image_source(lv_screen_active(), &analog_second_hand);
@@ -4645,16 +4838,16 @@ static void test_normal_clock_surfaces(lv_indev_t *pointer)
     runtime.night_active = true;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert_home_edges();
-    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
-    assert(find_visible_label(lv_screen_active(), analog ? "Oct 9" : "OCT 9"));
-    assert(!find_visible_label(lv_screen_active(), "Weather test status"));
+    assert(find_visible_label(lv_screen_active(), "Friday"));
+    assert(find_visible_label(lv_screen_active(), "Oct 9"));
+
     assert(visible(find_image_source(lv_screen_active(),
                                   analog ? &analog_stage_night : &digital_stage_night)));
     config.night_shift_mode = DEVICE_CONFIG_NIGHT_ALWAYS_ON;
     runtime.night_active = false;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert_home_edges();
-    assert(find_visible_label(lv_screen_active(), "Weather test status"));
+
     assert(visible(find_image_source(lv_screen_active(),
                                   analog ? &analog_stage_day : &digital_stage_day)));
 
@@ -4701,7 +4894,7 @@ static void test_normal_clock_surfaces(lv_indev_t *pointer)
       assert(lv_obj_get_style_text_font(text, 0) == (i == 1 ? &lv_font_clock_time_144 : &lv_font_montserrat_36));
     }
     assert(!find_visible_label(lv_screen_active(), "Clock pending network sync"));
-    assert(!find_visible_label(lv_screen_active(), "Weather test status"));
+
     assert(find_visible_label(lv_screen_active(), "Alarm Settings"));
     assert(!visible(hour) && !visible(minute) && !visible(second));
     runtime.night_active = true;
@@ -4712,7 +4905,7 @@ static void test_normal_clock_surfaces(lv_indev_t *pointer)
     assert(find_visible_label(lv_screen_active(), "Waiting for time sync"));
     swipe(pointer, 600, 200, 300, 200);
     assert(!find_visible_label(lv_screen_active(), "Time unavailable"));
-    swipe(pointer, 300, 200, 600, 200);
+    swipe(pointer, 300, 350, 600, 350);
     assert(find_visible_label(lv_screen_active(), "Time unavailable"));
     runtime.night_active = false;
     runtime.clock.usable = true;
@@ -4720,24 +4913,24 @@ static void test_normal_clock_surfaces(lv_indev_t *pointer)
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert_home_edges();
     assert(!find_visible_label(lv_screen_active(), "Clock pending network sync"));
-    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    assert(find_visible_label(lv_screen_active(), "Friday"));
     if (analog) assert(visible(hour) && visible(minute) && visible(second));
 
     /* Both configured faces retain the real-pointer navigation map. */
     swipe(pointer, 600, 200, 300, 200);
-    assert(!find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
-    swipe(pointer, 300, 200, 600, 200);
-    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
-    swipe(pointer, 300, 200, 600, 200);
-    assert(!find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    assert(!find_visible_label(lv_screen_active(), "Friday"));
+    swipe(pointer, 300, 350, 600, 350);
+    assert(find_visible_label(lv_screen_active(), "Friday"));
+    swipe(pointer, 300, 350, 600, 350);
+    assert(!find_visible_label(lv_screen_active(), "Friday"));
     swipe(pointer, 600, 200, 300, 200);
-    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    assert(find_visible_label(lv_screen_active(), "Friday"));
     swipe(pointer, 600, 400, 600, 200); /* Up remains reserved. */
-    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    assert(find_visible_label(lv_screen_active(), "Friday"));
     swipe(pointer, 600, 200, 600, 400);
     assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
     wac_ui_settings_close();
-    assert(find_visible_label(lv_screen_active(), analog ? "Friday" : "FRIDAY"));
+    assert(find_visible_label(lv_screen_active(), "Friday"));
   }
   assert(fake_nvs_calls(FAKE_SET) == 0);
 }
@@ -4800,7 +4993,7 @@ static void test_waiting_sync_transitions(lv_indev_t *pointer)
     assert(!find_visible_label(lv_screen_active(), "Waiting for sync"));
     lv_tick_inc(136000);
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    swipe(pointer, 300, 200, 600, 200);
+    swipe(pointer, 300, 350, 600, 350);
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert_waiting_sync(analog, false); /* Away from home resets paused-minute health. */
     swipe(pointer, 600, 200, 600, 400);
@@ -4889,8 +5082,8 @@ static void test_digital_night_layout(void)
       assert(lv_obj_get_style_transform_scale_x_safe(period, 0) == 256);
       assert(lv_obj_get_style_transform_scale_y_safe(period, 0) == 256);
     }
-    assert(find_visible_label(lv_screen_active(), "FRIDAY"));
-    assert(find_visible_label(lv_screen_active(), "OCT 9"));
+    assert(find_visible_label(lv_screen_active(), "Friday"));
+    assert(find_visible_label(lv_screen_active(), "Oct 9"));
 
     const int expected_scale = format == 1 ? 408 : 444;
     for (int hour = 0; hour < 24; ++hour) {
@@ -4960,7 +5153,7 @@ static void test_backup_clock_ui(lv_indev_t *pointer)
   assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
   assert(find_visible_label(lv_screen_active(), "--:--") && visible(indicator()));
   lv_obj_update_layout(lv_screen_active());
-  assert(lv_obj_get_x(indicator()) == 464 && lv_obj_get_y(indicator()) == 56);
+  assert(lv_obj_get_x(indicator()) == 488 && lv_obj_get_y(indicator()) == 56);
   assert(!visible(overlay()));
   click(LV_SYMBOL_WARNING);
   assert(visible(overlay()) && visible(label("Backup Clock Lost Time")));
@@ -4983,9 +5176,11 @@ static void test_backup_clock_ui(lv_indev_t *pointer)
   dismissal_result = ESP_ERR_TIMEOUT;
   swipe(pointer, 400, 528, 400, 528); /* Actual tap on the unchanged action area. */
   assert(dismissal_count == 1 && visible(overlay()));
-  assert(visible(label("Dismiss failed (ESP_ERR_TIMEOUT).")));
+  assert(!find_visible_label(lv_screen_active(), "Dismiss failed (ESP_ERR_TIMEOUT)."));
+  assert(visible(label("Backup Clock Lost Time")));
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  assert(visible(label("Dismiss failed (ESP_ERR_TIMEOUT).")));
+  assert(!find_visible_label(lv_screen_active(), "Dismiss failed (ESP_ERR_TIMEOUT)."));
+  assert(visible(label("Backup Clock Lost Time")));
   assert(!lv_obj_has_state(lv_obj_get_parent(label("DISMISS")), LV_STATE_DISABLED));
   dismissal_result = ESP_OK;
   click("DISMISS");
@@ -5008,7 +5203,7 @@ static void test_backup_clock_ui(lv_indev_t *pointer)
   runtime.clock.warning = WAC_TIME_WARNING_CONNECTION;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   lv_obj_update_layout(lv_screen_active());
-  assert(visible(indicator()) && lv_obj_get_y(indicator()) == 98);
+  assert(visible(indicator()) && lv_obj_get_y(indicator()) == 92);
   click(LV_SYMBOL_WARNING);
   assert(visible(label("Backup Clock Unavailable")) && visible(label("Check Connection.")));
   assert(!lv_obj_has_state(lv_obj_get_parent(label("DISMISS")), LV_STATE_DISABLED));
@@ -5053,7 +5248,7 @@ static void test_backup_clock_ui(lv_indev_t *pointer)
   assert(visible(indicator()) && !visible(overlay()));
   swipe(pointer, 600, 200, 300, 200);
   assert(!visible(indicator()));
-  swipe(pointer, 300, 200, 600, 200);
+  swipe(pointer, 300, 350, 600, 350);
   assert(visible(indicator()));
 
   config.night_shift_mode = DEVICE_CONFIG_NIGHT_ALWAYS_ON;
@@ -5075,7 +5270,7 @@ static void test_backup_clock_ui(lv_indev_t *pointer)
   assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
   assert(visible(indicator()) && !visible(overlay()));
   lv_obj_update_layout(lv_screen_active());
-  assert(lv_obj_get_y(indicator()) == 126);
+  assert(lv_obj_get_y(indicator()) == 152);
   assert(visible(label("Wednesday")));
   runtime.clock.usable = false;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
@@ -5105,7 +5300,7 @@ static void test_background_message_ui(lv_indev_t *pointer, bool night_active)
   message_submissions = 0;
   message_submission_result = ESP_OK;
   assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
-  swipe(pointer, 300, 200, 600, 200);
+  swipe(pointer, 300, 350, 600, 350);
   assert(visible(label("Dinner is ready")));
   swipe(pointer, 600, 200, 600, 200); /* Actual pointer tap. */
   assert(message_submissions == 1);
@@ -5131,7 +5326,7 @@ static void test_background_message_ui(lv_indev_t *pointer, bool night_active)
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
 
   /* Submission failure is shown, keeps the message, and permits retry. */
-  swipe(pointer, 300, 200, 600, 200);
+  swipe(pointer, 300, 350, 600, 350);
   message_submission_result = ESP_ERR_TIMEOUT;
   swipe(pointer, 600, 200, 600, 200);
   assert(message_submissions == 3);
@@ -5142,7 +5337,7 @@ static void test_background_message_ui(lv_indev_t *pointer, bool night_active)
   /* Leave and reopen before completion: returning must not revive old navigation. */
   swipe(pointer, 600, 200, 300, 200);
   assert(visible(label("7:07")));
-  swipe(pointer, 300, 200, 600, 200);
+  swipe(pointer, 300, 350, 600, 350);
   app_ui_complete_message_acknowledgment(ESP_OK);
   assert(visible(label("New important message")) && !visible(label("7:07")));
 
@@ -5236,7 +5431,7 @@ static void test_settings_runtime_appearance(lv_indev_t *pointer)
   assert(heading == menu_label(lv_screen_active(), "Settings"));
   menu_heading("Settings", true);
   menu_row("Alarm Settings", "7:00 AM · Mon–Fri", 320, true, true);
-  menu_switch("Alarm", false, true);
+  menu_row("Sound Machine", "Rain", 212, true, true);
   assert(find_image_source(root, &round_stage_night)
          && !find_image_source(root, &round_stage_day));
   click("Display Settings");
@@ -5505,13 +5700,12 @@ static void test_alarm_ringing_snoozed_surfaces(lv_indev_t *pointer)
     runtime.alarm.phase = WAC_ALARM_RINGING;
     runtime.weather.valid = true;
     runtime.weather.temp = 63;
-    snprintf(runtime.weather_status, sizeof(runtime.weather_status), "Weather test status");
     assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
     assert(!visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
     assert(visible_image_count(lv_screen_active(), night ? &digital_stage_night : &digital_stage_day) == 1);
     assert(!find_visible_label(lv_screen_active(), "Waiting for sync"));
     assert(!find_visible_label(lv_screen_active(), "63°"));
-    assert(!find_visible_label(lv_screen_active(), "Weather test status"));
+
     uint32_t primary = night ? 0xecc0c0 : 0xf5f8ff;
     uint32_t muted = night ? 0xc17a7a : 0xa6b6cf;
     uint32_t accent = night ? 0xe1b6b6 : 0x93d1ff;
@@ -5548,7 +5742,8 @@ static void test_alarm_ringing_snoozed_surfaces(lv_indev_t *pointer)
     alarm_submission_result = ESP_ERR_TIMEOUT;
     pointer_tap(pointer, snooze);
     assert(alarm_submissions == 1 && submitted_alarm_action == APP_ALARM_SNOOZE);
-    assert(find_visible_label(lv_screen_active(), "Action not sent. Try again."));
+    assert(!find_visible_label(lv_screen_active(), "Action not sent. Try again."));
+    assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
     assert(!lv_obj_has_state(snooze, LV_STATE_DISABLED));
     alarm_submission_result = ESP_OK;
     pointer_tap(pointer, snooze);
@@ -5577,7 +5772,8 @@ static void test_alarm_ringing_snoozed_surfaces(lv_indev_t *pointer)
     assert(lv_font_get_glyph_dsc(lv_obj_get_style_text_font(countdown, 0), &glyph, ':', '0')
       && !glyph.is_placeholder);
     alarm_label_box("Rings again at 7:16 AM", 150, 501, 500, &wac_font_settings_28, muted);
-    alarm_label_box("Could not save alarm state.", 150, 679, 500, &wac_font_settings_28, muted);
+    assert(!find_visible_label(lv_screen_active(), "Could not save alarm state."));
+    alarm_label_box("Repeating alarm stays on", 150, 679, 500, &wac_font_settings_28, muted);
     runtime.clock.utc_now++;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(find_visible_label(lv_screen_active(), "9:59"));
@@ -5592,7 +5788,8 @@ static void test_alarm_ringing_snoozed_surfaces(lv_indev_t *pointer)
     app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_ERR_TIMEOUT);
     assert(!find_visible_label(lv_screen_active(), "SNOOZED"));
     assert(visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
-    assert(find_visible_label(lv_screen_active(), "Could not save alarm state."));
+    assert(!find_visible_label(lv_screen_active(), "Could not save alarm state."));
+    assert(find_visible_label(lv_screen_active(), "Tomorrow · 7:06 AM"));
     assert(fake_nvs_calls(FAKE_SET) == 0);
   }
 }
@@ -5698,11 +5895,13 @@ static void test_alarm_caption_unavailable_and_formats(lv_indev_t *pointer)
     menu_box(visible_button("Alarm Settings"), 230, 574, 340, 104);
     runtime.alarm.storage_error = ESP_ERR_TIMEOUT;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert(find_visible_label(lv_screen_active(), "Alarm storage error."));
+    assert(!find_visible_label(lv_screen_active(), "Alarm storage error."));
+    assert(find_visible_label(lv_screen_active(), "Alarm off; saved settings are kept"));
     runtime.clock.usable = true;
     runtime.clock.source = WAC_TIME_SOURCE_NETWORK;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert(find_visible_label(lv_screen_active(), "Alarm storage error."));
+    assert(!find_visible_label(lv_screen_active(), "Alarm storage error."));
+    assert(find_visible_label(lv_screen_active(), "Alarm off"));
     runtime.alarm.storage_error = ESP_OK;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(find_visible_label(lv_screen_active(), "Alarm off"));
@@ -5810,7 +6009,7 @@ static void test_alarm_navigation_preemption_and_completion(lv_indev_t *pointer)
   runtime.message = (app_message_snapshot_t){.available = true, .id = "alarm-message", .text = "Meal is ready"};
   runtime.unread_message_count = 1;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  swipe(pointer, 300, 200, 600, 200);
+  swipe(pointer, 300, 350, 600, 350);
   message_submission_result = ESP_OK;
   swipe(pointer, 600, 200, 600, 200);
   assert(find_visible_label(lv_screen_active(), "Dismissing..."));
@@ -5827,7 +6026,7 @@ static void test_alarm_navigation_preemption_and_completion(lv_indev_t *pointer)
   assert(find_visible_label(lv_screen_active(), "SNOOZED"));
   swipe(pointer, 600, 200, 300, 200);
   assert(!find_visible_label(lv_screen_active(), "SNOOZED"));
-  swipe(pointer, 300, 200, 600, 200);
+  swipe(pointer, 300, 350, 600, 350);
   assert(find_visible_label(lv_screen_active(), "Snoozed · 7:16 AM"));
   pointer_tap(pointer, visible_button("Snoozed · 7:16 AM"));
   assert(find_visible_label(lv_screen_active(), "SNOOZED"));
@@ -5844,7 +6043,7 @@ static void test_alarm_navigation_preemption_and_completion(lv_indev_t *pointer)
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   app_ui_complete_alarm_action(APP_ALARM_DISMISS, &first, ESP_OK);
   assert(!find_visible_label(lv_screen_active(), "7:06"));
-  swipe(pointer, 300, 200, 600, 200);
+  swipe(pointer, 300, 350, 600, 350);
 
   runtime.alarm.phase = WAC_ALARM_RINGING;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
@@ -5854,7 +6053,8 @@ static void test_alarm_navigation_preemption_and_completion(lv_indev_t *pointer)
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   assert(find_visible_label(lv_screen_active(), "8:00"));
   app_ui_complete_alarm_action(APP_ALARM_DISMISS, &first, ESP_ERR_INVALID_STATE);
-  assert(find_visible_label(lv_screen_active(), "8:00") && find_visible_label(lv_screen_active(), "Action not applied. Try again."));
+  assert(find_visible_label(lv_screen_active(), "8:00") && find_visible_label(lv_screen_active(), "Alarm ringing"));
+  assert(!find_visible_label(lv_screen_active(), "Action not applied. Try again."));
   assert(!lv_obj_has_state(visible_button("DISMISS"), LV_STATE_DISABLED));
   unsigned count = alarm_submissions;
   pointer_tap(pointer, visible_button("DISMISS"));
@@ -6081,9 +6281,9 @@ static void test_display_applies_home_and_preserves_navigation(lv_indev_t *point
     swipe(pointer, 600, 200, 300, 200);
     assert(!visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    swipe(pointer, 300, 200, 600, 200);
+    swipe(pointer, 300, 350, 600, 350);
     assert(visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
-    swipe(pointer, 300, 200, 600, 200);
+    swipe(pointer, 300, 350, 600, 350);
     swipe(pointer, 600, 200, 300, 200);
     assert(visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
     swipe(pointer, 600, 200, 600, 400);
@@ -6150,6 +6350,74 @@ static void assert_conditions_arc_text(lv_obj_t *headline, lv_obj_t *detail,
   assert(!strcmp((const char *)lv_obj_get_user_data(detail), expected_detail));
 }
 
+/* These fabricated download/clock snapshots verify elapsed time selection,
+ * independently of the provider observation time and without live requests. */
+static void test_retained_weather_age(lv_indev_t *pointer)
+{
+  fake_nvs_reset();
+  assert(device_config_init() == ESP_OK);
+  device_config_t config;
+  assert(device_config_copy(&config) == ESP_OK);
+  config.location_ready = config.wifi_ready = true;
+  const struct {
+    int elapsed;
+    bool stamp, network, usable;
+    const char *notice;
+  } cases[] = {
+    {0, true, true, true, "Weather updated just now"},
+    {59, true, true, true, "Weather updated just now"},
+    {60, true, true, true, "Weather updated 1m ago"},
+    {3599, true, true, true, "Weather updated 59m ago"},
+    {3600, true, true, true, "Weather updated 1h ago"},
+    {86399, true, true, true, "Weather updated 23h ago"},
+    {86400, true, true, true, "Weather updated 1d ago"},
+    {172800, true, true, true, "Weather updated 2d ago"},
+    {0, false, true, true, "Weather data stale"},
+    {-1, true, true, true, "Weather data stale"},
+    {7200, true, false, true, "Weather data stale"},
+    {7200, true, true, false, "Weather data stale"},
+  };
+  for (unsigned analog = 0; analog < 2; ++analog) {
+    strcpy(config.default_clock_face, analog ? "analog" : "digital");
+    app_runtime_state_t runtime = {0};
+    runtime.clock.utc_now = local_epoch(2026, 10, 9, 7, 6);
+    runtime.clock.usable = true;
+    runtime.clock.source = WAC_TIME_SOURCE_NETWORK;
+    timed_conditions_fixture(&runtime.weather, false);
+    runtime.weather.stale = true;
+    runtime.weather.conditions.alert = false; /* Keep the normal Forecast-first navigation. */
+    runtime.weather.observed_at = runtime.clock.utc_now - 864000;
+    assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+    for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+      runtime.clock.usable = cases[i].usable;
+      runtime.clock.source = cases[i].network ? WAC_TIME_SOURCE_NETWORK : WAC_TIME_SOURCE_RTC;
+      runtime.weather.updated_at = cases[i].stamp ? runtime.clock.utc_now - cases[i].elapsed : 0;
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      if (cases[i].usable) {
+        lv_obj_t *notice = find_visible_label(lv_screen_active(), cases[i].notice);
+        assert(notice);
+        menu_box(notice, 150, analog ? 582 : 464, 500, -1);
+        assert(lv_obj_get_style_text_font(notice, 0) == &lv_font_montserrat_22);
+      } else assert(!find_visible_label(lv_screen_active(), cases[i].notice));
+      swipe(pointer, 600, 200, 300, 200);
+      assert_data_notice("Weather data stale", false);
+      if (strcmp(cases[i].notice, "Weather data stale"))
+        assert(!find_visible_label(lv_screen_active(), cases[i].notice));
+      swipe(pointer, 600, 200, 300, 200);
+      assert_data_notice(cases[i].notice, true);
+      assert(find_visible_label(lv_screen_active(), "8"));
+      swipe(pointer, 300, 350, 600, 350);
+      swipe(pointer, 300, 350, 600, 350);
+    }
+    runtime.clock.usable = true;
+    runtime.clock.source = WAC_TIME_SOURCE_NETWORK;
+    runtime.weather.stale = false;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(!find_visible_label(lv_screen_active(), "Weather data stale"));
+    assert(!find_visible_label(lv_screen_active(), "Weather updated 2h ago"));
+  }
+}
+
 static void test_conditions_saved_display_format(lv_indev_t *pointer)
 {
   for (unsigned original_24h = 0; original_24h < 2; ++original_24h) {
@@ -6169,12 +6437,12 @@ static void test_conditions_saved_display_format(lv_indev_t *pointer)
     assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
     lv_obj_t *headline, *detail;
     conditions_arc_objects(&headline, &detail);
-    assert_conditions_arc_text(headline, detail, "Checking the weather...", "");
+    assert_conditions_arc_text(headline, detail, "Waiting for weather…", "");
     timed_conditions_fixture(&runtime.weather, original_24h);
+    runtime.weather.updated_at = 0; /* This fixture has no reliable download time. */
     /* Retained weather after a failed refresh is a normal reason to need the
      * new format without another download. No live failure is being claimed. */
     runtime.weather.stale = true;
-    strcpy(runtime.weather_status, "Weather refresh failed. Showing last update until retry.");
     app_weather_snapshot_t supplied = runtime.weather;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert_conditions_arc_text(headline, detail, supplied.conditions.headline, supplied.conditions.detail);
@@ -6210,7 +6478,7 @@ static void test_conditions_saved_display_format(lv_indev_t *pointer)
     fake_nvs_clear_activity();
     /* A previously started download publishes its old preferred format after
      * Save. The current saved choice still selects the opposite captions. */
-    runtime.weather.updated_at++;
+    runtime.weather.updated_at = 0;
     for (unsigned night = 0; night < 2; ++night) {
       runtime.night_active = night;
       assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
@@ -6231,7 +6499,7 @@ static void test_conditions_saved_display_format(lv_indev_t *pointer)
     assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
     assert(!pending_settings_task && settings_restart_count == 0);
     runtime.night_active = false;
-    swipe(pointer, 300, 200, 600, 200);
+    swipe(pointer, 300, 350, 600, 350);
     swipe(pointer, 600, 200, 600, 400);
     click("Display Settings"); click("Time Format");
     allow_settings_task = true; pointer_tap(pointer, visible_button("Save"));
@@ -6325,7 +6593,7 @@ static void test_display_completion_under_alarm_and_replacement(lv_indev_t *poin
     } else {
       assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
       assert(!visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
-      swipe(pointer, 300, 200, 600, 200);
+      swipe(pointer, 300, 350, 600, 350);
       assert(!visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
       assert(find_visible_label(lv_screen_active(), "07:06"));
     }
@@ -6466,19 +6734,23 @@ static void test_audio_preview_preemption_and_ring_error(lv_indev_t *pointer)
   assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
   runtime.audio = (wac_audio_snapshot_t){.ready = true, .error = ESP_ERR_TIMEOUT};
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  lv_obj_t *footer = find_visible_label(lv_screen_active(), "Alarm audio unavailable.");
+  assert(!find_visible_label(lv_screen_active(), "Alarm audio unavailable."));
+  lv_obj_t *footer = find_visible_label(lv_screen_active(), "Alarm ringing");
   assert(footer && wac_ui_settings_view() == WAC_SETTINGS_SOUND_PICKER);
   assert(!find_visible_label(lv_screen_active(), "Audio preview failed. Try again."));
   runtime.alarm.storage_error = ESP_ERR_TIMEOUT;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  assert(find_visible_label(lv_screen_active(), "Alarm storage error.") == footer);
+  assert(!find_visible_label(lv_screen_active(), "Alarm storage error."));
+  assert(find_visible_label(lv_screen_active(), "Alarm ringing") == footer);
   runtime.alarm.storage_error = ESP_OK;
   alarm_submission_result = ESP_ERR_TIMEOUT;
   pointer_tap(pointer, visible_button("DISMISS"));
-  assert(find_visible_label(lv_screen_active(), "Action not sent. Try again.") == footer);
+  assert(!find_visible_label(lv_screen_active(), "Action not sent. Try again."));
+  assert(find_visible_label(lv_screen_active(), "Alarm ringing") == footer);
   runtime.audio = (wac_audio_snapshot_t){.ready = true};
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  assert(find_visible_label(lv_screen_active(), "Action not sent. Try again.") == footer);
+  assert(!find_visible_label(lv_screen_active(), "Action not sent. Try again."));
+  assert(find_visible_label(lv_screen_active(), "Alarm ringing") == footer);
   alarm_submission_result = ESP_OK;
   pointer_tap(pointer, visible_button("DISMISS"));
   runtime.alarm.phase = WAC_ALARM_IDLE;
@@ -6497,6 +6769,147 @@ static void test_audio_preview_preemption_and_ring_error(lv_indev_t *pointer)
   unsigned stops_after_close = preview_stop_requests;
   wac_settings_set_visible(false);
   assert(preview_stop_requests == stops_after_close);
+}
+
+static lv_area_t measured_label_text_area(lv_obj_t *label)
+{
+  assert(label && lv_obj_check_type(label, &lv_label_class));
+  const lv_font_t *font = lv_obj_get_style_text_font(label, 0);
+  const char *text = lv_label_get_text(label);
+  int32_t letter_space = lv_obj_get_style_text_letter_space(label, 0);
+  int32_t line_space = lv_obj_get_style_text_line_space(label, 0);
+  lv_area_t content, area;
+  lv_point_t first, size;
+  lv_obj_get_content_coords(label, &content);
+  lv_label_get_letter_pos(label, 0, &first);
+  lv_text_get_size(&size, text, font, letter_space, line_space,
+    LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  area.x1 = content.x1 + first.x;
+  area.y1 = content.y1 + first.y;
+  area.x2 = area.x1 + size.x - 1;
+  area.y2 = area.y1 + size.y - 1;
+  return area;
+}
+
+static int icon_text_clearance(const lv_area_t *icon, const lv_area_t *text)
+{
+  if (icon->y1 > text->y2 || text->y1 > icon->y2) return -1;
+  if (icon->x2 >= text->x1 && text->x2 >= icon->x1) return -2;
+  return icon->x2 < text->x1 ? text->x1 - icon->x2 - 1
+    : icon->x1 - text->x2 - 1;
+}
+
+static void assert_icon_clearance(const lv_area_t *icon, const lv_area_t *text)
+{
+  int clearance = icon_text_clearance(icon, text);
+  if (clearance == -1) return;
+  if (clearance < 12)
+    fprintf(stderr, "Shortcut icon/text clearance %dpx, expected at least 12px\n", clearance);
+  assert(clearance >= 12);
+}
+
+static void test_machine_clock_shortcut(lv_indev_t *pointer)
+{
+  static const char *const weekdays[] = {
+    "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday"
+  };
+  static const char *const dates[] = {
+    "Oct 7", "Oct 8", "Oct 9", "Oct 10", "Oct 11", "Oct 12", "Oct 13"
+  };
+  for (unsigned analog = 0; analog < 2; ++analog) {
+    for (unsigned night = 0; night < 2; ++night) {
+      device_config_t config; app_runtime_state_t runtime;
+      alarm_fixture(&config, &runtime);
+      strcpy(config.default_clock_face, analog ? "analog" : "digital");
+      runtime.night_active = night;
+      runtime.audio = audio_snapshot = (wac_audio_snapshot_t){.ready = true};
+      runtime.clock.warning = WAC_TIME_WARNING_CONNECTION;
+      assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+      for (unsigned day = 0; day < 7; ++day) {
+        runtime.clock.utc_now = local_epoch(2026, 10, 7 + (int)day, 7, 6);
+        assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+        lv_obj_t *weekday = find_visible_label(lv_screen_active(), weekdays[day]);
+        lv_obj_t *date = find_visible_label(lv_screen_active(), dates[day]);
+        lv_obj_t *speaker = find_image_source(lv_screen_active(), &wac_icon_volume_off);
+        lv_obj_t *warning = find_visible_label(lv_screen_active(), LV_SYMBOL_WARNING);
+        assert(weekday && date && speaker && warning);
+        lv_area_t speaker_area;
+        lv_obj_get_coords(speaker, &speaker_area);
+        lv_area_t warning_area = measured_label_text_area(warning);
+        lv_area_t weekday_area = measured_label_text_area(weekday);
+        lv_area_t date_area = measured_label_text_area(date);
+        assert_icon_clearance(&speaker_area, &weekday_area);
+        assert_icon_clearance(&speaker_area, &date_area);
+        assert_icon_clearance(&warning_area, &weekday_area);
+        assert_icon_clearance(&warning_area, &date_area);
+      }
+      runtime.clock.utc_now = local_epoch(2026, 10, 9, 7, 6);
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      lv_obj_t *speaker = find_image_source(lv_screen_active(), &wac_icon_volume_off);
+      assert(speaker && visible(speaker));
+      lv_obj_t *shortcut = lv_obj_get_parent(speaker);
+      menu_box(shortcut, 224, analog ? 152 : 92, 88, 80);
+      menu_box(speaker, 252, analog ? 176 : 116, 32, 32);
+      assert(lv_color_eq(lv_obj_get_style_image_recolor(speaker, 0), lv_color_hex(night ? 0xc17a7a : 0xa6b6cf)));
+      lv_obj_t *warning_icon = find_visible_label(lv_screen_active(), LV_SYMBOL_WARNING);
+      lv_obj_t *warning = lv_obj_get_parent(warning_icon);
+      menu_box(warning, 488, analog ? 152 : 92, 88, 80);
+      lv_obj_t *weekday = find_visible_label(lv_screen_active(), "Friday");
+      lv_obj_t *date = find_visible_label(lv_screen_active(), "Oct 9");
+      assert(weekday && date);
+      lv_area_t day_area, date_area;
+      lv_obj_get_coords(weekday, &day_area); lv_obj_get_coords(date, &date_area);
+      assert(day_area.y1 == (analog ? 150 : 90) && date_area.y1 - day_area.y1 == 48);
+      machine_plays = machine_stops = 0;
+      pointer_tap(pointer, warning_icon);
+      assert(find_visible_label(lv_screen_active(), "Backup Clock Unavailable"));
+      assert(fake_nvs_calls(FAKE_SET) == 0);
+      assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+      speaker = find_image_source(lv_screen_active(), &wac_icon_volume_off);
+      pointer_tap(pointer, speaker);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE && find_visible_label(lv_screen_active(), "Stopped"));
+      pointer_tap(pointer, visible_button("Play"));
+      assert(audio_snapshot.machine_pending && machine_plays == 1);
+      runtime.audio = audio_snapshot;
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      assert(find_visible_label(lv_screen_active(), "Starting…"));
+      pointer_tap(pointer, menu_back(lv_screen_active()));
+      assert(wac_ui_settings_view() == WAC_SETTINGS_NONE && machine_stops == 0 && audio_snapshot.machine_pending);
+      assert(visible(find_image_source(lv_screen_active(), &wac_icon_volume_off)));
+      runtime.audio = audio_snapshot = (wac_audio_snapshot_t){.ready = true, .machine_active = true, .machine_remaining_seconds = 123};
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      speaker = find_image_source(lv_screen_active(), &wac_icon_volume_2);
+      assert(speaker && visible(speaker));
+      pointer_tap(pointer, speaker);
+      assert(find_visible_label(lv_screen_active(), "Playing · 3 min left"));
+      pointer_tap(pointer, visible_button("Sleep Timer"));
+      /* Constructed alarm-owner snapshots establish UI priority and retained
+       * selection, while actual audio interruption is checked in test_audio. */
+      runtime.alarm.phase = WAC_ALARM_RINGING;
+      runtime.audio = audio_snapshot = (wac_audio_snapshot_t){.ready = true};
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE_TIMER);
+      assert(find_visible_label(lv_screen_active(), "Alarm ringing") && !find_visible_label(lv_screen_active(), "Continuous"));
+      assert(machine_stops == 0 && fake_nvs_calls(FAKE_SET) == 0);
+      runtime.alarm.phase = WAC_ALARM_IDLE;
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      swipe(pointer, 600, 350, 600, 500);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE_TIMER && find_visible_label(lv_screen_active(), "30 Minutes"));
+      pointer_tap(pointer, visible_button("Done"));
+      assert(find_visible_label(lv_screen_active(), "Stopped"));
+      pointer_tap(pointer, menu_back(lv_screen_active()));
+      assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+      runtime.clock.usable = false;
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      speaker = find_image_source(lv_screen_active(), &wac_icon_volume_off);
+      menu_box(lv_obj_get_parent(speaker), 224, 56, 88, 80);
+      menu_box(speaker, 252, 80, 32, 32);
+      warning_icon = find_visible_label(lv_screen_active(), LV_SYMBOL_WARNING);
+      warning = lv_obj_get_parent(warning_icon);
+      menu_box(warning, 488, 56, 88, 80);
+      assert(fake_nvs_calls(FAKE_SET) == 0);
+    }
+  }
 }
 
 static void test_indicator_pulses(void)
@@ -6655,6 +7068,7 @@ int main(int argc, char **argv)
     assert(argc == 1);
     test_provider_forecast_dates(pointer);
     test_weather_screen_transitions(pointer);
+    test_retained_weather_age(pointer);
     test_normal_clock_surfaces(pointer);
     test_waiting_sync_transitions(pointer);
     test_digital_night_layout();
@@ -6674,6 +7088,7 @@ int main(int argc, char **argv)
     test_weather_provider_alarm_resume(pointer);
     test_alarm_preempts_pending_settings(pointer);
     test_audio_preview_preemption_and_ring_error(pointer);
+    test_machine_clock_shortcut(pointer);
     test_indicator_pulses();
     assert(settings_restart_count == 0);
     test_weather_restart_after_alarm_replaces_editor(pointer);

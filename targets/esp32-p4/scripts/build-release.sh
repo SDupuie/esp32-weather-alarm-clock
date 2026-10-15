@@ -26,6 +26,7 @@ mkdir -p "$DOCS_FIRMWARE_DIR"
 cp "$PROJECT_DIR/build/bootloader/bootloader.bin" "$DOCS_FIRMWARE_DIR/bootloader.bin"
 cp "$PROJECT_DIR/build/partition_table/partition-table.bin" "$DOCS_FIRMWARE_DIR/partition-table.bin"
 cp "$PROJECT_DIR/build/round_weather_display_esp32_p4.bin" "$DOCS_FIRMWARE_DIR/app.bin"
+cp "$PROJECT_DIR/build/storage.bin" "$DOCS_FIRMWARE_DIR/storage.bin"
 
 echo ""
 echo "Copied release artifacts to $DOCS_FIRMWARE_DIR"

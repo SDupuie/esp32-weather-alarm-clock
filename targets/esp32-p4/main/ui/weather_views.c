@@ -345,7 +345,7 @@ void wac_weather_build_forecast(lv_obj_t *parent)
   lv_obj_align(s_weather.forecast_tomorrow_icon, LV_ALIGN_TOP_MID, 0, FORECAST_TOMORROW_ICON_TOP);
 
   s_weather.forecast_updating_label = wac_ui_create_label(
-    s_weather.forecast_view, &wac_font_weather_32, wac_ui_color_text_muted(), LV_TEXT_ALIGN_CENTER, "Updating…"
+    s_weather.forecast_view, &wac_font_weather_32, wac_ui_color_text_muted(), LV_TEXT_ALIGN_CENTER, "Waiting for weather…"
   );
   lv_obj_set_width(s_weather.forecast_updating_label, 400);
   lv_obj_set_pos(s_weather.forecast_updating_label, 200, 290);
@@ -561,7 +561,7 @@ void wac_weather_build_conditions(lv_obj_t *parent)
   s_weather.conditions_headline = create_conditions_arc_label(
     face, &s_headline_arc, &lv_font_montserrat_32, wac_ui_color_text_primary(), COND_HEADLINE_RADIUS
   );
-  set_conditions_arc_text(s_weather.conditions_headline, "Checking the weather...", &lv_font_montserrat_32);
+  set_conditions_arc_text(s_weather.conditions_headline, "Waiting for weather…", &lv_font_montserrat_32);
   s_weather.conditions_detail = create_conditions_arc_label(
     face, &s_detail_arc, &lv_font_montserrat_18, lv_color_hex(0xebf2ff), COND_DETAIL_RADIUS
   );
@@ -985,7 +985,7 @@ static void update_conditions_view(const app_weather_snapshot_t *weather, bool t
 
   bool original_format = time_24h == weather->conditions_time_24h;
   const char *headline = have ? (original_format ? c->headline : weather->conditions_alternate_headline)
-    : (weather->valid ? "Weather unavailable" : "Checking the weather...");
+    : (weather->valid ? "Weather unavailable" : "Waiting for weather…");
   const char *detail = have && c->has_detail
     ? (original_format ? c->detail : weather->conditions_alternate_detail) : "";
   set_conditions_arc_text(s_weather.conditions_headline, headline, pick_font_to_fit(headline, HEADLINE_FONTS, 2, COND_HEADLINE_MAX_PX));
@@ -1032,45 +1032,23 @@ static void update_conditions_view(const app_weather_snapshot_t *weather, bool t
   wac_ui_set_label_text(s_weather.conditions_column_labels[2], snow ? "SNOW" : "RAIN");
 }
 
-void wac_weather_update_status(const char *status_text, const app_weather_snapshot_t *weather,
-  bool night, wac_weather_surface_t surface)
+void wac_weather_update_status(const app_weather_snapshot_t *weather,
+  bool night, wac_weather_surface_t surface, const char *retained_notice)
 {
-  bool unavailable_home = surface == WAC_WEATHER_SURFACE_UNAVAILABLE_HOME;
-  if (night || surface == WAC_WEATHER_SURFACE_MESSAGE || unavailable_home) {
+  bool forecast = surface == WAC_WEATHER_SURFACE_FORECAST;
+  bool conditions = surface == WAC_WEATHER_SURFACE_CONDITIONS;
+  if (!night && (forecast || conditions) && weather->valid && weather->stale) {
+    lv_obj_set_width(s_weather.status_stack, forecast ? 440 : 500);
+    lv_obj_align(s_weather.status_stack, LV_ALIGN_TOP_LEFT, forecast ? 180 : 150, forecast ? 120 : 680);
+    lv_obj_set_style_text_font(s_weather.weather_status_label, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_opa(s_weather.weather_status_label, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_letter_space(s_weather.weather_status_label, 0, 0);
+    wac_ui_set_label_text(s_weather.weather_status_label, forecast ? "Weather data stale" : retained_notice);
+    lv_obj_clear_flag(s_weather.weather_status_label, LV_OBJ_FLAG_HIDDEN);
+  } else {
     wac_ui_set_label_text(s_weather.weather_status_label, "");
     lv_obj_add_flag(s_weather.weather_status_label, LV_OBJ_FLAG_HIDDEN);
-    return;
   }
-
-  bool weather_view = surface == WAC_WEATHER_SURFACE_FORECAST || surface == WAC_WEATHER_SURFACE_CONDITIONS;
-  bool have_status = status_text != NULL && status_text[0] != '\0';
-  bool data_warning = weather_view
-    && ((!have_status && weather->valid && weather->stale)
-      || (have_status && (!strcmp(status_text, "Weather request failed. Retrying...")
-        || !strcmp(status_text, "Weather refresh failed. Showing last update until retry."))));
-  if (have_status || data_warning) {
-    if (data_warning) {
-      bool forecast = surface == WAC_WEATHER_SURFACE_FORECAST;
-      lv_obj_set_width(s_weather.status_stack, forecast ? 440 : 500);
-      lv_obj_align(s_weather.status_stack, LV_ALIGN_TOP_LEFT, forecast ? 180 : 150, forecast ? 48 : 680);
-      lv_obj_set_style_text_font(s_weather.weather_status_label, &lv_font_montserrat_22, 0);
-      lv_obj_set_style_text_opa(s_weather.weather_status_label, LV_OPA_COVER, 0);
-      lv_obj_set_style_text_letter_space(s_weather.weather_status_label, 0, 0);
-      status_text = weather->valid ? "Weather data stale" : "Weather update failed.";
-    } else {
-      lv_obj_set_width(s_weather.status_stack, 360);
-      lv_obj_align(s_weather.status_stack, LV_ALIGN_BOTTOM_MID, 0, -56);
-      lv_obj_set_style_text_font(s_weather.weather_status_label, &lv_font_montserrat_18, 0);
-      lv_obj_set_style_text_opa(s_weather.weather_status_label, LV_OPA_70, 0);
-      lv_obj_set_style_text_letter_space(s_weather.weather_status_label, 1, 0);
-    }
-    wac_ui_set_label_text(s_weather.weather_status_label, status_text);
-    lv_obj_clear_flag(s_weather.weather_status_label, LV_OBJ_FLAG_HIDDEN);
-    return;
-  }
-
-  wac_ui_set_label_text(s_weather.weather_status_label, "");
-  lv_obj_add_flag(s_weather.weather_status_label, LV_OBJ_FLAG_HIDDEN);
 }
 
 void wac_weather_update_message(const app_message_snapshot_t *snapshot)

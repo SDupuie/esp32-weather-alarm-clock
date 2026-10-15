@@ -29,6 +29,7 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 - Touchscreen settings for Wi-Fi, location, display, messaging and saved alarm/night preferences.
 - One recurring alarm with selected repeat days, Snooze, Dismiss, missed-alarm notices and restart recovery.
 - Classic Beep, Classic Bell, and Rising Tones, with a five-second sound preview and gradually increasing alarm volume.
+- Sound Machine with nine repeating recordings, White/Pink/Brown Noise, independent volume and a sleep timer.
 - Automatic startup when the board receives power.
 
 The approved design is in [docs/architecture.md](docs/architecture.md). Open [mockups/alarm-design.html](mockups/alarm-design.html) in a browser to explore the clock screens and House Messages page.
@@ -116,7 +117,10 @@ The example port is for macOS. See Espressif's [serial connection instructions](
 3. Allow time for network synchronization and the first weather update.
 4. Open **Settings → Display Settings** to change the clock face, time format or brightness, then tap **Save** to apply without restarting. Other device preferences are under **Device Setup**; nested **Done** keeps your edits until **Save & Restart** applies them.
 
-For firmware updates, build and flash again over USB. The browser installer files in [docs/index.html](docs/index.html) currently package the original weather-display baseline, without this project’s alarm-clock enhancements.
+For firmware updates, build and flash again over USB. The browser installer in
+[docs/index.html](docs/index.html) uses four prepared images, including the Sound
+Machine recordings. See the [target guide](targets/esp32-p4/README.md#prepare-browser-installation-files)
+to rebuild those installation files before distributing updated firmware.
 
 ## Using the Clock
 
@@ -129,6 +133,7 @@ Your selected analog or digital face is the home screen.
 | Clock | Swipe right | Open Messages. |
 | Messages | Swipe left | Return to the clock. |
 | Clock | Swipe down | Open settings. |
+| Clock | Tap the speaker icon | Open Sound Machine; Back returns to the clock. |
 | Settings editor | Tap **Cancel** | Discard that editor's unsaved changes; Weather returns to Device Setup, while Display, Device Setup and Alarm return to Settings. |
 | Settings entry | Tap **Back** | Return to the clock after first-use location setup is complete. |
 | Unread message | Tap the displayed message | Mark it read for this clock and return home after acknowledgment succeeds. |
@@ -213,12 +218,13 @@ Room Name, Device ID and House Messages are under **Device Setup → Messaging**
 | Brightness | Day/Night levels under **Settings → Display Settings → Brightness**. |
 | Night Shift | Mode, fixed schedule, and solar offsets with calculated start/end times. |
 | Alarm | Time, repeat days, sound, volume, snooze and On/Off. The editor previews the next alarm for unsaved time/day edits. |
+| Sound Machine | Sound, independent volume, sleep timer and Play/Stop. |
 
 Display Settings has its own **Cancel** and **Save**. Save applies the clock face, time format, leading zero and Day/Night brightness without restarting, then returns to Settings. Cancel or Back discards those edits.
 
 Conditions descriptions also use the saved time format, including while showing weather retained after a failed update.
 
-Device Setup and Wi-Fi share a draft for **Save & Restart**. The **Weather** entry opens the Weather editor for location, provider, units and API key, which save independently and restart after success. Its Back or Cancel returns to Device Setup with any other device edits retained; Weather Save applies only the weather choices. Alarm **Save** applies settings without restarting. The **Alarm On/Off** switches in Settings and Alarm Settings save immediately; **Cancel** does not undo a successful switch change. Other alarm edits still require **Save**. Nested **Done** keeps edits in the parent draft; **Cancel** discards unsaved edits. See the [architecture](docs/architecture.md#editing-and-saving-user-settings) for save rules and accepted partial-save behavior.
+Device Setup and Wi-Fi share a draft for **Save & Restart**. The **Weather** entry opens the Weather editor for location, provider, units and API key, which save independently and restart after success. Its Back or Cancel returns to Device Setup with any other device edits retained; Weather Save applies only the weather choices. Alarm **Save** applies settings without restarting. The **Alarm On/Off** switch in Alarm Settings saves immediately; **Cancel** does not undo a successful switch change. Other alarm edits still require **Save**. Nested **Done** keeps edits in the parent draft; **Cancel** discards unsaved edits. See the [architecture](docs/architecture.md#editing-and-saving-user-settings) for save rules and accepted partial-save behavior.
 
 Visual Crossing's API key stays masked. **Configured** means a key is saved;
 **Entered (not saved)** means you changed it in the editor. Save checks a newly
@@ -237,6 +243,17 @@ Tap a text field to open the keyboard. The active input stays visible above it; 
 Alarm Time and Fixed Schedule minute arrows move in five-minute steps and change the hour when minutes wrap. Opening an editor leaves the saved time unchanged. Volume and brightness sliders have a thin bar and a large circular handle.
 
 Preview Sound plays the selected draft sound at the draft volume without saving either choice. Stop Preview, leaving the sound picker or a ringing alarm stops the preview. Sunrise/Sunset shows calculated event times when the clock has usable time and a saved location.
+
+### Sound Machine
+
+Open **Settings → Sound Machine** or tap the speaker on either clock face.
+Choose a sound, volume and sleep timer, then tap **Play**. Sound, volume and timer
+changes save and apply immediately; **Back** and **Done** keep playback running.
+Changing the sound keeps the remaining time; changing the timer starts its full
+duration. Timed playback fades during its final 30 seconds. **Stop**, a ringing
+alarm or an alarm-sound preview ends playback. Press Play to start again.
+After a restart, your choices remain saved and playback is Stopped.
+See the [playback rules](docs/architecture.md#sound-machine-playback) for details.
 
 ## Documentation
 

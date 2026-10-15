@@ -58,11 +58,17 @@ set_tests_properties(alarm_recovery PROPERTIES TIMEOUT 15)
 # queue/task and copied-owner inputs are substituted in each fresh process.
 add_executable(test_audio test_audio.c)
 target_include_directories(test_audio PRIVATE
-  "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)
+  "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main
+  ../managed_components/espressif__esp_audio_codec/include
+  ../managed_components/espressif__esp_audio_codec/include/simple_dec
+  ../managed_components/espressif__esp_audio_codec/include/decoder
+  ../managed_components/espressif__esp_audio_codec/include/decoder/impl)
+target_compile_definitions(test_audio PRIVATE
+  WAC_AUDIO_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/assets/sounds/clock")
 target_compile_features(test_audio PRIVATE c_std_11)
 target_compile_options(test_audio PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(test_audio PRIVATE Threads::Threads m)
-foreach(scenario generator playback queuefail taskfail bspfail openfail volumefail writefail closefail)
+foreach(scenario generator playback queuefail taskfail bspfail openfail volumefail writefail closefail machine noise metadata recording machinefail cancelsetup)
   add_test(NAME audio_${scenario} COMMAND test_audio ${scenario})
   set_tests_properties(audio_${scenario} PROPERTIES TIMEOUT 15)
 endforeach()
@@ -148,7 +154,7 @@ foreach(name RUNTIME_LOCK_TIMEOUT_MS WIFI_CONNECT_TIMEOUT_MS WEATHER_REFRESH_INT
   endif()
   string(APPEND weather_worker "${declaration}\n")
 endforeach()
-foreach(signature "static void copy_text(" "static void runtime_state_update(" "static bool runtime_state_has_valid_weather(" "static void weather_service_wait(" "static void weather_service_task(")
+foreach(signature "static void runtime_state_update(" "static void weather_service_wait(" "static void weather_service_task(")
   string(FIND "${weather_main_source}" "${signature}" begin)
   if(begin LESS 0)
     message(FATAL_ERROR "Weather worker function ${signature} missing")

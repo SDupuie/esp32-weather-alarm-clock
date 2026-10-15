@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "esp_log.h"
 #include "weather_icon_names.h"
 #include "assets/analog_center_cap.h"
 #include "assets/analog_edge_indicator.h"
@@ -92,7 +91,7 @@
  * digital/forecast/message background art matches. */
 #define FACE_CONTENT_SIZE 780
 #define DIGITAL_DAY_TOP 80
-#define DIGITAL_DATE_TOP 115
+#define DIGITAL_DATE_TOP 128
 /* 150 was correct for the old scaled lv_font_montserrat_48 (line_height 52,
  * base_line 9, scaled 3x -> effective line_height 156 / base_line 27, baseline
  * at 150+156-27=279). lv_font_clock_time_144 -- generated from digits, ':'
@@ -133,6 +132,7 @@ typedef struct {
   lv_obj_t *analog_weather_waiting;
   lv_obj_t *digital_weather_waiting;
   bool weather_available;
+  bool weather_notice;
   bool night;
   lv_obj_t *unavailable_view;
   lv_obj_t *unavailable_stage;
@@ -174,13 +174,13 @@ typedef struct {
   lv_obj_t *analog_weather_indicator;
   lv_obj_t *digital_weather_indicator;
   lv_obj_t *second_hand;
+  lv_obj_t *machine_indicator, *machine_icon;
   lv_obj_t *backup_indicator;
   lv_obj_t *backup_overlay;
   lv_obj_t *backup_card;
   lv_obj_t *backup_title;
   lv_obj_t *backup_detail;
   lv_obj_t *backup_dismiss;
-  lv_obj_t *backup_error;
   lv_obj_t *alarm_view;
   lv_obj_t *alarm_stage;
   lv_obj_t *alarm_day;
@@ -208,7 +208,6 @@ typedef struct {
 } clock_view_objects_t;
 
 static clock_view_objects_t s_clock;
-static const char *TAG = "rwd_app_ui";
 
 static const char *const WEEKDAY_NAMES[] = {
   "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
@@ -385,151 +384,6 @@ static void build_analog_dial_objects(lv_obj_t *parent)
   apply_analog_dial_palette(false);
 }
 
-static void log_object_bounds(
-  const char *prefix,
-  lv_obj_t *obj,
-  const char *icon_name,
-  const lv_image_dsc_t *asset,
-  bool used_fallback
-)
-{
-  int32_t x = 0;
-  int32_t y = 0;
-  int32_t width = 0;
-  int32_t height = 0;
-  bool hidden = true;
-
-  if (obj != NULL) {
-    lv_obj_update_layout(obj);
-    x = lv_obj_get_x(obj);
-    y = lv_obj_get_y(obj);
-    width = lv_obj_get_width(obj);
-    height = lv_obj_get_height(obj);
-    hidden = lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
-  }
-
-  ESP_LOGI(
-    TAG,
-    "%s: %s%s -> asset=%p cf=%u img=%ux%u stride=%u bytes=%u obj=%p hidden=%d pos=%" PRId32 ",%" PRId32 " size=%" PRId32 "x%" PRId32,
-    prefix,
-    icon_name != NULL ? icon_name : weather_icon_fallback_name(),
-    used_fallback ? " (fallback)" : "",
-    (const void *) asset,
-    asset != NULL ? (unsigned int) asset->header.cf : 0U,
-    asset != NULL ? (unsigned int) asset->header.w : 0U,
-    asset != NULL ? (unsigned int) asset->header.h : 0U,
-    asset != NULL ? (unsigned int) asset->header.stride : 0U,
-    asset != NULL ? (unsigned int) asset->data_size : 0U,
-    (void *) obj,
-    hidden ? 1 : 0,
-    x,
-    y,
-    width,
-    height
-  );
-}
-
-static void log_analog_hand_state(
-  const char *name,
-  lv_obj_t *obj,
-  const lv_image_dsc_t *asset,
-  int pivot_x,
-  int pivot_y
-)
-{
-  if (obj == NULL || asset == NULL) {
-    ESP_LOGW(TAG, "Analog %s hand missing obj=%p asset=%p", name, (void *) obj, (const void *) asset);
-    return;
-  }
-
-  lv_obj_update_layout(obj);
-  ESP_LOGI(
-    TAG,
-    "Analog %s hand: asset=%p cf=%u pos=%" PRId32 ",%" PRId32 " size=%" PRId32 "x%" PRId32
-    " pivot=%d,%d opa=%u hidden=%d",
-    name,
-    (const void *) asset,
-    (unsigned) asset->header.cf,
-    (int32_t) lv_obj_get_x(obj),
-    (int32_t) lv_obj_get_y(obj),
-    (int32_t) lv_obj_get_width(obj),
-    (int32_t) lv_obj_get_height(obj),
-    pivot_x,
-    pivot_y,
-    (unsigned) lv_obj_get_style_opa(obj, 0),
-    lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN) ? 1 : 0
-  );
-}
-
-void wac_clock_log_weather(const app_weather_snapshot_t *weather)
-{
-  bool live_weather = weather != NULL;
-  if (s_clock.digital_view != NULL) {
-    lv_obj_update_layout(s_clock.digital_view);
-  }
-
-  const char *current_icon_name = live_weather
-    ? weather->icon_name
-    : weather_icon_fallback_name();
-  bool current_used_fallback = live_weather && !weather_icon_name_is_known(weather->icon_name);
-  const lv_image_dsc_t *current_asset = weather_icon_image_for_name(current_icon_name);
-
-  log_object_bounds(
-    "DIGITAL current icon",
-    s_clock.digital_current_icon,
-    current_icon_name,
-    current_asset,
-    current_used_fallback
-  );
-
-  if (s_clock.digital_current_panel != NULL) {
-    log_object_bounds(
-      "DIGITAL current panel",
-      s_clock.digital_current_panel,
-      current_icon_name,
-      current_asset,
-      current_used_fallback
-    );
-  }
-
-  if (s_clock.digital_forecast_container != NULL) {
-    log_object_bounds(
-      "DIGITAL forecast container",
-      s_clock.digital_forecast_container,
-      current_icon_name,
-      current_asset,
-      current_used_fallback
-    );
-  }
-
-  for (int i = 0; i < DAY_COUNT; ++i) {
-    const char *forecast_icon_name = live_weather
-      ? weather_icon_name_or_fallback(weather->forecast[i].icon_name)
-      : weather_icon_fallback_name();
-    bool used_fallback = live_weather && !weather_icon_name_is_known(weather->forecast[i].icon_name);
-    const lv_image_dsc_t *forecast_asset = weather_icon_image_for_name(forecast_icon_name);
-    int forecast_temp = live_weather ? weather->forecast[i].high : 0;
-    const char *forecast_day = live_weather ? wac_ui_forecast_weekday(&weather->forecast[i]) : "--";
-
-    ESP_LOGI(
-      TAG,
-      "FORECAST[%d]: %s %s%s %d -> asset=%p obj=%p hidden=%d pos=%" PRId32 ",%" PRId32 " size=%" PRId32 "x%" PRId32,
-      i,
-      forecast_day,
-      forecast_icon_name,
-      used_fallback ? " (fallback)" : "",
-      forecast_temp,
-      (const void *) forecast_asset,
-      (void *) s_clock.digital_forecast_icons[i],
-      s_clock.digital_forecast_icons[i] != NULL && lv_obj_has_flag(s_clock.digital_forecast_icons[i], LV_OBJ_FLAG_HIDDEN) ? 1 : 0,
-      s_clock.digital_forecast_icons[i] != NULL ? lv_obj_get_x(s_clock.digital_forecast_icons[i]) : 0,
-      s_clock.digital_forecast_icons[i] != NULL ? lv_obj_get_y(s_clock.digital_forecast_icons[i]) : 0,
-      s_clock.digital_forecast_icons[i] != NULL ? lv_obj_get_width(s_clock.digital_forecast_icons[i]) : 0,
-      s_clock.digital_forecast_icons[i] != NULL ? lv_obj_get_height(s_clock.digital_forecast_icons[i]) : 0
-    );
-  }
-}
-
 static int32_t scale_dimension(int32_t value, int32_t scale)
 {
   return (value * scale + 128) / 256;
@@ -683,7 +537,7 @@ static void apply_clock_weather_visibility(void)
   lv_obj_t *waiting[] = {s_clock.analog_weather_waiting, s_clock.digital_weather_waiting};
   for (size_t i = 0; i < sizeof(waiting) / sizeof(waiting[0]); ++i) {
     if (!waiting[i]) continue;
-    if (s_clock.night || s_clock.weather_available) lv_obj_add_flag(waiting[i], LV_OBJ_FLAG_HIDDEN);
+    if (s_clock.night || (s_clock.weather_available && !s_clock.weather_notice)) lv_obj_add_flag(waiting[i], LV_OBJ_FLAG_HIDDEN);
     else lv_obj_remove_flag(waiting[i], LV_OBJ_FLAG_HIDDEN);
   }
   if (s_clock.analog_weather_icon) {
@@ -938,22 +792,6 @@ void wac_clock_build_analog(lv_obj_t *parent)
   s_clock.analog_center_cap = lv_image_create(s_clock.analog_face);
   lv_image_set_src(s_clock.analog_center_cap, &analog_center_cap);
   lv_obj_set_pos(s_clock.analog_center_cap, ANALOG_CENTER_CAP_X, ANALOG_CENTER_CAP_Y);
-
-  log_analog_hand_state("hour", s_clock.analog_hour_asset, &analog_hour_hand, ANALOG_HOUR_PIVOT_X, ANALOG_HOUR_PIVOT_Y);
-  log_analog_hand_state(
-    "minute",
-    s_clock.analog_minute_asset,
-    &analog_minute_hand,
-    ANALOG_MINUTE_PIVOT_X,
-    ANALOG_MINUTE_PIVOT_Y
-  );
-  log_analog_hand_state(
-    "second",
-    s_clock.second_hand,
-    &analog_second_hand,
-    ANALOG_SECOND_PIVOT_X,
-    ANALOG_SECOND_PIVOT_Y
-  );
 }
 
 void wac_clock_build_digital(lv_obj_t *parent)
@@ -1170,11 +1008,6 @@ void wac_clock_build_backup(lv_obj_t *parent, lv_event_cb_t open_cb, lv_event_cb
     wac_ui_color_text_muted(), LV_TEXT_ALIGN_CENTER, "");
   lv_obj_set_pos(s_clock.backup_detail, 29, 95);
   lv_obj_set_width(s_clock.backup_detail, 460);
-  s_clock.backup_error = wac_ui_create_label(s_clock.backup_card, &lv_font_montserrat_18,
-    wac_ui_color_text_muted(), LV_TEXT_ALIGN_CENTER, "");
-  lv_obj_set_pos(s_clock.backup_error, 19, 131);
-  lv_obj_set_width(s_clock.backup_error, 480);
-  lv_obj_add_flag(s_clock.backup_error, LV_OBJ_FLAG_HIDDEN);
   s_clock.backup_dismiss = lv_button_create(s_clock.backup_card);
   wac_ui_clear_container_chrome(s_clock.backup_dismiss);
   lv_obj_set_pos(s_clock.backup_dismiss, 84, 161);
@@ -1191,8 +1024,6 @@ void wac_clock_build_backup(lv_obj_t *parent, lv_event_cb_t open_cb, lv_event_cb
 
 static void update_analog_clock(const struct tm *local_time)
 {
-  static int s_logged_angle_updates = 0;
-
   if (local_time == NULL || s_clock.second_hand == NULL) {
     return;
   }
@@ -1210,18 +1041,6 @@ static void update_analog_clock(const struct tm *local_time)
   }
 
   lv_image_set_rotation(s_clock.second_hand, (int32_t) lround(second_angle * 10.0));
-
-  if (s_logged_angle_updates < 3) {
-    ESP_LOGI(
-      TAG,
-      "Analog hand angles update %d: hour=%.1f minute=%.1f second=%.1f",
-      s_logged_angle_updates + 1,
-      hour_angle,
-      minute_angle,
-      second_angle
-    );
-    s_logged_angle_updates++;
-  }
 }
 
 static void update_day_labels(const struct tm *local_time)
@@ -1233,7 +1052,6 @@ static void update_day_labels(const struct tm *local_time)
 
   char analog_date[16];
   char digital_date[16];
-  char digital_date_upper[16];
   snprintf(analog_date, sizeof(analog_date), "%s %d", MONTH_NAMES[local_time->tm_mon], local_time->tm_mday);
   snprintf(
     digital_date,
@@ -1242,12 +1060,11 @@ static void update_day_labels(const struct tm *local_time)
     MONTH_NAMES[local_time->tm_mon],
     local_time->tm_mday
   );
-  wac_ui_copy_uppercase_string(digital_date_upper, sizeof(digital_date_upper), digital_date);
 
   wac_ui_set_label_text(s_clock.analog_day_label, WEEKDAY_NAMES[local_time->tm_wday]);
   wac_ui_set_label_text(s_clock.analog_date_label, analog_date);
-  wac_ui_set_label_text(s_clock.digital_day_label, WEEKDAY_NAMES_UPPER[local_time->tm_wday]);
-  wac_ui_set_label_text(s_clock.digital_date_label, digital_date_upper);
+  wac_ui_set_label_text(s_clock.digital_day_label, WEEKDAY_NAMES[local_time->tm_wday]);
+  wac_ui_set_label_text(s_clock.digital_date_label, digital_date);
 }
 
 static void update_digital_clock(const device_config_t *config, const struct tm *local_time)
@@ -1440,6 +1257,21 @@ void wac_clock_update_weather(const app_weather_snapshot_t *weather)
 
 }
 
+void wac_clock_update_weather_notice(const char *notice)
+{
+  s_clock.weather_notice = notice && notice[0];
+  lv_obj_t *labels[] = {s_clock.analog_weather_waiting, s_clock.digital_weather_waiting};
+  bool retained = s_clock.weather_available;
+  for (size_t i = 0; i < sizeof(labels) / sizeof(labels[0]); ++i) {
+    if (!labels[i]) continue;
+    wac_ui_set_label_text(labels[i], retained ? notice : "Waiting for weather…");
+    lv_obj_set_style_text_font(labels[i], retained ? &lv_font_montserrat_22 : &wac_font_settings_28, 0);
+    lv_obj_set_pos(labels[i], 150, retained ? (i == 0 ? 582 : 464) : (i == 0 ? 550 : 390));
+    lv_obj_move_foreground(labels[i]);
+  }
+  apply_clock_weather_visibility();
+}
+
 void wac_clock_update_indicators(bool unread, bool important, bool weather_alert, bool night)
 {
   apply_edge_indicator_state(s_clock.analog_edge_indicator, unread, important, night);
@@ -1487,14 +1319,14 @@ void wac_clock_update_status(const char *text, bool analog, bool waiting_for_syn
 }
 
 void wac_clock_update_backup(bool home, bool analog, bool usable,
-  wac_time_warning_t warning, bool open, bool dismiss_pending, const char *error, bool night)
+  wac_time_warning_t warning, bool open, bool dismiss_pending, bool night)
 {
   if (!s_clock.backup_indicator) return;
   bool pending = warning != WAC_TIME_WARNING_NONE;
   if (home && pending) lv_obj_remove_flag(s_clock.backup_indicator, LV_OBJ_FLAG_HIDDEN);
   else lv_obj_add_flag(s_clock.backup_indicator, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_set_pos(s_clock.backup_indicator, 464, !usable ? 56
-    : (analog ? 126 : 98));
+  lv_obj_set_pos(s_clock.backup_indicator, 488, !usable ? 56
+    : (analog ? 152 : 92));
   if (home && pending && open)
     lv_obj_remove_flag(s_clock.backup_overlay, LV_OBJ_FLAG_HIDDEN);
   else lv_obj_add_flag(s_clock.backup_overlay, LV_OBJ_FLAG_HIDDEN);
@@ -1507,7 +1339,6 @@ void wac_clock_update_backup(bool home, bool analog, bool usable,
   lv_obj_set_style_border_color(s_clock.backup_card, line, 0);
   lv_obj_set_style_text_color(s_clock.backup_title, primary, 0);
   lv_obj_set_style_text_color(s_clock.backup_detail, muted, 0);
-  lv_obj_set_style_text_color(s_clock.backup_error, muted, 0);
   lv_obj_set_style_text_color(s_clock.backup_dismiss, primary, 0);
   lv_obj_set_style_bg_color(s_clock.backup_dismiss, lv_color_hex(night ? 0x321c20 : 0x17263b), 0);
   lv_obj_set_style_border_color(s_clock.backup_dismiss, line, 0);
@@ -1516,9 +1347,7 @@ void wac_clock_update_backup(bool home, bool analog, bool usable,
   wac_ui_set_label_text(s_clock.backup_detail, lost ? "Check Battery." : "Check Connection.");
   if (dismiss_pending) lv_obj_add_state(s_clock.backup_dismiss, LV_STATE_DISABLED);
   else lv_obj_remove_state(s_clock.backup_dismiss, LV_STATE_DISABLED);
-  wac_ui_set_label_text(s_clock.backup_error, error);
-  if (error && error[0]) lv_obj_remove_flag(s_clock.backup_error, LV_OBJ_FLAG_HIDDEN);
-  else lv_obj_add_flag(s_clock.backup_error, LV_OBJ_FLAG_HIDDEN);
+
 }
 
 static void set_alarm_visible(lv_obj_t *obj, bool visible)
@@ -1683,14 +1512,13 @@ void wac_clock_build_alarm(lv_obj_t *parent, lv_event_cb_t action_cb,
 void wac_clock_update_alarm(const device_config_t *config,
   const wac_time_snapshot_t *clock, const wac_alarm_snapshot_t *alarm,
   wac_clock_alarm_surface_t surface, bool analog, bool night,
-  bool caption_blocked, bool pending, const char *error)
+  bool caption_blocked, bool pending)
 {
   if (!s_clock.alarm_view || !config || !clock || !alarm) return;
   bool ringing = surface == WAC_CLOCK_ALARM_RINGING;
   bool snoozed = surface == WAC_CLOCK_ALARM_SNOOZED;
   bool home = surface == WAC_CLOCK_ALARM_HOME;
   bool missed = alarm->missed.valid;
-  bool failed = error && error[0];
   lv_color_t primary = night ? wac_ui_color_night_primary() : wac_ui_color_text_primary();
   lv_color_t muted = night ? wac_ui_color_night_muted() : wac_ui_color_text_muted();
   lv_color_t accent = lv_color_hex(night ? 0xe1b6b6 : 0x93d1ff);
@@ -1713,8 +1541,7 @@ void wac_clock_update_alarm(const device_config_t *config,
   style_alarm_button(s_clock.unavailable_alarm_button, night, false);
   lv_obj_set_style_text_color(s_clock.unavailable_alarm_button_text, primary, 0);
   lv_obj_set_style_text_color(s_clock.unavailable_alarm_caption, muted, 0);
-  wac_ui_set_label_text(s_clock.unavailable_alarm_caption, failed ? error
-    : config->alarm_enabled ? "Alarm saved; will arm when time is available"
+  wac_ui_set_label_text(s_clock.unavailable_alarm_caption, config->alarm_enabled ? "Alarm saved; will arm when time is available"
     : "Alarm off; saved settings are kept");
   lv_obj_set_pos(s_clock.unavailable_alarm_button, 230, missed ? 546 : 574);
   lv_obj_set_height(s_clock.unavailable_alarm_button, missed ? 72 : 104);
@@ -1778,8 +1605,7 @@ void wac_clock_update_alarm(const device_config_t *config,
     wac_ui_set_label_text(s_clock.alarm_deadline, again);
     lv_obj_set_pos(s_clock.alarm_footer, snoozed ? 150 : 200, 679);
     lv_obj_set_width(s_clock.alarm_footer, snoozed ? 500 : 400);
-    wac_ui_set_label_text(s_clock.alarm_footer, failed ? error
-      : snoozed ? "Repeating alarm stays on" : "Alarm ringing");
+    wac_ui_set_label_text(s_clock.alarm_footer, snoozed ? "Repeating alarm stays on" : "Alarm ringing");
   }
 
   if (home) {
@@ -1816,7 +1642,7 @@ void wac_clock_update_alarm(const device_config_t *config,
       format_alarm_time(time_text, sizeof(time_text), config, occurrence->minute, true);
       snprintf(summary, sizeof(summary), "%s · %s", day, time_text);
     }
-    wac_ui_set_label_text(s_clock.alarm_badge_text, failed && clock->usable ? error : summary);
+    wac_ui_set_label_text(s_clock.alarm_badge_text, summary);
     bool analog_row = analog && clock->usable;
     lv_obj_set_pos(s_clock.alarm_badge, missed ? 130 : analog_row ? 220 : 170,
       analog_row ? 220 : 642);
@@ -1829,7 +1655,7 @@ void wac_clock_update_alarm(const device_config_t *config,
     lv_obj_set_style_text_font(s_clock.alarm_badge_text,
       missed ? &wac_font_settings_26 : &wac_font_settings_28, 0);
     /* Use the normal analog row's full width to keep complete captions on one
-     * line at the approved font size. Longer error text can still wrap. */
+     * line at the approved font size. */
     lv_point_t text_size;
     int gap = missed || analog_row ? 10 : 14;
     int text_width = (missed ? 540 : analog_row ? 360 : 460) - 2 * padding
@@ -1855,4 +1681,27 @@ void wac_clock_update_alarm(const device_config_t *config,
     if (s_clock.backup_overlay && !lv_obj_has_flag(s_clock.backup_overlay, LV_OBJ_FLAG_HIDDEN))
       lv_obj_move_foreground(s_clock.backup_overlay);
   }
+}
+
+void wac_clock_build_machine(lv_obj_t *parent, lv_event_cb_t open_cb)
+{
+  s_clock.machine_indicator = lv_button_create(parent);
+  wac_ui_clear_container_chrome(s_clock.machine_indicator);
+  lv_obj_set_size(s_clock.machine_indicator, 88, 80);
+  lv_obj_remove_flag(s_clock.machine_indicator, LV_OBJ_FLAG_SCROLLABLE);
+  s_clock.machine_icon = lv_image_create(s_clock.machine_indicator);
+  lv_image_set_src(s_clock.machine_icon, &wac_icon_volume_off);
+  lv_obj_center(s_clock.machine_icon);
+  lv_obj_remove_flag(s_clock.machine_icon, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(s_clock.machine_indicator, open_cb, LV_EVENT_CLICKED, NULL);
+}
+void wac_clock_update_machine(bool home, bool analog, bool usable, bool playing, bool night)
+{
+  if (!s_clock.machine_indicator) return;
+  if (home) lv_obj_remove_flag(s_clock.machine_indicator, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(s_clock.machine_indicator, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_pos(s_clock.machine_indicator, 224, !usable ? 56 : analog ? 152 : 92);
+  lv_image_set_src(s_clock.machine_icon, playing ? &wac_icon_volume_2 : &wac_icon_volume_off);
+  lv_obj_set_style_image_recolor(s_clock.machine_icon, night ? wac_ui_color_night_muted() : wac_ui_color_text_muted(), 0);
+  lv_obj_set_style_image_recolor_opa(s_clock.machine_icon, LV_OPA_COVER, 0);
 }

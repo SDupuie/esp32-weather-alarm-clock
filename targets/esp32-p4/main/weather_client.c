@@ -18,10 +18,6 @@
 #include "forecast_representative.h"
 #include "storm_conditions.h"
 #include "weather_icon_names.h"
-#ifdef ESP_PLATFORM
-#include "esp_heap_caps.h"
-#include "freertos/task.h"
-#endif
 
 static const char *TAG = "rwd_weather";
 #define WEATHER_HTTP_TIMEOUT_MS 10000
@@ -29,8 +25,8 @@ static const char *TAG = "rwd_weather";
 #define WEATHER_HOURS_MAX 192
 #define QUOTA_HOUR_US INT64_C(3600000000)
 
-static SemaphoreHandle_t request_mutex;
-static StaticSemaphore_t request_mutex_storage;
+static SemaphoreHandle_t request_gate;
+static StaticSemaphore_t request_gate_storage;
 typedef struct {
   char key[DEVICE_CONFIG_WEATHER_KEY_LEN];
   bool paused;
@@ -38,21 +34,6 @@ typedef struct {
 } quota_record_t;
 static quota_record_t quota[2];
 static unsigned request_count;
-
-#ifdef ESP_PLATFORM
-static void log_request_resources(const char *phase)
-{
-  /* IDF reports the stack high-water mark in bytes. Sample while the response,
-   * parsed JSON and normalized arrays coexist, then again after cleanup. */
-  uint32_t internal=MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-  uint32_t external=MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
-  ESP_LOGI(TAG,"request=%u phase=%s task=%s stack_free_min_bytes=%u "
-    "internal_free=%u internal_largest=%u psram_free=%u psram_largest=%u",
-    request_count,phase,pcTaskGetName(NULL),(unsigned)uxTaskGetStackHighWaterMark(NULL),
-    (unsigned)heap_caps_get_free_size(internal),(unsigned)heap_caps_get_largest_free_block(internal),
-    (unsigned)heap_caps_get_free_size(external),(unsigned)heap_caps_get_largest_free_block(external));
-}
-#endif
 
 typedef struct {
   char *data;
@@ -97,14 +78,17 @@ static bool append_number(cJSON *array, double value)
 
 esp_err_t weather_client_init(void)
 {
-  if (request_mutex) return ESP_OK;
-  request_mutex = xSemaphoreCreateMutexStatic(&request_mutex_storage);
+  if (request_gate) return ESP_OK;
+  /* Serialize whole requests without retaining an SDK mutex's inherited
+   * priority through the remaining network and decode work. */
+  request_gate = xSemaphoreCreateBinaryStatic(&request_gate_storage);
+  if (request_gate) xSemaphoreGive(request_gate);
 #ifdef ESP_PLATFORM
   /* IDF's DEBUG request-header log includes the credential-bearing query.
    * VC uses host/path/query below, avoiding URL parse errors that echo a URL. */
   esp_log_level_set("HTTP_CLIENT", ESP_LOG_WARN);
 #endif
-  return request_mutex ? ESP_OK : ESP_ERR_NO_MEM;
+  return request_gate ? ESP_OK : ESP_ERR_NO_MEM;
 }
 static quota_record_t *record_for(const device_config_t *config)
 {
@@ -128,11 +112,11 @@ static quota_record_t *record_for(const device_config_t *config)
 }
 int64_t weather_client_next_allowed_us(const device_config_t *config)
 {
-  if (!config || !request_mutex) return 0;
-  xSemaphoreTake(request_mutex, portMAX_DELAY);
+  if (!config || !request_gate) return 0;
+  xSemaphoreTake(request_gate, portMAX_DELAY);
   quota_record_t *record = record_for(config);
   int64_t deadline = record && record->paused ? record->next_us : 0;
-  xSemaphoreGive(request_mutex);
+  xSemaphoreGive(request_gate);
   return deadline;
 }
 
@@ -456,9 +440,6 @@ static esp_err_t decode(const device_config_t *config,cJSON *root,app_weather_sn
   out->thundersnow=picture==WEATHER_PICTURE_THUNDERSNOW;
   snprintf(out->summary,sizeof(out->summary),"%s",weather_caption_for_facts(&facts,out->is_day));
   snprintf(out->icon_name,sizeof(out->icon_name),"%s",weather_icon_name_for_picture(picture,out->is_day));
-#ifdef ESP_PLATFORM
-  log_request_resources("decode");
-#endif
   build_conditions(config,current,hourly,daily,out);
   out->valid=true; out->updated_at=time(NULL);
   if (vc) { cJSON_Delete(hourly); cJSON_Delete(daily); cJSON_Delete(normalized_current); }
@@ -512,14 +493,14 @@ static __attribute__((noinline)) esp_err_t perform_request(
 esp_err_t weather_client_fetch(const device_config_t *config,app_weather_snapshot_t *out)
 {
   if (!config||!out) return ESP_ERR_INVALID_ARG;
-  if (!request_mutex || !config->latitude[0] || !config->longitude[0] ||
+  if (!request_gate || !config->latitude[0] || !config->longitude[0] ||
       (config->weather_provider!=DEVICE_CONFIG_WEATHER_OPEN_METEO && config->weather_provider!=DEVICE_CONFIG_WEATHER_VISUAL_CROSSING)) return ESP_ERR_INVALID_STATE;
   bool vc=config->weather_provider==DEVICE_CONFIG_WEATHER_VISUAL_CROSSING;
   if (vc && !config->weather_api_key[0]) return ESP_ERR_INVALID_ARG;
-  xSemaphoreTake(request_mutex,portMAX_DELAY);
+  xSemaphoreTake(request_gate,portMAX_DELAY);
   quota_record_t *record=record_for(config);
   if (record&&record->paused&&esp_timer_get_time()<record->next_us) {
-    xSemaphoreGive(request_mutex); return ESP_ERR_INVALID_STATE;
+    xSemaphoreGive(request_gate); return ESP_ERR_INVALID_STATE;
   }
   http_response_t response={0};
   int status=0; double query_cost=NAN;
@@ -542,8 +523,5 @@ esp_err_t weather_client_fetch(const device_config_t *config,app_weather_snapsho
   ESP_LOGI(TAG,"provider=%s request=%u status=%d bytes=%u queryCost=%.0f result=%d",
     vc?"Visual Crossing":"Open-Meteo",request_count,status,(unsigned)response.length,query_cost,err);
   free(response.data);
-#ifdef ESP_PLATFORM
-  log_request_resources("cleanup");
-#endif
-  xSemaphoreGive(request_mutex); return err;
+  xSemaphoreGive(request_gate); return err;
 }

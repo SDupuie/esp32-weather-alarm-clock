@@ -67,7 +67,7 @@ static const lv_buttonmatrix_ctrl_t SETTINGS_KEYBOARD_SYMBOLS_CTRL[] = {
 #undef UTILITY
 #undef WIDE
 
-typedef enum { SAVE_DEVICE, SAVE_DISPLAY, SAVE_WEATHER, SAVE_ALARM, SAVE_TOGGLE } save_kind_t;
+typedef enum { SAVE_DEVICE, SAVE_DISPLAY, SAVE_WEATHER, SAVE_ALARM, SAVE_TOGGLE, SAVE_MACHINE } save_kind_t;
 typedef struct {
   save_kind_t kind;
   unsigned route;
@@ -101,8 +101,16 @@ static save_completion_t s_save_completion;
 static scan_completion_t s_scan_completion;
 static struct {
   lv_obj_t *root, *keyboard, *status, *body, *backdrop, *wifi_summary;
-  lv_obj_t *heading, *back_button, *normal_note;
+  lv_obj_t *heading, *back_button, *normal_note, *save_button, *toggle_button;
   lv_obj_t *preview_button, *preview_caption;
+  lv_obj_t *machine_button, *machine_status, *machine_volume, *machine_list, *machine_bar, *machine_thumb, *machine_retry;
+  int machine_scroll;
+  wac_settings_view_t machine_return;
+  esp_err_t machine_submission_error;
+  bool saving_machine, machine_changed_while_saving, machine_save_failed;
+  /* Only the three immediate preferences cross an outstanding save. This
+   * keeps a last drag/choice intact when the shared editor is reset or closed. */
+  struct { device_config_sound_machine_sound_t sound; uint8_t volume, timer; } machine_desired;
   wac_audio_snapshot_t audio;
   esp_err_t preview_submission_error;
   struct { lv_obj_t *block, *input, *summary, *arrow, *clear; int y; } fields[6];
@@ -133,14 +141,14 @@ enum {
   ACTION_BACK = 100, ACTION_DONE, ACTION_CANCEL, ACTION_SAVE,
   ACTION_ALARM_TOGGLE, ACTION_FACE, ACTION_FORMAT, ACTION_ZERO,
   ACTION_UNITS, ACTION_SHARING, ACTION_SCAN, ACTION_MANUAL, ACTION_PROVIDER,
-  ACTION_PREVIEW, ACTION_CLEAR_KEY,
+  ACTION_PREVIEW, ACTION_CLEAR_KEY, ACTION_MACHINE_PLAY, ACTION_MACHINE_RETRY,
   ACTION_HOUR_UP, ACTION_HOUR_DOWN, ACTION_MINUTE_UP, ACTION_MINUTE_DOWN,
   ACTION_AM, ACTION_PM, ACTION_WEEKDAYS, ACTION_EVERY_DAY,
   ACTION_OFFSET_BEFORE, ACTION_OFFSET_AT, ACTION_OFFSET_AFTER,
   ACTION_OFFSET_MINUS, ACTION_OFFSET_PLUS,
   ACTION_DAY_BASE = 200, ACTION_SOUND_BASE = 220,
   ACTION_SNOOZE_BASE = 230, ACTION_MODE_BASE = 240,
-  ACTION_NETWORK_BASE = 260
+  ACTION_NETWORK_BASE = 260, ACTION_MACHINE_SOUND_BASE = 280, ACTION_MACHINE_TIMER_BASE = 300
 };
 enum { FIELD_ROOM, FIELD_ID, FIELD_SSID, FIELD_PASSWORD, FIELD_LOCATION, FIELD_API_KEY,
   FIELD_VOLUME, FIELD_DAY_BRIGHTNESS, FIELD_NIGHT_BRIGHTNESS };
@@ -148,12 +156,13 @@ enum { FIELD_ROOM, FIELD_ID, FIELD_SSID, FIELD_PASSWORD, FIELD_LOCATION, FIELD_A
 static void action_event(lv_event_t *event);
 static void scan_networks(void);
 static void navigate(wac_settings_view_t view);
+static void submit_save(save_kind_t kind);
 static void focus_validation(wac_settings_view_t view, int field_id, const char *text);
 
 /* Updating these shared color styles preserves the active editor, its cursor
  * and keyboard. Appearance is supplied by the Night Shift owner through ui.c. */
 enum { STYLE_PRIMARY, STYLE_MUTED, STYLE_ACCENT, STYLE_BUTTON,
-  STYLE_SELECTED, STYLE_TRACK, STYLE_TRACK_ON, STYLE_KNOB, STYLE_RANGE, STYLE_COUNT };
+  STYLE_SELECTED, STYLE_TRACK, STYLE_TRACK_ON, STYLE_KNOB, STYLE_RANGE, STYLE_SCROLL_TRACK, STYLE_SCROLL_THUMB, STYLE_COUNT };
 static lv_style_t s_palette[STYLE_COUNT];
 static bool s_palette_ready, s_night;
 
@@ -189,6 +198,8 @@ void wac_settings_apply_night(bool active)
   lv_style_set_bg_color(&s_palette[STYLE_TRACK_ON], selected);
   lv_style_set_border_color(&s_palette[STYLE_TRACK_ON], accent());
   lv_style_set_bg_color(&s_palette[STYLE_KNOB], primary());
+  lv_style_set_bg_color(&s_palette[STYLE_SCROLL_TRACK], muted());
+  lv_style_set_bg_color(&s_palette[STYLE_SCROLL_THUMB], accent());
   lv_style_set_bg_color(&s_palette[STYLE_RANGE], lv_color_hex(active ? 0xc17a7a : 0x78b8ff));
   for (int i = 0; i < STYLE_COUNT; ++i) lv_obj_report_style_change(&s_palette[i]);
   if (s_settings.root) lv_obj_set_style_bg_color(s_settings.root, lv_color_hex(active ? 0x18090c : 0x07101c), 0);
@@ -242,7 +253,10 @@ static lv_obj_t *button_box(int action, int x, int y, int width, int height, boo
   lv_obj_set_style_shadow_width(obj, 0, 0);
   lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_event_cb(obj, action_event, LV_EVENT_CLICKED, (void *)(intptr_t)action);
-  if (s_settings.saving || s_settings.restarting) lv_obj_add_state(obj, LV_STATE_DISABLED);
+  if (action == ACTION_SAVE) s_settings.save_button = obj;
+  if (action == ACTION_ALARM_TOGGLE) s_settings.toggle_button = obj;
+  if ((s_settings.saving && (!s_settings.saving_machine || action == ACTION_SAVE || action == ACTION_ALARM_TOGGLE))
+      || s_settings.restarting) lv_obj_add_state(obj, LV_STATE_DISABLED);
   return obj;
 }
 
@@ -422,6 +436,51 @@ static lv_obj_t *icon_button(const char *text, int action, int x, int y, int wid
   return obj;
 }
 
+static const char *const machine_sounds[] = {"Rain", "Thunder", "Ocean", "Wind", "Forest", "Campfire", "Stream", "Night", "Singing Bowl", "White Noise", "Pink Noise", "Brown Noise"};
+static const char *const machine_descriptions[] = {"Steady rainfall.", "Distant rolling thunder.", "Waves washing ashore.", "A soft, steady breeze.", "Birdsong and forest ambience.", "Crackling wood fire.", "Flowing water.", "Crickets and night ambience.", "Resonant singing bowl tones.", "A steady, bright hiss.", "Softer, balanced noise.", "Deep, low noise."};
+static const unsigned machine_timers[] = {0, 15, 30, 60, 120};
+static bool machine_view(wac_settings_view_t view)
+{
+  return view >= WAC_SETTINGS_MACHINE && view <= WAC_SETTINGS_MACHINE_TIMER;
+}
+static void refresh_machine(void)
+{
+  if (!s_settings.machine_button) return;
+  bool busy = s_settings.audio.machine_active || s_settings.audio.machine_pending;
+  lv_label_set_text(lv_obj_get_child(s_settings.machine_button, 0), busy ? "Stop" : "Play");
+  lv_image_set_src(lv_obj_get_child(s_settings.machine_button, 1), busy ? &wac_icon_square : &wac_icon_play);
+  center_icon_text(s_settings.machine_button, true);
+  if (!s_settings.audio.ready && !busy) lv_obj_add_state(s_settings.machine_button, LV_STATE_DISABLED);
+  else lv_obj_remove_state(s_settings.machine_button, LV_STATE_DISABLED);
+  char text[80];
+  if (s_settings.machine_submission_error != ESP_OK) snprintf(text, sizeof(text), "Could not start. Try Play again.");
+  else if (!s_settings.audio.ready) snprintf(text, sizeof(text), "Audio unavailable.");
+  else if (s_settings.audio.error != ESP_OK) snprintf(text, sizeof(text), "Stopped · Audio failed. Try Play again.");
+  else if (s_settings.audio.machine_pending) snprintf(text, sizeof(text), "Starting…");
+  else if (!s_settings.audio.machine_active) snprintf(text, sizeof(text), "Stopped");
+  else if (s_settings.audio.machine_continuous) snprintf(text, sizeof(text), "Playing · Continuous");
+  else snprintf(text, sizeof(text), "Playing · %u min left", (unsigned)((s_settings.audio.machine_remaining_seconds + 59) / 60));
+  lv_label_set_text(s_settings.machine_status, text);
+}
+static void copy_machine_preferences(device_config_t *to, const device_config_t *from)
+{
+  to->sound_machine_sound = from->sound_machine_sound;
+  to->sound_machine_volume = from->sound_machine_volume;
+  to->sound_machine_timer_minutes = from->sound_machine_timer_minutes;
+}
+static void apply_machine_desired(device_config_t *to)
+{
+  to->sound_machine_sound = s_settings.machine_desired.sound;
+  to->sound_machine_volume = s_settings.machine_desired.volume;
+  to->sound_machine_timer_minutes = s_settings.machine_desired.timer;
+}
+static bool machine_desired_equals(const device_config_t *config)
+{
+  return s_settings.machine_desired.sound == config->sound_machine_sound
+    && s_settings.machine_desired.volume == config->sound_machine_volume
+    && s_settings.machine_desired.timer == config->sound_machine_timer_minutes;
+}
+
 /* The copied owner state drives this existing button and caption in place;
  * playback completion must not rebuild a draft or an active editor. */
 static void refresh_audio(void)
@@ -458,6 +517,7 @@ void wac_settings_update_audio(const wac_audio_snapshot_t *audio)
   if (!audio) return;
   s_settings.audio = *audio;
   refresh_audio();
+  refresh_machine();
 }
 
 static void stop_preview(void)
@@ -527,7 +587,7 @@ static void refresh_notice(void)
   wac_settings_view_t view = wac_ui_settings_view();
   if (view == WAC_SETTINGS_ALARM) {
     format_alarm_preview(alarm_preview, sizeof(alarm_preview));
-    text = s_settings.saving ? "Saving settings..."
+    text = s_settings.saving && !s_settings.saving_machine ? "Saving settings..."
       : s_settings.notice_kind == NOTICE_SAVE_ERROR ? "Could not save. Try again."
       : s_settings.notice[0] && !s_settings.draft.alarm_repeat_days ? "Choose at least one day."
       : alarm_preview;
@@ -764,7 +824,7 @@ static void keyboard_draw(lv_event_t *event)
 
 static void field_focus(lv_event_t *event)
 {
-  if (s_settings.saving || s_settings.restarting) return;
+  if ((s_settings.saving && !s_settings.saving_machine) || s_settings.restarting) return;
   lv_obj_t *input = lv_event_get_user_data(event);
   if (!input) input = lv_event_get_target(event);
   if (lv_obj_has_state(input, LV_STATE_DISABLED)) return;
@@ -774,7 +834,7 @@ static void field_focus(lv_event_t *event)
 
 static void field_changed(lv_event_t *event)
 {
-  if (s_settings.saving || s_settings.restarting) return;
+  if ((s_settings.saving && !s_settings.saving_machine) || s_settings.restarting) return;
   const char *value = lv_textarea_get_text(lv_event_get_target(event));
   char *dest = NULL;
   size_t length = 0;
@@ -856,7 +916,7 @@ static void field(const char *title, const char *value, int field_id, size_t len
     lv_obj_add_flag(clear, LV_OBJ_FLAG_HIDDEN);
     s_settings.fields[field_id].clear = clear;
   }
-  if (s_settings.saving || s_settings.restarting || disabled) lv_obj_add_state(obj, LV_STATE_DISABLED);
+  if ((s_settings.saving && !s_settings.saving_machine) || s_settings.restarting || disabled) lv_obj_add_state(obj, LV_STATE_DISABLED);
   s_settings.fields[field_id].block = block;
   s_settings.fields[field_id].input = obj;
   s_settings.fields[field_id].y = y;
@@ -877,7 +937,7 @@ static void field(const char *title, const char *value, int field_id, size_t len
     lv_obj_set_pos(arrow, 466, 32);
     s_settings.fields[field_id].summary = summary;
     s_settings.fields[field_id].arrow = arrow;
-    if (s_settings.saving || s_settings.restarting || disabled) lv_obj_add_state(block, LV_STATE_DISABLED);
+    if ((s_settings.saving && !s_settings.saving_machine) || s_settings.restarting || disabled) lv_obj_add_state(block, LV_STATE_DISABLED);
   }
 }
 
@@ -891,7 +951,7 @@ static void focus_validation(wac_settings_view_t view, int field_id, const char 
 
 static void slider_changed(lv_event_t *event)
 {
-  if (s_settings.saving) return;
+  if (s_settings.saving && !s_settings.saving_machine) return;
   int field_id = (int)(intptr_t)lv_event_get_user_data(event);
   int value = lv_slider_get_value(lv_event_get_target(event));
   if (field_id == FIELD_VOLUME) {
@@ -937,7 +997,37 @@ static void slider(const char *title, int field_id, int value, int y)
    * it leaves a valid saved volume unchanged until the user adjusts it. */
   lv_slider_set_value(obj, initial, LV_ANIM_OFF);
   lv_obj_add_event_cb(obj, slider_changed, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)field_id);
-  if (s_settings.saving) lv_obj_add_state(obj, LV_STATE_DISABLED);
+  if (s_settings.saving && !s_settings.saving_machine) lv_obj_add_state(obj, LV_STATE_DISABLED);
+}
+
+static void machine_slider_changed(lv_event_t *event)
+{
+  unsigned value = lv_slider_get_value(lv_event_get_target(event));
+  s_settings.machine_desired.volume = value;
+  char text[8]; snprintf(text, sizeof(text), "%u%%", value);
+  lv_label_set_text(s_settings.machine_volume, text);
+  submit_save(SAVE_MACHINE);
+}
+static void machine_scroll_event(lv_event_t *event)
+{
+  (void)event;
+  if (!s_settings.machine_list || !s_settings.machine_thumb) return;
+  s_settings.machine_scroll = lv_obj_get_scroll_y(s_settings.machine_list);
+  int top = s_settings.machine_scroll * (420 - 137) / (1284 - 420);
+  if (top < 0) top = 0;
+  if (top > 283) top = 283;
+  lv_obj_set_y(s_settings.machine_thumb, top);
+}
+static void machine_bar_event(lv_event_t *event)
+{
+  if (lv_event_get_code(event) != LV_EVENT_PRESSED && lv_event_get_code(event) != LV_EVENT_PRESSING) return;
+  lv_indev_t *indev = lv_indev_active();
+  if (!indev || !s_settings.machine_list) return;
+  lv_point_t point; lv_indev_get_point(indev, &point);
+  int top = point.y - 212 - 137 / 2;
+  if (top < 0) top = 0;
+  if (top > 283) top = 283;
+  lv_obj_scroll_to_y(s_settings.machine_list, top * 864 / 283, LV_ANIM_OFF);
 }
 
 static void time_picker(int hour, int minute, const device_config_t *draft)
@@ -1106,6 +1196,7 @@ static void save_task(void *arg)
   } else if (request->kind == SAVE_DEVICE) error = device_config_save_device(&request->baseline, &request->draft);
   else if (request->kind == SAVE_DISPLAY) error = device_config_save_display(&request->baseline, &request->draft);
   else if (request->kind == SAVE_ALARM) error = device_config_save_alarm(&request->baseline, &request->draft);
+  else if (request->kind == SAVE_MACHINE) error = device_config_save_sound_machine(&request->baseline, &request->draft);
   else error = device_config_set_alarm_enabled(request->draft.alarm_enabled);
 complete:
   portENTER_CRITICAL(&s_completion_lock);
@@ -1123,7 +1214,11 @@ complete:
 
 static void submit_save(save_kind_t kind)
 {
-  if (s_settings.saving || s_settings.restarting) return;
+  if (s_settings.saving || s_settings.restarting) {
+    if (kind == SAVE_MACHINE && s_settings.saving_machine) s_settings.machine_changed_while_saving = true;
+    return;
+  }
+  s_settings.machine_changed_while_saving = false;
   if (kind == SAVE_WEATHER && s_settings.draft.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
       && !has_text(s_settings.draft.weather_api_key)) {
     focus_validation(WAC_SETTINGS_WEATHER, FIELD_API_KEY, "Enter a Visual Crossing API key.");
@@ -1149,6 +1244,7 @@ static void submit_save(save_kind_t kind)
   }
   save_request_t *request = calloc(1, sizeof(*request));
   if (!request) {
+    if (kind == SAVE_MACHINE) s_settings.machine_save_failed = true;
     show_notice("Could not start saving. Try again.");
     s_settings.notice_kind = NOTICE_SAVE_ERROR;
     refresh_notice();
@@ -1158,6 +1254,11 @@ static void submit_save(save_kind_t kind)
   request->route = s_settings.route;
   if (kind != SAVE_TOGGLE) { request->baseline = s_settings.baseline; request->draft = s_settings.draft; }
   else { request->baseline = s_settings.applied; request->draft = s_settings.applied; request->draft.alarm_enabled = !request->draft.alarm_enabled; }
+  if (kind == SAVE_MACHINE) {
+    request->baseline = request->draft = s_settings.applied;
+    apply_machine_desired(&request->draft);
+    s_settings.machine_save_failed = false;
+  }
   if (kind == SAVE_WEATHER && s_settings.holding_device_draft) request->baseline = s_settings.applied;
   if (kind == SAVE_WEATHER && !has_text(request->draft.location)) {
     free(request);
@@ -1165,6 +1266,7 @@ static void submit_save(save_kind_t kind)
     return;
   }
   s_settings.saving = true;
+  s_settings.saving_machine = kind == SAVE_MACHINE;
   bool lookup = kind == SAVE_WEATHER && needs_location_lookup(&request->draft);
   show_notice(lookup ? "Checking Location…" : kind == SAVE_WEATHER ? "Saving settings…" : "Saving settings...");
   if (lookup) s_settings.notice_kind = NOTICE_LOCATION_CHECKING;
@@ -1174,10 +1276,12 @@ static void submit_save(save_kind_t kind)
     s_settings.notice_kind = NOTICE_PROVIDER_CHECKING;
   if (xTaskCreate(save_task, "settings_save", 8192, request, 4, NULL) != pdPASS) {
     s_settings.saving = false;
+    s_settings.saving_machine = false;
+    if (kind == SAVE_MACHINE) s_settings.machine_save_failed = true;
     free(request); show_notice("Could not start saving. Try again.");
     s_settings.notice_kind = NOTICE_SAVE_ERROR;
   }
-  wac_settings_render(wac_ui_settings_view());
+  if (kind != SAVE_MACHINE) wac_settings_render(wac_ui_settings_view());
 }
 
 static void scan_task(void *arg)
@@ -1206,6 +1310,12 @@ static void scan_networks(void)
   wac_settings_render(wac_ui_settings_view());
 }
 
+void wac_settings_start_machine(bool return_to_clock)
+{
+  s_settings.machine_return = return_to_clock ? WAC_SETTINGS_NONE : wac_ui_settings_view();
+  navigate(WAC_SETTINGS_MACHINE);
+}
+
 void wac_settings_start_weather(const device_config_t *config)
 {
   s_settings.holding_device_draft = false;
@@ -1217,7 +1327,15 @@ void wac_settings_begin(lv_obj_t *parent, const device_config_t *config)
 {
   wac_settings_apply_night(s_night);
   s_settings.preview_submission_error = ESP_OK;
+  s_settings.machine_submission_error = ESP_OK;
+  s_settings.machine_scroll = 0;
+  s_settings.machine_return = WAC_SETTINGS_ENTRY;
   s_settings.applied = *config;
+  if (!s_settings.saving_machine && !s_settings.machine_save_failed) {
+    s_settings.machine_desired.sound = config->sound_machine_sound;
+    s_settings.machine_desired.volume = config->sound_machine_volume;
+    s_settings.machine_desired.timer = config->sound_machine_timer_minutes;
+  }
   s_settings.holding_device_draft = false;
   s_settings.baseline = s_settings.draft = *config;
   ++s_settings.route;
@@ -1244,7 +1362,10 @@ void wac_settings_close(void)
   s_settings.root = s_settings.body = s_settings.status = s_settings.keyboard = NULL;
   s_settings.backdrop = s_settings.wifi_summary = NULL;
   s_settings.preview_button = s_settings.preview_caption = NULL;
+  s_settings.machine_button = s_settings.machine_status = s_settings.machine_volume = NULL;
+  s_settings.machine_list = s_settings.machine_bar = s_settings.machine_thumb = s_settings.machine_retry = NULL;
   s_settings.heading = s_settings.back_button = s_settings.normal_note = s_settings.active_input = NULL;
+  s_settings.save_button = s_settings.toggle_button = NULL;
   s_settings.solar_note = s_settings.solar_description = NULL;
   memset(s_settings.solar_times, 0, sizeof(s_settings.solar_times));
   memset(s_settings.fields, 0, sizeof(s_settings.fields));
@@ -1312,6 +1433,11 @@ static void back(void)
 {
   switch (wac_ui_settings_view()) {
     case WAC_SETTINGS_ENTRY: wac_ui_settings_close(); break;
+    case WAC_SETTINGS_MACHINE:
+      if (s_settings.machine_return == WAC_SETTINGS_NONE) wac_ui_settings_close();
+      else navigate(s_settings.machine_return);
+      break;
+    case WAC_SETTINGS_MACHINE_SOUND: case WAC_SETTINGS_MACHINE_TIMER: navigate(WAC_SETTINGS_MACHINE); break;
     case WAC_SETTINGS_DEVICE_SETUP:
       s_settings.draft = s_settings.baseline;
       navigate(WAC_SETTINGS_ENTRY); break;
@@ -1345,7 +1471,23 @@ static void back(void)
 static void action_event(lv_event_t *event)
 {
   int action = (int)(intptr_t)lv_event_get_user_data(event);
-  if (s_settings.saving || s_settings.restarting) return;
+  if (s_settings.restarting || (s_settings.saving && !s_settings.saving_machine)) return;
+  if (action == ACTION_MACHINE_PLAY) {
+    wac_audio_copy(&s_settings.audio);
+    s_settings.machine_submission_error = (s_settings.audio.machine_active || s_settings.audio.machine_pending)
+      ? wac_audio_sound_machine_stop() : wac_audio_sound_machine_play();
+    wac_audio_copy(&s_settings.audio);
+    refresh_machine(); return;
+  }
+  if (action == ACTION_MACHINE_RETRY) { submit_save(SAVE_MACHINE); return; }
+  if (action >= ACTION_MACHINE_SOUND_BASE && action < ACTION_MACHINE_SOUND_BASE + 12) {
+    s_settings.machine_desired.sound = action - ACTION_MACHINE_SOUND_BASE;
+    submit_save(SAVE_MACHINE); wac_settings_render(wac_ui_settings_view()); return;
+  }
+  if (action >= ACTION_MACHINE_TIMER_BASE && action < ACTION_MACHINE_TIMER_BASE + 5) {
+    s_settings.machine_desired.timer = machine_timers[action - ACTION_MACHINE_TIMER_BASE];
+    submit_save(SAVE_MACHINE); wac_settings_render(wac_ui_settings_view()); return;
+  }
   if (action == ACTION_PREVIEW) {
     wac_audio_copy(&s_settings.audio);
     if (!s_settings.audio.ready && !s_settings.audio.preview_active) return;
@@ -1360,7 +1502,8 @@ static void action_event(lv_event_t *event)
   }
   stop_preview();
   s_settings.preview_submission_error = ESP_OK;
-  if (action > WAC_SETTINGS_NONE && action <= WAC_SETTINGS_BRIGHTNESS) {
+  if (action > WAC_SETTINGS_NONE && action <= WAC_SETTINGS_MACHINE_TIMER) {
+    if (action == WAC_SETTINGS_MACHINE) { wac_settings_start_machine(false); return; }
     if (action == WAC_SETTINGS_WEATHER && wac_ui_settings_view() == WAC_SETTINGS_DEVICE_SETUP) {
       s_settings.held_device_draft = s_settings.draft;
       s_settings.holding_device_draft = true;
@@ -1459,7 +1602,33 @@ void wac_settings_poll(void)
       device_config_copy(&s_settings.applied);
       if (save.kind == SAVE_DISPLAY) wac_ui_apply_display(&s_settings.applied);
     }
-    if (save.error == ESP_OK && (save.kind == SAVE_DEVICE || save.kind == SAVE_WEATHER)) {
+    if (save.kind == SAVE_MACHINE) {
+      s_settings.saving_machine = false;
+      if (save.error == ESP_OK) {
+        copy_machine_preferences(&s_settings.baseline, &s_settings.applied);
+        /* A drag or another choice may have changed the desired preferences
+         * while the ordinary background save was in flight. */
+        if (s_settings.machine_changed_while_saving && !machine_desired_equals(&save.draft)) submit_save(SAVE_MACHINE);
+        else {
+          copy_machine_preferences(&s_settings.draft, &s_settings.applied);
+          if (machine_view(wac_ui_settings_view())) show_notice("");
+        }
+      } else {
+        s_settings.machine_save_failed = true;
+        if (machine_view(wac_ui_settings_view())) {
+          show_notice("Could not save. Retry your choice.");
+          s_settings.notice_kind = NOTICE_SAVE_ERROR;
+        }
+      }
+      if (!s_settings.saving && !s_settings.restarting) {
+        if (s_settings.save_button) lv_obj_remove_state(s_settings.save_button, LV_STATE_DISABLED);
+        if (s_settings.toggle_button) lv_obj_remove_state(s_settings.toggle_button, LV_STATE_DISABLED);
+      }
+      wac_settings_view_t current_view = wac_ui_settings_view();
+      if (s_settings.root && (machine_view(current_view) || current_view == WAC_SETTINGS_ENTRY)
+          && (save.error != ESP_OK || current_view != WAC_SETTINGS_MACHINE || s_settings.machine_retry))
+        wac_settings_render(wac_ui_settings_view());
+    } else if (save.error == ESP_OK && (save.kind == SAVE_DEVICE || save.kind == SAVE_WEATHER)) {
       /* Save & Restart completes even if alarm navigation replaced its editor.
        * Only the original editor may show location/network-specific success. */
       s_settings.restarting = true;
@@ -1531,7 +1700,10 @@ void wac_settings_render(wac_settings_view_t view)
   lv_obj_clean(s_settings.root);
   s_settings.status = s_settings.keyboard = s_settings.wifi_summary = NULL;
   s_settings.preview_button = s_settings.preview_caption = NULL;
+  s_settings.machine_button = s_settings.machine_status = s_settings.machine_volume = NULL;
+  s_settings.machine_list = s_settings.machine_bar = s_settings.machine_thumb = s_settings.machine_retry = NULL;
   s_settings.normal_note = s_settings.active_input = NULL;
+  s_settings.save_button = s_settings.toggle_button = NULL;
   s_settings.solar_note = s_settings.solar_description = NULL;
   memset(s_settings.solar_times, 0, sizeof(s_settings.solar_times));
   memset(s_settings.fields, 0, sizeof(s_settings.fields));
@@ -1540,7 +1712,7 @@ void wac_settings_render(wac_settings_view_t view)
   s_settings.backdrop = lv_image_create(s_settings.root);
   lv_image_set_src(s_settings.backdrop, s_night ? &round_stage_night : &round_stage_day);
   lv_obj_remove_flag(s_settings.backdrop, LV_OBJ_FLAG_CLICKABLE);
-  const char *titles[] = {"", "Settings", "Device Setup", "Display", "Messaging", "Weather", "Wi-Fi", "Network Details", "Alarm", "Alarm Time", "Repeat", "Sound & Snooze", "Alarm Sound", "Snooze", "Night Shift", "Night Shift Mode", "Fixed Schedule", "Night Starts", "Night Ends", "Sunrise/Sunset", "Sunset Offset", "Sunrise Offset", "Brightness"};
+  const char *titles[] = {"", "Settings", "Device Setup", "Display", "Messaging", "Weather", "Wi-Fi", "Network Details", "Alarm", "Alarm Time", "Repeat", "Sound & Snooze", "Alarm Sound", "Snooze", "Night Shift", "Night Shift Mode", "Fixed Schedule", "Night Starts", "Night Ends", "Sunrise/Sunset", "Sunset Offset", "Sunrise Offset", "Brightness", "Sound Machine", "Sound", "Sleep Timer"};
   s_settings.heading = label(s_settings.body, titles[view], 245, 128, 320, &lv_font_montserrat_36);
   lv_obj_set_style_text_letter_space(s_settings.heading, 1, 0);
   s_settings.back_button = button_box(ACTION_BACK, 145, 104, 88, 88, false);
@@ -1574,7 +1746,7 @@ void wac_settings_render(wac_settings_view_t view)
     lv_obj_add_style(detail, &s_palette[STYLE_MUTED], 0);
     return;
   }
-  if (s_settings.restarting || (s_settings.saving && view != WAC_SETTINGS_WEATHER && view != WAC_SETTINGS_ALARM)) {
+  if (s_settings.restarting || (s_settings.saving && !s_settings.saving_machine && view != WAC_SETTINGS_WEATHER && view != WAC_SETTINGS_ALARM)) {
     s_settings.status = label(s_settings.root, s_settings.restarting
       ? "Settings Saved. Restarting..." : s_settings.notice, 155, 368, 490, &wac_font_settings_24);
     return;
@@ -1585,7 +1757,7 @@ void wac_settings_render(wac_settings_view_t view)
   static const char *sounds[] = {"Classic Beep", "Classic Bell", "Rising Tones"};
   switch (view) {
     case WAC_SETTINGS_ENTRY: {
-      switch_row("Alarm", s_settings.applied.alarm_enabled, ACTION_ALARM_TOGGLE, 212);
+      entry_row("Sound Machine", machine_sounds[s_settings.applied.sound_machine_sound], WAC_SETTINGS_MACHINE, 212);
       char time[32], repeat[48];
       format_time(time, sizeof(time), s_settings.applied.alarm_hour,
         s_settings.applied.alarm_minute, &s_settings.applied);
@@ -1598,6 +1770,88 @@ void wac_settings_render(wac_settings_view_t view)
       button("Back to Clock", ACTION_BACK, 230, 646, 340, 88, false);
       break;
     }
+    case WAC_SETTINGS_MACHINE: {
+      value_entry("Sound", machine_sounds[s_settings.machine_desired.sound], WAC_SETTINGS_MACHINE_SOUND, 212, 96);
+      if (s_settings.machine_desired.timer) snprintf(text, sizeof(text), "%u Minutes", s_settings.machine_desired.timer);
+      else snprintf(text, sizeof(text), "Continuous");
+      value_entry("Sleep Timer", text, WAC_SETTINGS_MACHINE_TIMER, 320, 96);
+      label(s_settings.body, "Volume", 150, 452, 270, &lv_font_montserrat_32);
+      snprintf(text, sizeof(text), "%u%%", s_settings.machine_desired.volume);
+      s_settings.machine_volume = label(s_settings.body, text, 498, 452, 150, &lv_font_montserrat_32);
+      lv_obj_t *range = lv_slider_create(s_settings.body);
+      lv_obj_remove_style_all(range);
+      lv_obj_set_pos(range, 175, 532); lv_obj_set_size(range, 450, 8);
+      lv_obj_set_ext_click_area(range, 20);
+      lv_obj_add_style(range, &s_palette[STYLE_BUTTON], LV_PART_MAIN);
+      lv_obj_add_style(range, &s_palette[STYLE_RANGE], LV_PART_INDICATOR);
+      lv_obj_add_style(range, &s_palette[STYLE_RANGE], LV_PART_KNOB);
+      for (int part = 0; part < 3; ++part) {
+        lv_part_t target = part == 0 ? LV_PART_MAIN : part == 1 ? LV_PART_INDICATOR : LV_PART_KNOB;
+        lv_obj_set_style_bg_opa(range, LV_OPA_COVER, target);
+        lv_obj_set_style_radius(range, LV_RADIUS_CIRCLE, target);
+      }
+      lv_obj_set_style_pad_all(range, 14, LV_PART_KNOB);
+      lv_slider_set_range(range, 0, 100);
+      lv_slider_set_value(range, s_settings.machine_desired.volume, LV_ANIM_OFF);
+      lv_obj_add_event_cb(range, machine_slider_changed, LV_EVENT_VALUE_CHANGED, NULL);
+      s_settings.machine_status = label(s_settings.body, "Stopped", 150, 598, 500, &wac_font_settings_26);
+      lv_obj_add_style(s_settings.machine_status, &s_palette[STYLE_MUTED], 0);
+      s_settings.machine_button = icon_button("Play", ACTION_MACHINE_PLAY, 270, 676, 260, 80, &wac_icon_play, true, true);
+      refresh_machine();
+      break;
+    }
+    case WAC_SETTINGS_MACHINE_SOUND: {
+      snprintf(text, sizeof(text), "Volume · %u%%", s_settings.machine_desired.volume);
+      lv_obj_t *caption = label(s_settings.body, text, 150, 174, 500, &wac_font_settings_28);
+      lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
+      if (s_settings.machine_save_failed) lv_obj_add_flag(caption, LV_OBJ_FLAG_HIDDEN);
+      s_settings.machine_list = lv_obj_create(s_settings.body);
+      lv_obj_remove_style_all(s_settings.machine_list);
+      lv_obj_set_pos(s_settings.machine_list, 140, 212); lv_obj_set_size(s_settings.machine_list, 520, 420);
+      lv_obj_set_scroll_dir(s_settings.machine_list, LV_DIR_VER);
+      lv_obj_set_scrollbar_mode(s_settings.machine_list, LV_SCROLLBAR_MODE_OFF);
+      s_settings.body = s_settings.machine_list;
+      for (int i = 0; i < 12; ++i) {
+        bool selected = s_settings.machine_desired.sound == (device_config_sound_machine_sound_t)i;
+        lv_obj_t *obj = entry_box(machine_sounds[i], machine_descriptions[i], ACTION_MACHINE_SOUND_BASE + i, i * 108, selected);
+        lv_obj_set_x(obj, 0);
+        if (selected) check_icon(obj);
+      }
+      s_settings.body = s_settings.root;
+      s_settings.machine_bar = lv_obj_create(s_settings.body);
+      lv_obj_remove_style_all(s_settings.machine_bar);
+      lv_obj_set_pos(s_settings.machine_bar, 672, 212); lv_obj_set_size(s_settings.machine_bar, 10, 420);
+      lv_obj_set_style_radius(s_settings.machine_bar, LV_RADIUS_CIRCLE, 0);
+      lv_obj_add_style(s_settings.machine_bar, &s_palette[STYLE_SCROLL_TRACK], 0);
+      lv_obj_set_style_bg_opa(s_settings.machine_bar, 97, 0);
+      lv_obj_add_flag(s_settings.machine_bar, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_remove_flag(s_settings.machine_bar, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_ext_click_area(s_settings.machine_bar, 12);
+      lv_obj_add_event_cb(s_settings.machine_bar, machine_bar_event, LV_EVENT_ALL, NULL);
+      s_settings.machine_thumb = lv_obj_create(s_settings.machine_bar);
+      lv_obj_remove_style_all(s_settings.machine_thumb);
+      lv_obj_set_size(s_settings.machine_thumb, 10, 137);
+      lv_obj_set_style_radius(s_settings.machine_thumb, LV_RADIUS_CIRCLE, 0);
+      lv_obj_add_style(s_settings.machine_thumb, &s_palette[STYLE_SCROLL_THUMB], 0);
+      lv_obj_set_style_bg_opa(s_settings.machine_thumb, LV_OPA_COVER, 0);
+      lv_obj_remove_flag(s_settings.machine_thumb, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_add_event_cb(s_settings.machine_list, machine_scroll_event, LV_EVENT_SCROLL, NULL);
+      lv_obj_update_layout(s_settings.machine_list);
+      lv_obj_scroll_to_y(s_settings.machine_list, s_settings.machine_scroll, LV_ANIM_OFF);
+      machine_scroll_event(NULL);
+      button("Done", ACTION_DONE, 270, 676, 260, 80, true);
+      break;
+    }
+    case WAC_SETTINGS_MACHINE_TIMER:
+      for (int i = 0; i < 5; ++i) {
+        if (machine_timers[i]) snprintf(text, sizeof(text), "%u Minutes", machine_timers[i]);
+        else snprintf(text, sizeof(text), "Continuous");
+        bool selected = s_settings.machine_desired.timer == machine_timers[i];
+        if (selected) icon_button(text, ACTION_MACHINE_TIMER_BASE + i, 170, 212 + i * 92, 460, 80, &wac_icon_check, false, true);
+        else button(text, ACTION_MACHINE_TIMER_BASE + i, 170, 212 + i * 92, 460, 80, false);
+      }
+      button("Done", ACTION_DONE, 270, 676, 260, 80, true);
+      break;
     case WAC_SETTINGS_DEVICE_SETUP:
       wifi_summary(text, sizeof(text));
       entry_row("Wi-Fi", text, WAC_SETTINGS_WIFI, 212);
@@ -1847,7 +2101,12 @@ void wac_settings_render(wac_settings_view_t view)
     }
     default: break;
   }
-  int notice_y = (view == WAC_SETTINGS_DEVICE_SETUP || view == WAC_SETTINGS_ENTRY) ? 170
+  if (machine_view(view) && s_settings.machine_save_failed) {
+    lv_obj_t *retry = s_settings.machine_retry = button("Retry Save", ACTION_MACHINE_RETRY, 245, 176, 310, 28, false);
+    lv_obj_set_style_text_font(lv_obj_get_child(retry, 0), &lv_font_montserrat_18, 0);
+    return;
+  }
+  int notice_y = machine_view(view) ? 642 : (view == WAC_SETTINGS_DEVICE_SETUP || view == WAC_SETTINGS_ENTRY) ? 170
     : (view == WAC_SETTINGS_WEATHER || view == WAC_SETTINGS_CREDENTIALS) ? 548
     : view == WAC_SETTINGS_DEVICE ? 574 : 620;
   s_settings.notice_y = notice_y;
