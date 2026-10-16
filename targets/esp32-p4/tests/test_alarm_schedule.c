@@ -125,7 +125,7 @@ static void invalid_checks(void)
   device_config_t config = {.alarm_enabled = false, .alarm_hour = 7,
     .alarm_repeat_days = 62};
   empty(&config); empty(NULL);
-  config.alarm_enabled = true; config.alarm_repeat_days = 0; empty(&config);
+  config.alarm_enabled = true;
   config.alarm_repeat_days = 128; empty(&config);
   config.alarm_repeat_days = 255; empty(&config);
   config.alarm_repeat_days = 62; config.alarm_hour = 24; empty(&config);
@@ -133,9 +133,36 @@ static void invalid_checks(void)
   wac_alarm_schedule_calculate(&config, 0, NULL);
 }
 
+static void one_time_checks(void)
+{
+  const case_t once[] = {
+    {"UTC0", 7, 0, 0, "2026-10-12 06:59:59", NULL, "2026-10-12 07:00:00", 0, 20261012},
+    {"UTC0", 7, 0, 0, "2026-10-12 07:00:00", NULL, "2026-10-12 07:00:00", 0, 20261012},
+    {"UTC0", 7, 0, 0, "2026-10-12 07:00:01", NULL, "2026-10-13 07:00:00", 0, 20261013},
+    {"UTC0", 0, 0, 0, "2026-12-31 23:59:59", NULL, "2027-01-01 00:00:00", 0, 20270101},
+    {"UTC0", 0, 0, 0, "2027-01-01 00:00:00", NULL, "2027-01-01 00:00:00", 0, 20270101},
+    {"EST5EDT,M3.2.0,M11.1.0", 2, 30, 0, "2026-03-08 06:29:59", NULL, "2026-03-08 06:30:00", 0, 20260308},
+    {"EST5EDT,M3.2.0,M11.1.0", 2, 30, 0, "2026-03-08 06:30:01", NULL, "2026-03-09 06:30:00", 0, 20260309},
+    {"EST5EDT,M3.2.0,M11.1.0", 1, 30, 0, "2026-11-01 05:30:00", NULL, "2026-11-01 06:30:00", 0, 20261101},
+    {"EST5EDT,M3.2.0,M11.1.0", 1, 30, 0, "2026-11-01 06:30:00", NULL, "2026-11-01 06:30:00", 0, 20261101},
+    {"<+1030>-10:30<+11>-11,M10.1.0,M4.1.0", 2, 15, 0, "2026-10-03 15:14:59", NULL, "2026-10-03 15:15:00", 0, 20261004},
+  };
+  for (size_t i = 0; i < sizeof(once) / sizeof(once[0]); ++i) {
+    const case_t *c = &once[i];
+    assert(setenv("TZ", c->zone, 1) == 0); tzset();
+    device_config_t config = {.alarm_enabled = true, .alarm_hour = c->hour,
+      .alarm_minute = c->minute, .alarm_repeat_days = 0};
+    wac_alarm_schedule_t result;
+    wac_alarm_schedule_calculate(&config, utc(c->now), &result);
+    assert(!result.previous.valid);
+    expect(&result.next, c->next, c->next_date, c->hour * 60 + c->minute);
+  }
+}
+
 int main(void)
 {
   schedule_checks();
+  one_time_checks();
   invalid_checks();
   printf("Alarm schedule: %zu independently specified UTC/date cases passed.\n",
     sizeof(cases) / sizeof(cases[0]));

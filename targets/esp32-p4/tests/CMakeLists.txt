@@ -108,7 +108,7 @@ set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 set(LV_BUILD_CONF_PATH "${CMAKE_CURRENT_BINARY_DIR}/lv_conf.h" CACHE PATH "" FORCE)
-set(native_lv_conf "#pragma once\n#define LV_CONF_H\n#define LV_MEM_SIZE (4 * 1024 * 1024)\n#define LV_FONT_MONTSERRAT_14 1\n#define LV_FONT_MONTSERRAT_28 1\n#define LV_FONT_MONTSERRAT_26 1\n#define LV_FONT_MONTSERRAT_48 1\n#define LV_FONT_MONTSERRAT_18 1\n#define LV_FONT_MONTSERRAT_24 1\n#define LV_FONT_MONTSERRAT_22 1\n#define LV_FONT_MONTSERRAT_32 1\n#define LV_FONT_MONTSERRAT_34 1\n#define LV_FONT_MONTSERRAT_36 1\n")
+set(native_lv_conf "#pragma once\n#define LV_CONF_H\n#define LV_MEM_SIZE (16 * 1024 * 1024)\n#define LV_FONT_MONTSERRAT_14 1\n#define LV_FONT_MONTSERRAT_28 1\n#define LV_FONT_MONTSERRAT_26 1\n#define LV_FONT_MONTSERRAT_48 1\n#define LV_FONT_MONTSERRAT_18 1\n#define LV_FONT_MONTSERRAT_24 1\n#define LV_FONT_MONTSERRAT_22 1\n#define LV_FONT_MONTSERRAT_32 1\n#define LV_FONT_MONTSERRAT_34 1\n#define LV_FONT_MONTSERRAT_36 1\n")
 if(EXISTS "${LV_BUILD_CONF_PATH}")
   file(READ "${LV_BUILD_CONF_PATH}" previous_lv_conf)
 endif()
@@ -116,6 +116,9 @@ if(NOT native_lv_conf STREQUAL previous_lv_conf)
   file(WRITE "${LV_BUILD_CONF_PATH}" "${native_lv_conf}")
 endif()
 add_subdirectory(../managed_components/lvgl__lvgl "${CMAKE_CURRENT_BINARY_DIR}/lvgl")
+# Use the bundled decoder for real PNG validation in the weather-client checks.
+# Native allocators enforce the same per-allocation bound as firmware's PSRAM hooks.
+target_compile_definitions(lvgl PUBLIC LV_USE_LODEPNG=1 LODEPNG_MAX_ALLOC=4194304)
 find_path(CJSON_INCLUDE_DIR cJSON.h
   HINTS "$ENV{IDF_PATH}/components/json/cJSON"
         "$ENV{HOME}/.espressif/v5.5.5/esp-idf/components/json/cJSON"
@@ -146,15 +149,20 @@ endforeach()
 set(weather_main "${CMAKE_CURRENT_SOURCE_DIR}/../main/main.c")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${weather_main}")
 file(READ "${weather_main}" weather_main_source)
-set(weather_worker "static const char *TAG = \"native_weather_worker\";\nstatic app_runtime_state_t s_runtime_state;\nstatic SemaphoreHandle_t s_runtime_mutex;\n")
-foreach(name RUNTIME_LOCK_TIMEOUT_MS WIFI_CONNECT_TIMEOUT_MS WEATHER_REFRESH_INTERVAL_MS WEATHER_RETRY_INTERVAL_MS)
+set(weather_worker "static const char *TAG = \"native_weather_worker\";\nstatic app_runtime_state_t s_runtime_state;\nstatic SemaphoreHandle_t s_runtime_mutex;\nstatic uint32_t s_radar_displayed_generation;\n")
+string(REGEX MATCH "typedef struct \\{[^}]*\\} weather_radar_work_t;" radar_work_declaration "${weather_main_source}")
+if(NOT radar_work_declaration)
+  message(FATAL_ERROR "Radar worker state declaration missing")
+endif()
+string(APPEND weather_worker "${radar_work_declaration}\n")
+foreach(name RUNTIME_LOCK_TIMEOUT_MS WIFI_CONNECT_TIMEOUT_MS WEATHER_REFRESH_INTERVAL_MS WEATHER_RETRY_INTERVAL_MS RADAR_REFRESH_INTERVAL_MS RADAR_STEP_INTERVAL_MS)
   string(REGEX MATCH "static const uint32_t ${name} = [^;]*;" declaration "${weather_main_source}")
   if(NOT declaration)
     message(FATAL_ERROR "Weather worker constant ${name} missing")
   endif()
   string(APPEND weather_worker "${declaration}\n")
 endforeach()
-foreach(signature "static void runtime_state_update(" "static void weather_service_wait(" "static void weather_service_task(")
+foreach(signature "static void runtime_state_update(" "static bool runtime_radar_publish(" "static uint32_t runtime_radar_displayed(" "static void weather_service_wait(" "static void weather_service_radar(" "static void weather_service_task(")
   string(FIND "${weather_main_source}" "${signature}" begin)
   if(begin LESS 0)
     message(FATAL_ERROR "Weather worker function ${signature} missing")
@@ -171,6 +179,7 @@ endforeach()
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/weather_service_task.inc" "${weather_worker}")
 add_executable(test_weather_service test_weather_service.c test_support.c
   ../main/forecast_representative.c
+  ../main/location_scoring.c
   ../main/storm_conditions.c ../main/weather_icon_names.c
   "${CJSON_INCLUDE_DIR}/cJSON.c")
 target_include_directories(test_weather_service PRIVATE
@@ -180,13 +189,13 @@ target_compile_definitions(test_weather_service PRIVATE time=wac_test_time
   WAC_WEATHER_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/test-data")
 target_compile_features(test_weather_service PRIVATE c_std_11)
 target_compile_options(test_weather_service PRIVATE -Wall -Wextra -Werror -UNDEBUG)
-target_link_libraries(test_weather_service PRIVATE Threads::Threads m)
+target_link_libraries(test_weather_service PRIVATE lvgl::lvgl Threads::Threads m)
 add_test(NAME weather_service COMMAND test_weather_service)
 set_tests_properties(weather_service PROPERTIES TIMEOUT 15)
 
 add_executable(test_ui_shell test_ui.c test_support.c
   ../main/ui/ui.c ../main/ui/clock_views.c ../main/ui/weather_views.c ../main/ui/settings.c
-  ../main/device_config.c ../main/timezone_table.c ../main/weather_icon_names.c ../main/alarm_schedule.c
+  ../main/device_config.c ../main/timezone_table.c ../main/weather_icon_names.c ../main/alarm_schedule.c ../main/location_scoring.c
   "${CJSON_INCLUDE_DIR}/cJSON.c"
   ../main/assets/lv_font_clock_time_144.c ../main/assets/lv_font_temp_102.c
   ../main/assets/lv_font_temp_105.c ../main/assets/lv_font_wind_speed_70.c ../main/assets/wac_fonts.c ../main/assets/wac_icons.c)

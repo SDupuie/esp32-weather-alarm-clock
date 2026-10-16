@@ -1065,7 +1065,7 @@
     }
   },
   {
-    "name": "pressure falling 4 hPa over 3h raises a pressure alert",
+    "name": "pressure falling 4 hPa over 3h stays informational without an alert",
     "cfg": {
       "units": "metric"
     },
@@ -1311,9 +1311,7 @@
       ]
     },
     "expected": {
-      "alerts": [
-        "pressure"
-      ],
+      "alerts": [],
       "pressure": {
         "value": 1012,
         "change": -4.0,
@@ -1322,9 +1320,9 @@
         "meaning": "Can mean a storm is coming"
       },
       "summary": {
-        "headline": "Pressure dropping fast",
-        "detail": "Can mean a storm is coming",
-        "alert": true
+        "headline": "Dry for now",
+        "detail": "Falling pressure can mean rain later",
+        "alert": false
       }
     }
   },
@@ -1575,12 +1573,273 @@
       ]
     },
     "expected": {
-      "alerts": [
-        "pressure"
-      ],
+      "alerts": [],
       "pressure": {
         "change": -4.0,
         "trend": "falling"
+      }
+    }
+  },
+  {
+    "name": "falling pressure with high wind alerts only for the wind",
+    "cfg": {
+      "units": "metric"
+    },
+    "current": {
+      "time": "2026-03-14T14:30",
+      "windspeed": 50.0,
+      "winddirection": 225
+    },
+    "hourly": {
+      "time": [
+        "2026-03-14T00:00",
+        "2026-03-14T01:00",
+        "2026-03-14T02:00",
+        "2026-03-14T03:00",
+        "2026-03-14T04:00",
+        "2026-03-14T05:00",
+        "2026-03-14T06:00",
+        "2026-03-14T07:00",
+        "2026-03-14T08:00",
+        "2026-03-14T09:00",
+        "2026-03-14T10:00",
+        "2026-03-14T11:00",
+        "2026-03-14T12:00",
+        "2026-03-14T13:00",
+        "2026-03-14T14:00",
+        "2026-03-14T15:00",
+        "2026-03-14T16:00",
+        "2026-03-14T17:00",
+        "2026-03-14T18:00",
+        "2026-03-14T19:00",
+        "2026-03-14T20:00",
+        "2026-03-14T21:00",
+        "2026-03-14T22:00",
+        "2026-03-14T23:00"
+      ],
+      "pressure_msl": [
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1016.0,
+        1015.0,
+        1013.5,
+        1012.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0,
+        1015.0
+      ],
+      "wind_speed_10m": [
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0,
+        50.0
+      ],
+      "wind_gusts_10m": [
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0,
+        15.0
+      ],
+      "precipitation": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "precipitation_probability": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "snowfall": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "condition_flags": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "sky": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    "expected": {
+      "alerts": [
+        "wind"
+      ],
+      "pressure": {
+        "value": 1012,
+        "change": -4.0,
+        "trend": "falling",
+        "status": "Dropping fast",
+        "meaning": "Can mean a storm is coming"
+      },
+      "summary": {
+        "headline": "Winds up to 50 km/h now",
+        "alert": true
       }
     }
   },
@@ -6041,7 +6300,7 @@
       "alerts": [],
       "summary": {
         "headline": "Turning much colder by 5 PM",
-        "detail": "About 18\u00b0 colder by then",
+        "detail": "About 18° colder by then",
         "changeLabel": "Conditions changing"
       }
     }
@@ -6607,7 +6866,7 @@
       "alerts": [],
       "summary": {
         "headline": "Much colder tomorrow",
-        "detail": "High of 41\u00b0, 62\u00b0 today",
+        "detail": "High of 41°, 62° today",
         "changeLabel": "Conditions changing"
       }
     }

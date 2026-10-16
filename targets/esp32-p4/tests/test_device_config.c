@@ -135,7 +135,6 @@ static void test_validation(void)
   INVALID(bad.alarm_hour = 24);
   INVALID(bad.alarm_minute = 60);
   INVALID(bad.alarm_repeat_days = 0x80);
-  INVALID(bad.alarm_repeat_days = 0);
   INVALID(bad.alarm_sound = (device_config_alarm_sound_t)3);
   INVALID(bad.alarm_volume = 101);
   INVALID(bad.sound_machine_sound = (device_config_sound_machine_sound_t) -1);
@@ -717,7 +716,7 @@ static void test_malformed_saved_values(void)
   }
   const char *numeric_keys[] = {"alarm_days", "alarm_hour", "night_mode", "lead_zero",
     "sm_sound", "sm_volume", "sm_timer"};
-  const uint8_t numeric_values[] = {0, 24, 255, 2, 12, 101, 1};
+  const uint8_t numeric_values[] = {0x80, 24, 255, 2, 12, 101, 1};
   for (unsigned i = 0; i < sizeof(numeric_values); ++i) {
     device_config_t base = fresh();
     fake_nvs_put_u8(numeric_keys[i], numeric_values[i]);
@@ -753,6 +752,60 @@ static void test_immediate_alarm_toggle_failures(void)
     assert(device_config_init() == ESP_OK);
     applied = current();
     assert(applied.alarm_enabled == (failures[i] == FAKE_COMMIT));
+  }
+}
+
+static void test_one_time_completion(void)
+{
+  device_config_t base = fresh(), draft = alarm_edit(base);
+  draft.alarm_repeat_days = 0;
+  assert(device_config_validate(&draft) == ESP_OK);
+  assert(device_config_save_alarm(&base, &draft) == ESP_OK);
+  fake_nvs_clear_activity();
+  assert(device_config_init() == ESP_OK);
+  base = current();
+  assert(base.alarm_enabled && base.alarm_repeat_days == 0);
+  assert(fake_nvs_calls(FAKE_SET) == 0);
+  assert(device_config_complete_one_time(6, 30) == ESP_OK);
+  device_config_t expected = base;
+  expected.alarm_enabled = false;
+  device_config_t applied = current();
+  assert_same(&expected, &applied);
+  assert(fake_nvs_calls(FAKE_SET) == 1 && fake_nvs_calls(FAKE_COMMIT) == 1);
+  fake_nvs_clear_activity();
+  assert(device_config_init() == ESP_OK);
+  applied = current();
+  assert_same(&expected, &applied);
+
+  /* Completion of a captured alarm must not disable a replacement schedule. */
+  for (int replacement = 0; replacement < 4; ++replacement) {
+    base = fresh(); draft = alarm_edit(base);
+    draft.alarm_repeat_days = 0;
+    if (replacement == 0) draft.alarm_hour = 8;
+    if (replacement == 1) draft.alarm_minute = 45;
+    if (replacement == 2) draft.alarm_repeat_days = 0x3e;
+    if (replacement == 3) draft.alarm_enabled = false;
+    assert(device_config_save_alarm(&base, &draft) == ESP_OK);
+    expected = current();
+    fake_nvs_clear_activity();
+    assert(device_config_complete_one_time(6, 30) == ESP_OK);
+    applied = current();
+    assert_same(&expected, &applied);
+    assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+  }
+
+  fake_op_t failures[] = {FAKE_OPEN, FAKE_SET, FAKE_COMMIT};
+  for (unsigned i = 0; i < sizeof(failures) / sizeof(failures[0]); ++i) {
+    base = fresh(); draft = alarm_edit(base); draft.alarm_repeat_days = 0;
+    assert(device_config_save_alarm(&base, &draft) == ESP_OK);
+    expected = current();
+    fake_nvs_clear_activity(); fake_nvs_fail(failures[i], 1);
+    assert(device_config_complete_one_time(6, 30) == ESP_FAIL);
+    applied = current();
+    assert_same(&expected, &applied);
+    fake_nvs_clear_activity();
+    assert(device_config_init() == ESP_OK);
+    assert(current().alarm_enabled == (failures[i] != FAKE_COMMIT));
   }
 }
 
@@ -1049,6 +1102,7 @@ int main(void)
   device_config_set_defaults(&not_started);
   assert(device_config_copy(&not_started) == ESP_ERR_INVALID_STATE);
   assert(device_config_set_alarm_enabled(true) == ESP_ERR_INVALID_STATE);
+  assert(device_config_complete_one_time(7, 0) == ESP_ERR_INVALID_STATE);
   assert(device_config_save_display(&not_started, &not_started) == ESP_ERR_INVALID_STATE);
   assert(device_config_save_sound_machine(&not_started, &not_started) == ESP_ERR_INVALID_STATE);
   test_defaults_and_read_only_copies();
@@ -1072,6 +1126,7 @@ int main(void)
   test_corrected_retry_repairs_partial_shared_mode();
   test_malformed_saved_values();
   test_immediate_alarm_toggle_failures();
+  test_one_time_completion();
   test_slow_save_readers_and_serialized_writers();
   puts("Settings checks passed: defaults, validation, editor merges, partial saves, startup errors, concurrent access.");
   return 0;

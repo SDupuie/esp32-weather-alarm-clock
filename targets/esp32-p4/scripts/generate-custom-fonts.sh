@@ -130,6 +130,7 @@ generate_font "wac_font_settings_28" 28 "0xB7,0x2013,0x2026" "wac_fonts_28" "lv_
 # Time picker and unsigned solar-offset magnitude use their true pixel sizes.
 generate_font "wac_font_settings_104" 104 "0x30-0x39,0x3A" "wac_fonts_104" "" "$settings_tmp"
 generate_font "wac_font_settings_96" 96 "0x2D,0x30-0x39,0x3A" "wac_fonts_96" "" "$settings_tmp"
+generate_font "wac_font_weather_18" 18 "0xB7" "wac_fonts_18" "lv_font_montserrat_18" "$settings_tmp"
 generate_font "wac_font_weather_32" 32 "0x2026" "wac_fonts_32" "lv_font_montserrat_32" "$settings_tmp"
 python3 - "$settings_tmp" "$OUTPUT_DIR" <<'PYEOF'
 import pathlib
@@ -137,7 +138,7 @@ import re
 import sys
 scratch, output = map(pathlib.Path, sys.argv[1:])
 fragments = []
-for size, stem in ((24, "wac_fonts"), (26, "wac_fonts_26"), (34, "wac_fonts_34"), (28, "wac_fonts_28"), (104, "wac_fonts_104"), (96, "wac_fonts_96"), (32, "wac_fonts_32")):
+for size, stem in ((24, "wac_fonts"), (26, "wac_fonts_26"), (34, "wac_fonts_34"), (28, "wac_fonts_28"), (104, "wac_fonts_104"), (96, "wac_fonts_96"), (32, "wac_fonts_32"), (18, "wac_fonts_18")):
     content = (scratch / f"{stem}.c").read_text()
     # Record the canonical output path, not the random temporary directory.
     content = content.replace(str(scratch / f"{stem}.c"), str(output / "wac_fonts.c"))
@@ -165,7 +166,7 @@ for size, stem in ((24, "wac_fonts"), (26, "wac_fonts_26"), (34, "wac_fonts_34")
 (output / "wac_fonts.h").write_text(
     '#pragma once\n\n#include "lvgl.h"\n\n' +
     ''.join(f'extern const lv_font_t wac_font_settings_{size};\n' for size in (24, 26, 34, 28, 104, 96)) +
-    'extern const lv_font_t wac_font_weather_32;\n')
+    'extern const lv_font_t wac_font_weather_32;\nextern const lv_font_t wac_font_weather_18;\n')
 PYEOF
 rm -rf "$settings_tmp"
 trap - EXIT

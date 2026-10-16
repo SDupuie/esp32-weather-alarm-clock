@@ -45,9 +45,18 @@ static const uint32_t RUNTIME_LOCK_TIMEOUT_MS = 250;
 static const uint32_t WIFI_CONNECT_TIMEOUT_MS = 30000;
 static const uint32_t WEATHER_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 static const uint32_t WEATHER_RETRY_INTERVAL_MS = 20000;
+static const uint32_t RADAR_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+static const uint32_t RADAR_STEP_INTERVAL_MS = 100;
+
+typedef struct {
+  int64_t due_us;
+  bool active, publication_pending;
+  app_radar_snapshot_t publication;
+} weather_radar_work_t;
 
 static app_runtime_state_t s_runtime_state;
 static SemaphoreHandle_t s_runtime_mutex;
+static uint32_t s_radar_displayed_generation;
 static QueueHandle_t s_clock_commands;
 
 /* Clock queue payloads are copied; callbacks never retain a screen pointer. */
@@ -129,6 +138,34 @@ static void runtime_state_update(
   if (mark_weather_stale && s_runtime_state.weather.valid)
     s_runtime_state.weather.stale = true;
   xSemaphoreGive(s_runtime_mutex);
+}
+
+static bool runtime_radar_publish(const app_radar_snapshot_t *radar)
+{
+  if (!s_runtime_mutex || xSemaphoreTake(s_runtime_mutex,
+        pdMS_TO_TICKS(RUNTIME_LOCK_TIMEOUT_MS)) != pdTRUE) return false;
+  s_runtime_state.radar = *radar;
+  xSemaphoreGive(s_runtime_mutex);
+  return true;
+}
+
+/* Only acknowledge after LVGL has replaced its image source under the display
+ * lock. The client may then reuse the previous slot, never the displayed one. */
+static void runtime_radar_acknowledge(uint32_t generation)
+{
+  if (!s_runtime_mutex || xSemaphoreTake(s_runtime_mutex,
+        pdMS_TO_TICKS(RUNTIME_LOCK_TIMEOUT_MS)) != pdTRUE) return;
+  s_radar_displayed_generation = generation;
+  xSemaphoreGive(s_runtime_mutex);
+}
+
+static uint32_t runtime_radar_displayed(void)
+{
+  if (!s_runtime_mutex || xSemaphoreTake(s_runtime_mutex,
+        pdMS_TO_TICKS(RUNTIME_LOCK_TIMEOUT_MS)) != pdTRUE) return 0;
+  uint32_t displayed = s_radar_displayed_generation;
+  xSemaphoreGive(s_runtime_mutex);
+  return displayed;
 }
 
 static void runtime_state_snapshot(app_runtime_state_t *out_runtime, const device_config_t *config)
@@ -334,6 +371,7 @@ static void ui_heartbeat_task(void *arg)
         app_ui_complete_message_acknowledgment(message_result);
       }
       app_ui_update_runtime(&config, &runtime_snapshot);
+      runtime_radar_acknowledge(runtime_snapshot.radar.generation);
       /* Navigation uses the owner's completed phase, including failed saves
        * whose live Snooze/Dismiss action has already taken effect. */
       if (have_alarm_result)
@@ -350,16 +388,40 @@ static void ui_heartbeat_task(void *arg)
   }
 }
 
-static void weather_service_wait(int64_t weather_due_us, int64_t time_retry_due_us)
+static void weather_service_wait(int64_t weather_due_us, int64_t time_retry_due_us,
+                                 int64_t radar_due_us)
 {
   if (time_retry_due_us > 0 && time_retry_due_us < weather_due_us) {
     weather_due_us = time_retry_due_us;
   }
+  if (radar_due_us < weather_due_us) weather_due_us = radar_due_us;
   int64_t remaining_us = weather_due_us - esp_timer_get_time();
   if (remaining_us > 0) {
     TickType_t ticks = pdMS_TO_TICKS((remaining_us + 999) / 1000);
     vTaskDelay(ticks > 0 ? ticks : 1);
   }
+}
+
+static void weather_service_radar(const device_config_t *config,
+                                  weather_radar_work_t *work, bool connected)
+{
+  /* Retain a failed short-copy handoff before asking the client to advance. */
+  if (work->publication_pending)
+    work->publication_pending = !runtime_radar_publish(&work->publication);
+  if (work->publication_pending) return;
+  /* Before the first image/attempt, wait for Wi-Fi readiness. An ordinary
+   * outage must still mark an existing frame old when its check becomes due. */
+  if (!connected && !work->active && !work->publication.valid) return;
+  bool start = !work->active && esp_timer_get_time() >= work->due_us;
+  if (!start && !work->active) return;
+  if (start) work->due_us = esp_timer_get_time()
+    + (int64_t) RADAR_REFRESH_INTERVAL_MS * 1000;
+  weather_radar_step_t step = !connected ? WEATHER_RADAR_OFFLINE
+    : start ? WEATHER_RADAR_CHECK : WEATHER_RADAR_CONTINUE;
+  work->publication_pending = weather_client_radar_step(config, step,
+    runtime_radar_displayed(), &work->publication, &work->active);
+  if (work->publication_pending)
+    work->publication_pending = !runtime_radar_publish(&work->publication);
 }
 
 static void weather_service_task(void *arg)
@@ -372,6 +434,7 @@ static void weather_service_task(void *arg)
   bool reported_missing_wifi_profile = false;
   int64_t next_weather_attempt_us = 0;
   int64_t time_retry_due_us = 0;
+  weather_radar_work_t radar_work = {0};
 
   while (true) {
     device_config_t config;
@@ -381,6 +444,7 @@ static void weather_service_task(void *arg)
     }
 
     if (!config.wifi_ready) {
+      weather_service_radar(&config, &radar_work, false);
       if (!reported_missing_wifi_profile) {
         ESP_LOGI(TAG, "No stored Wi-Fi profile is available yet; waiting for setup");
         reported_missing_wifi_profile = true;
@@ -398,6 +462,7 @@ static void weather_service_task(void *arg)
       if (err != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi init failed: %s", esp_err_to_name(err));
         runtime_state_update(NULL, true);
+        weather_service_radar(&config, &radar_work, false);
         vTaskDelay(retry_delay_ticks);
         continue;
       }
@@ -413,6 +478,7 @@ static void weather_service_task(void *arg)
       if (err != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi connect timeout: %s", esp_err_to_name(err));
         runtime_state_update(NULL, true);
+        weather_service_radar(&config, &radar_work, false);
         vTaskDelay(retry_delay_ticks);
         continue;
       }
@@ -441,47 +507,38 @@ static void weather_service_task(void *arg)
 
     int64_t quota_due = weather_client_next_allowed_us(&config);
     if (quota_due > next_weather_attempt_us) next_weather_attempt_us = quota_due;
-    if (esp_timer_get_time() < next_weather_attempt_us) {
-      weather_service_wait(next_weather_attempt_us, time_retry_due_us);
-      continue;
+    if (esp_timer_get_time() >= next_weather_attempt_us) {
+      ESP_LOGI(TAG, "Requesting live weather for %s,%s (%s units)",
+               config.latitude, config.longitude, config.units);
+      app_weather_snapshot_t weather_snapshot = {0};
+      esp_err_t weather_err = weather_client_fetch(&config, &weather_snapshot);
+      if (weather_err != ESP_OK) {
+        ESP_LOGW(TAG, "Weather refresh failed: %s", esp_err_to_name(weather_err));
+        runtime_state_update(NULL, true);
+        next_weather_attempt_us = esp_timer_get_time()
+          + (int64_t) WEATHER_RETRY_INTERVAL_MS * 1000;
+        quota_due = weather_client_next_allowed_us(&config);
+        if (quota_due > next_weather_attempt_us) next_weather_attempt_us = quota_due;
+      } else {
+        /* Never turn a pre-sync download into a measured weather age later. */
+        wac_time_snapshot_t download_clock;
+        wac_time_snapshot(&download_clock);
+        weather_snapshot.updated_at = download_clock.usable
+          && download_clock.source == WAC_TIME_SOURCE_NETWORK ? download_clock.utc_now : 0;
+        runtime_state_update(&weather_snapshot, false);
+        ESP_LOGI(TAG, "Live weather updated (%d°, H:%d° L:%d°)",
+                 weather_snapshot.temp, weather_snapshot.high, weather_snapshot.low);
+        next_weather_attempt_us = esp_timer_get_time()
+          + (int64_t) WEATHER_REFRESH_INTERVAL_MS * 1000;
+      }
     }
 
-    ESP_LOGI(
-      TAG,
-      "Requesting live weather for %s,%s (%s units)",
-      config.latitude,
-      config.longitude,
-      config.units
-    );
-
-    app_weather_snapshot_t weather_snapshot = {0};
-    esp_err_t weather_err = weather_client_fetch(&config, &weather_snapshot);
-    if (weather_err != ESP_OK) {
-      ESP_LOGW(TAG, "Weather refresh failed: %s", esp_err_to_name(weather_err));
-      runtime_state_update(NULL, true);
-      next_weather_attempt_us = esp_timer_get_time() + (int64_t) WEATHER_RETRY_INTERVAL_MS * 1000;
-      quota_due = weather_client_next_allowed_us(&config);
-      if (quota_due > next_weather_attempt_us) next_weather_attempt_us = quota_due;
-      weather_service_wait(next_weather_attempt_us, time_retry_due_us);
-      continue;
-    }
-
-    /* A timestamp taken before network time is known must not later appear
-     * to be a measured weather age after the clock synchronizes. */
-    wac_time_snapshot_t download_clock;
-    wac_time_snapshot(&download_clock);
-    weather_snapshot.updated_at = download_clock.usable
-      && download_clock.source == WAC_TIME_SOURCE_NETWORK ? download_clock.utc_now : 0;
-    runtime_state_update(&weather_snapshot, false);
-    ESP_LOGI(
-      TAG,
-      "Live weather updated (%d°, H:%d° L:%d°)",
-      weather_snapshot.temp,
-      weather_snapshot.high,
-      weather_snapshot.low
-    );
-    next_weather_attempt_us = esp_timer_get_time() + (int64_t) WEATHER_REFRESH_INTERVAL_MS * 1000;
-    weather_service_wait(next_weather_attempt_us, time_retry_due_us);
+    /* One bounded step leaves forecast/time eligible between Radar requests. */
+    weather_service_radar(&config, &radar_work, true);
+    int64_t radar_due_us = (radar_work.active || radar_work.publication_pending)
+      ? esp_timer_get_time() + (int64_t) RADAR_STEP_INTERVAL_MS * 1000
+      : radar_work.due_us;
+    weather_service_wait(next_weather_attempt_us, time_retry_due_us, radar_due_us);
   }
 }
 
@@ -587,6 +644,9 @@ void app_main(void)
     const esp_lv_adapter_touch_callbacks_t callbacks = {.custom_touch_read = read_touch};
     ESP_ERROR_CHECK(esp_lv_adapter_set_touch_callbacks(input, &callbacks));
   }
+  esp_err_t image_err = weather_client_init_images();
+  if (image_err != ESP_OK)
+    ESP_LOGW(TAG, "Radar image setup failed: %s", esp_err_to_name(image_err));
   app_ui_set_clock_warning_dismiss_handler(request_clock_warning_dismiss);
   app_ui_set_alarm_action_handler(request_alarm_action);
   ESP_ERROR_CHECK(app_ui_show_boot_screen(&config, &startup_runtime, touch_ready));
@@ -600,7 +660,7 @@ void app_main(void)
   BaseType_t ui_task_ok = xTaskCreatePinnedToCore(
     ui_heartbeat_task,
     "rwd_ui_heartbeat",
-    6144,
+    12288,
     NULL,
     4,
     NULL,
@@ -610,13 +670,15 @@ void app_main(void)
     ESP_LOGW(TAG, "Failed to start UI heartbeat task");
   }
 
-  BaseType_t weather_task_ok = xTaskCreate(
+  /* Leave the drawing core free; audio shares core 1 at the same priority. */
+  BaseType_t weather_task_ok = xTaskCreatePinnedToCore(
     weather_service_task,
     "rwd_weather",
     8192,
     NULL,
     4,
-    NULL
+    NULL,
+    1
   );
   if (weather_task_ok != pdPASS) {
     ESP_LOGW(TAG, "Failed to start weather service task");

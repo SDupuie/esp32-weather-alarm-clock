@@ -9,7 +9,7 @@ typedef enum {
   WAC_SETTINGS_NONE, WAC_SETTINGS_ENTRY, WAC_SETTINGS_DEVICE_SETUP,
   WAC_SETTINGS_DISPLAY, WAC_SETTINGS_DEVICE, WAC_SETTINGS_WEATHER,
   WAC_SETTINGS_WIFI, WAC_SETTINGS_CREDENTIALS, WAC_SETTINGS_ALARM,
-  WAC_SETTINGS_ALARM_TIME, WAC_SETTINGS_REPEAT, WAC_SETTINGS_SOUND,
+  WAC_SETTINGS_ALARM_TIME, WAC_SETTINGS_REPEAT, WAC_SETTINGS_REPEAT_CUSTOM, WAC_SETTINGS_SOUND,
   WAC_SETTINGS_SOUND_PICKER, WAC_SETTINGS_SNOOZE,
   WAC_SETTINGS_NIGHT, WAC_SETTINGS_NIGHT_MODE, WAC_SETTINGS_NIGHT_FIXED,
   WAC_SETTINGS_NIGHT_START, WAC_SETTINGS_NIGHT_END,
@@ -27,6 +27,7 @@ void wac_settings_begin(lv_obj_t *parent, const device_config_t *config);
 void wac_settings_apply_night(bool active);
 void wac_settings_update_solar(const solar_times_t *events);
 void wac_settings_update_clock(const wac_time_snapshot_t *clock);
+void wac_settings_update_alarm(const device_config_t *config, const wac_alarm_snapshot_t *alarm);
 void wac_settings_update_audio(const wac_audio_snapshot_t *audio);
 void wac_settings_start_machine(bool return_to_clock);
 void wac_settings_start_weather(const device_config_t *config);
@@ -45,6 +46,13 @@ lv_color_t wac_ui_color_night_alert(void);
 bool wac_ui_strings_equal_ignore_case(const char *a, const char *b);
 void wac_ui_copy_uppercase_string(char *dest, size_t dest_size, const char *src);
 void wac_ui_set_label_text(lv_obj_t *label, const char *text);
+/* Immutable assets only: mutable Radar descriptors require explicit eviction. */
+static inline bool wac_ui_set_image_asset(lv_obj_t *image, const lv_image_dsc_t *source)
+{
+  if (source != NULL && lv_image_get_src(image) == source) return false;
+  lv_image_set_src(image, source);
+  return true;
+}
 lv_obj_t *wac_ui_create_label(lv_obj_t *parent, const lv_font_t *font,
   lv_color_t color, lv_text_align_t align, const char *text);
 void wac_ui_clear_container_chrome(lv_obj_t *obj);
@@ -71,10 +79,11 @@ void wac_clock_update_backup(bool home, bool analog, bool usable,
 /* Navigation selects a surface; the clock renderer owns only its objects. */
 typedef enum {
   WAC_CLOCK_ALARM_HIDDEN, WAC_CLOCK_ALARM_HOME,
-  WAC_CLOCK_ALARM_RINGING, WAC_CLOCK_ALARM_SNOOZED
+  WAC_CLOCK_ALARM_RINGING, WAC_CLOCK_ALARM_SNOOZED, WAC_CLOCK_ALARM_DISMISSED
 } wac_clock_alarm_surface_t;
 void wac_clock_build_alarm(lv_obj_t *parent, lv_event_cb_t action_cb,
-  lv_event_cb_t badge_cb, lv_event_cb_t open_alarm_cb);
+  lv_event_cb_t badge_cb, lv_event_cb_t open_alarm_cb, lv_event_cb_t slide_cb);
+void wac_clock_cancel_alarm_slide(bool animate);
 void wac_clock_update_alarm(const device_config_t *config,
   const wac_time_snapshot_t *clock, const wac_alarm_snapshot_t *alarm,
   wac_clock_alarm_surface_t surface, bool analog, bool night,
@@ -84,16 +93,19 @@ void wac_clock_update_alarm(const device_config_t *config,
  * or another service/configuration snapshot. Surface is a draw-time input. */
 typedef enum {
   WAC_WEATHER_SURFACE_HOME, WAC_WEATHER_SURFACE_FORECAST,
-  WAC_WEATHER_SURFACE_CONDITIONS, WAC_WEATHER_SURFACE_MESSAGE,
+  WAC_WEATHER_SURFACE_CONDITIONS, WAC_WEATHER_SURFACE_RADAR, WAC_WEATHER_SURFACE_MESSAGE,
   WAC_WEATHER_SURFACE_UNAVAILABLE_HOME
 } wac_weather_surface_t;
 
 void wac_weather_reset(void);
 void wac_weather_build_forecast(lv_obj_t *parent);
 void wac_weather_build_conditions(lv_obj_t *parent);
+void wac_weather_set_radar_enabled(lv_obj_t *parent, bool enabled);
+void wac_weather_update_radar(const app_radar_snapshot_t *radar,
+  const device_config_t *config, bool night);
 void wac_weather_build_message(lv_obj_t *parent);
 void wac_weather_build_status(lv_obj_t *parent);
-void wac_weather_set_visible(bool forecast, bool conditions, bool message);
+void wac_weather_set_visible(bool forecast, bool radar, bool message);
 void wac_weather_apply_night(const app_weather_snapshot_t *weather, bool important, bool active);
 void wac_weather_update(const app_weather_snapshot_t *weather, const struct tm *local_calendar,
   bool time_24h);

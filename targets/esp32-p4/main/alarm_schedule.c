@@ -64,7 +64,7 @@ void wac_alarm_schedule_calculate(const device_config_t *config, time_t utc_now,
   if (!out) return;
   *out = (wac_alarm_schedule_t){0};
   if (!config || !config->alarm_enabled || config->alarm_hour > 23
-      || config->alarm_minute > 59 || !config->alarm_repeat_days
+      || config->alarm_minute > 59
       || (config->alarm_repeat_days & 0x80)) return;
 
   struct tm date;
@@ -73,6 +73,23 @@ void wac_alarm_schedule_calculate(const device_config_t *config, time_t utc_now,
   date.tm_hour = config->alarm_hour;
   date.tm_min = config->alarm_minute;
   date.tm_sec = 0;
+  if (!config->alarm_repeat_days) {
+    /* None arms one calendar date. Its owner retains that date for recovery;
+     * previews calculate today or tomorrow without claiming a previous alarm. */
+    for (int i = 0; i < 2; ++i, move_day(&date, 1)) {
+      time_t utc;
+      if (date.tm_year < -1899 || date.tm_year > 8099
+          || !occurrence_utc(&date, &utc)) return;
+      if (utc < utc_now) continue;
+      out->next = (wac_alarm_occurrence_t){
+        .valid = true, .utc = utc,
+        .local_date = (date.tm_year + 1900) * 10000 + (date.tm_mon + 1) * 100 + date.tm_mday,
+        .minute = config->alarm_hour * 60 + config->alarm_minute,
+      };
+      return;
+    }
+    return;
+  }
   /* A weekly schedule needs seven days each way. One extra calendar day
    * covers a transition that moves a midnight occurrence across a date. */
   for (int i = 0; i < 8; ++i) move_day(&date, -1);

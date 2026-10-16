@@ -19,7 +19,6 @@ typedef enum {
   STORM_ALERT_THUNDER = 0,
   STORM_ALERT_GUSTS,
   STORM_ALERT_WIND,
-  STORM_ALERT_PRESSURE,
   STORM_ALERT_PRECIP
 } storm_alert_kind_t;
 

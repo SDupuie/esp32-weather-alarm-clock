@@ -6020,3 +6020,150 @@ lv_font_t wac_font_weather_32 = {
 
 
 #endif /*#if WAC_FONT_WEATHER_32*/
+
+
+/*******************************************************************************
+ * Size: 18 px
+ * Bpp: 4
+ * Opts: --bpp 4 --size 18 --font /Users/Scott/Projects/ESP32 Weather Alarm Clock/targets/esp32-p4/managed_components/lvgl__lvgl/scripts/built_in_font/Montserrat-Medium.ttf -r 0xB7 --format lvgl --no-compress --no-prefilter --force-fast-kern-format --lv-font-name wac_font_weather_18 --lv-fallback lv_font_montserrat_18 -o /Users/Scott/Projects/ESP32 Weather Alarm Clock/targets/esp32-p4/main/assets/wac_fonts.c
+ ******************************************************************************/
+
+#include "lvgl.h"
+
+#ifndef WAC_FONT_WEATHER_18
+#define WAC_FONT_WEATHER_18 1
+#endif
+
+#if WAC_FONT_WEATHER_18
+
+/*-----------------
+ *    BITMAPS
+ *----------------*/
+
+/*Store the image of the glyphs*/
+static LV_ATTRIBUTE_LARGE_CONST const uint8_t settings_18_glyph_bitmap[] = {
+    /* U+00B7 "·" */
+    0x28, 0x1c, 0xf8, 0x7f, 0x40
+};
+
+
+/*---------------------
+ *  GLYPH DESCRIPTION
+ *--------------------*/
+
+static const lv_font_fmt_txt_glyph_dsc_t settings_18_glyph_dsc[] = {
+    {.bitmap_index = 0, .adv_w = 0, .box_w = 0, .box_h = 0, .ofs_x = 0, .ofs_y = 0} /* id = 0 reserved */,
+    {.bitmap_index = 0, .adv_w = 77, .box_w = 3, .box_h = 3, .ofs_x = 1, .ofs_y = 4}
+};
+
+/*---------------------
+ *  CHARACTER MAPPING
+ *--------------------*/
+
+
+
+/*Collect the unicode lists and glyph_id offsets*/
+static const lv_font_fmt_txt_cmap_t settings_18_cmaps[] =
+{
+    {
+        .range_start = 183, .range_length = 1, .glyph_id_start = 1,
+        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
+    }
+};
+
+/*-----------------
+ *    KERNING
+ *----------------*/
+
+
+/*Map glyph_ids to kern left classes*/
+static const uint8_t settings_18_kern_left_class_mapping[] =
+{
+    0, 1
+};
+
+/*Map glyph_ids to kern right classes*/
+static const uint8_t settings_18_kern_right_class_mapping[] =
+{
+    0, 1
+};
+
+/*Kern values between classes*/
+static const int8_t settings_18_kern_class_values[] =
+{
+    1
+};
+
+
+/*Collect the kern class' data in one place*/
+static const lv_font_fmt_txt_kern_classes_t settings_18_kern_classes =
+{
+    .class_pair_values   = settings_18_kern_class_values,
+    .left_class_mapping  = settings_18_kern_left_class_mapping,
+    .right_class_mapping = settings_18_kern_right_class_mapping,
+    .left_class_cnt      = 1,
+    .right_class_cnt     = 1,
+};
+
+/*--------------------
+ *  ALL CUSTOM DATA
+ *--------------------*/
+
+#if LVGL_VERSION_MAJOR == 8
+/*Store all the custom data of the font*/
+static  lv_font_fmt_txt_glyph_cache_t settings_18_cache;
+#endif
+
+#if LVGL_VERSION_MAJOR >= 8
+static const lv_font_fmt_txt_dsc_t settings_18_font_dsc = {
+#else
+static lv_font_fmt_txt_dsc_t settings_18_font_dsc = {
+#endif
+    .glyph_bitmap = settings_18_glyph_bitmap,
+    .glyph_dsc = settings_18_glyph_dsc,
+    .cmaps = settings_18_cmaps,
+    .kern_dsc = &settings_18_kern_classes,
+    .kern_scale = 16,
+    .cmap_num = 1,
+    .bpp = 4,
+    .kern_classes = 1,
+    .bitmap_format = 0,
+#if LVGL_VERSION_MAJOR == 8
+    .cache = &settings_18_cache
+#endif
+};
+
+extern const lv_font_t lv_font_montserrat_18;
+
+
+/*-----------------
+ *  PUBLIC FONT
+ *----------------*/
+
+/*Initialize a public general font descriptor*/
+#if LVGL_VERSION_MAJOR >= 8
+const lv_font_t wac_font_weather_18 = {
+#else
+lv_font_t wac_font_weather_18 = {
+#endif
+    .get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt,    /*Function pointer to get glyph's data*/
+    .get_glyph_bitmap = lv_font_get_bitmap_fmt_txt,    /*Function pointer to get glyph's bitmap*/
+    .line_height = 21,          /*The maximum line height required by the font*/
+    .base_line = 4,             /*Baseline measured from the bottom of the line*/
+#if !(LVGL_VERSION_MAJOR == 6 && LVGL_VERSION_MINOR == 0)
+    .subpx = LV_FONT_SUBPX_NONE,
+#endif
+#if LV_VERSION_CHECK(7, 4, 0) || LVGL_VERSION_MAJOR >= 8
+    .underline_position = -1,
+    .underline_thickness = 1,
+#endif
+    .dsc = &settings_18_font_dsc,          /*The custom font data. Will be accessed by `get_glyph_bitmap/dsc` */
+#if LV_VERSION_CHECK(8, 2, 0) || LVGL_VERSION_MAJOR >= 9
+    .fallback = &lv_font_montserrat_18,
+#endif
+    .user_data = NULL,
+};
+
+
+
+#endif /*#if WAC_FONT_WEATHER_18*/

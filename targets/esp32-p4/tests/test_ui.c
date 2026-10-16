@@ -10,6 +10,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+static unsigned ui_invalidations;
+static void count_ui_invalidations(lv_event_t *event)
+{
+  (void)event;
+  ++ui_invalidations;
+}
+
 /* Playback alone is substituted. The controls still use production Settings,
  * LVGL pointer input, drafts and configuration/storage code. */
 static wac_audio_snapshot_t audio_snapshot = {.ready = true};
@@ -446,7 +453,7 @@ static void flush(lv_display_t *screen, const lv_area_t *area, uint8_t *pixels)
 static void create_pointer(void)
 {
   display = lv_display_create(800, 800);
-  static uint8_t buffer[800 * 32 * 4];
+  _Alignas(4) static uint8_t buffer[800 * 32 * 4];
   lv_display_set_buffers(display, buffer, NULL, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_set_flush_cb(display, flush);
   pointer = lv_indev_create();
@@ -632,6 +639,13 @@ void wac_ui_settings_navigate(wac_settings_view_t next)
   wac_settings_render(view);
 }
 wac_settings_view_t wac_ui_settings_view(void) { return view; }
+/* This Settings-only target substitutes the shell; ui_shell links the owner. */
+void wac_ui_set_label_text(lv_obj_t *label, const char *text)
+{
+  if (!label) return;
+  const char *next = text ? text : "";
+  if (strcmp(lv_label_get_text(label), next)) lv_label_set_text(label, next);
+}
 void wac_ui_settings_close(void)
 {
   wac_settings_close();
@@ -2350,10 +2364,67 @@ static void test_shared_time_arrow_controls(void)
   wac_settings_apply_night(false);
 }
 
+static const char *repeat_caption(unsigned mask, bool compact, bool night)
+{
+  /* This oracle names every selected bit; opening an editor never changes it. */
+  static const char *const names[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  static char text[48];
+  text[0] = '\0';
+  unsigned count = 0;
+  for (unsigned day = 0; day < 7; ++day) {
+    if (!(mask & (1u << day))) continue;
+    if (count++) strcat(text, ", ");
+    strcat(text, names[day]);
+  }
+  if (!mask) strcpy(text, "Rings once");
+  else if (mask == 0x7f) strcpy(text, "Every Day");
+  else if (mask == 0x3e) strcpy(text, "Mon–Fri");
+  else if (mask == 0x41) strcpy(text, "Sat–Sun");
+  else if (compact && strlen(text) > 14) snprintf(text, sizeof(text), "%u days", count);
+  operation_label(text, 155, compact ? 646 : 542, 490, &lv_font_montserrat_28, true, night);
+  return text;
+}
+
 static void repeat_selection(unsigned mask, bool night)
 {
-  static const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-  static const int positions[][2] = {{454,380},{136,267},{263,267},{390,267},{517,267},{200,380},{327,380}};
+  static const char *const rows[] = {"None", "Every Day", "Weekdays", "Custom Days"};
+  unsigned selected = !mask ? 0 : mask == 0x7f ? 1 : mask == 0x3e ? 2 : 3;
+  menu_heading("Repeat", night);
+  for (unsigned row = 0; row < 4; ++row) {
+    lv_obj_t *button = menu_button(rows[row], NULL);
+    menu_box(button, 140, 212 + 108 * row, 520, 96);
+    menu_button_style(button, row == selected, night);
+    lv_obj_t *title = menu_label(button, rows[row]);
+    assert(lv_obj_get_style_text_font(title, 0) == &lv_font_montserrat_28);
+    menu_color(title, night ? 0xecc0c0 : 0xf5f8ff, false);
+    lv_obj_t *check = image_source(button, &wac_icon_check);
+    assert((check != NULL) == (row == selected));
+    if (check) {
+      menu_box(check, row == 3 ? 567 : 607, 244 + 108 * row, 32, 32);
+      assert(lv_color_eq(lv_obj_get_style_image_recolor(check, 0),
+                        lv_color_hex(night ? 0xe1b6b6 : 0x93d1ff)));
+    }
+    lv_obj_t *arrow = image_source(button, &wac_icon_chevron_right);
+    assert((arrow != NULL) == (row == 3));
+    if (arrow) {
+      menu_box(arrow, 607, 568, 32, 32);
+      assert(lv_color_eq(lv_obj_get_style_image_recolor(arrow, 0),
+                        lv_color_hex(night ? 0xe1b6b6 : 0x93d1ff)));
+    }
+  }
+  assert(!find_menu_button(lv_screen_active(), "Mon", NULL, true));
+  repeat_caption(mask, true, night);
+  menu_box(menu_button("Done", NULL), 270, 682, 260, 88);
+  menu_button_style(menu_button("Done", NULL), true, night);
+  assert(!lv_obj_has_state(menu_button("Done", NULL), LV_STATE_DISABLED));
+}
+
+static void custom_day_selection(unsigned mask, bool night)
+{
+  static const char *const days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  static const int positions[][2] = {{406,409},{86,296},{214,296},{342,296},{470,296},{598,296},{278,409}};
+  menu_heading("Custom Days", night);
+  operation_label("Choose alarm days", 150, 174, 500, &lv_font_montserrat_28, true, night);
   for (unsigned day = 0; day < 7; ++day) {
     lv_obj_t *button = menu_button(days[day], NULL);
     menu_box(button, positions[day][0], positions[day][1], 116, 96);
@@ -2365,51 +2436,106 @@ static void repeat_selection(unsigned mask, bool night)
     assert(lv_obj_get_style_text_font(title, 0) == &lv_font_montserrat_28);
     if (selected) {
       assert(lv_obj_get_width(check) == 32 && lv_obj_get_height(check) == 32);
+      assert(lv_color_eq(lv_obj_get_style_image_recolor(check, 0),
+                        lv_color_hex(night ? 0xecc0c0 : 0xf5f8ff)));
       lv_area_t title_area, check_area;
       lv_obj_get_coords(title, &title_area); lv_obj_get_coords(check, &check_area);
       assert(check_area.y1 - title_area.y2 - 1 == 4);
     }
   }
-  assert(lv_obj_has_state(menu_button("Done", NULL), LV_STATE_DISABLED) == !mask);
+  /* Both half-pixel rows round together, retaining their 17px vertical gap. */
+  assert(lv_obj_get_y(menu_button("Sat", NULL)) - lv_obj_get_y(menu_button("Mon", NULL)) - 96 == 17);
+  assert(lv_obj_get_x(menu_button("Mon", NULL)) + lv_obj_get_x(menu_button("Fri", NULL)) + 116 == 800);
+  assert(lv_obj_get_x(menu_button("Sat", NULL)) + lv_obj_get_x(menu_button("Sun", NULL)) + 116 == 800);
+  repeat_caption(mask, false, night);
+  menu_box(menu_button("Done", NULL), 270, 682, 260, 88);
+  menu_button_style(menu_button("Done", NULL), true, night);
+  assert(!lv_obj_has_state(menu_button("Done", NULL), LV_STATE_DISABLED));
 }
 
-static void test_repeat_shortcuts_and_zero_guard(void)
+static void test_repeat_shortcuts_and_one_time(void)
 {
   for (unsigned night = 0; night < 2; ++night) {
-    fresh_editor();
-    wac_settings_apply_night(night);
+    /* All saved mask values select the matching row, and Custom opens the
+     * original selection even for None, Every Day and Weekdays. */
+    for (unsigned mask = 0; mask < 128; ++mask) {
+      fresh_editor();
+      device_config_t config = current();
+      config.alarm_repeat_days = mask;
+      wac_ui_settings_close();
+      wac_settings_begin(lv_screen_active(), &config);
+      wac_ui_settings_navigate(WAC_SETTINGS_ALARM);
+      wac_settings_apply_night(night);
+      click("Repeat");
+      repeat_selection(mask, night);
+      click("Custom Days");
+      assert(view == WAC_SETTINGS_REPEAT_CUSTOM);
+      custom_day_selection(mask, night);
+      if (mask & 1) header_back(); else click("Done");
+      assert(view == WAC_SETTINGS_REPEAT);
+      repeat_selection(mask, night);
+      char summary[48];
+      snprintf(summary, sizeof(summary), "%s", mask ? repeat_caption(mask, true, night) : "None");
+      if (mask & 2) header_back(); else click("Done");
+      assert(view == WAC_SETTINGS_ALARM);
+      menu_row("Repeat", summary, 428, false, night);
+      lv_obj_t *value = menu_label(menu_button("Repeat", summary), summary);
+      lv_point_t text_size;
+      lv_text_get_size(&text_size, summary, lv_obj_get_style_text_font(value, 0),
+                       0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+      if (text_size.x > lv_obj_get_width(value))
+        fprintf(stderr, "Repeat mask 0x%02x summary %s needs %dpx but has %dpx\n",
+                mask, summary, text_size.x, (int)lv_obj_get_width(value));
+      assert(lv_obj_get_width(value) == 260 && text_size.x <= lv_obj_get_width(value));
+      assert(lv_obj_get_height(value) == lv_obj_get_style_text_font(value, 0)->line_height);
+      lv_obj_t *row = menu_button("Repeat", summary);
+      lv_obj_t *title = menu_label(row, "Repeat");
+      lv_point_t title_size;
+      lv_text_get_size(&title_size, "Repeat", lv_obj_get_style_text_font(title, 0),
+                       0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+      lv_area_t title_area, value_area, arrow_area;
+      lv_obj_get_coords(title, &title_area); lv_obj_get_coords(value, &value_area);
+      lv_obj_get_coords(image_source(row, &wac_icon_chevron_right), &arrow_area);
+      assert(value_area.x2 - text_size.x + 1 - (title_area.x1 + title_size.x) >= 12);
+      assert(arrow_area.x1 - value_area.x2 - 1 >= 6);
+      click("Repeat"); click("Custom Days");
+      custom_day_selection(mask, night);
+      click("Done"); click("Done"); click("Cancel");
+      assert(task_count == 0 && fake_nvs_calls(FAKE_SET) == 0);
+    }
+
+    fresh_editor(); wac_settings_apply_night(night);
     click("Alarm Settings"); click("Repeat");
-    menu_heading("Repeat", night);
-    operation_label("Choose alarm days", 150, 198, 500, &lv_font_montserrat_32, true, night);
-    repeat_selection(0x3e, night);
-    operation_label("Mon–Fri", 155, 617, 490, &lv_font_montserrat_28, true, night);
-    menu_box(menu_button("Weekdays", NULL), 164, 501, 224, 96);
-    menu_box(menu_button("Every Day", NULL), 412, 501, 224, 96);
-    menu_box(menu_button("Done", NULL), 270, 682, 260, 88);
-    tap(menu_button("Every Day", NULL));
-    repeat_selection(0x7f, night);
-    operation_label("Every Day", 155, 617, 490, &lv_font_montserrat_28, true, night);
-    tap(menu_button("Weekdays", NULL));
-    repeat_selection(0x3e, night);
-    tap(menu_button("Fri", NULL));
-    repeat_selection(0x1e, night);
-    operation_label("Mon, Tue, Wed, Thu", 155, 617, 490, &lv_font_montserrat_28, true, night);
-    tap(menu_button("Fri", NULL));
-    const char *weekdays[] = {"Mon", "Tue", "Wed", "Thu", "Fri"};
-    for (unsigned day = 0; day < 5; ++day) tap(menu_button(weekdays[day], NULL));
+    click("Every Day"); repeat_selection(0x7f, night);
+    click("Weekdays"); repeat_selection(0x3e, night);
+    click("Custom Days");
+    click("Tue"); click("Thu");
+    custom_day_selection(0x2a, night);
+    header_back(); repeat_selection(0x2a, night);
+    click("Done"); menu_row("Repeat", "Mon, Wed, Fri", 428, false, night);
+    click("Repeat"); click("Custom Days");
+    custom_day_selection(0x2a, night);
+    click("Mon"); click("Wed"); click("Fri");
+    custom_day_selection(0, night);
+    click("Done"); repeat_selection(0, night);
+    header_back(); menu_row("Repeat", "None", 428, false, night);
+    click("Repeat"); click("Weekdays"); click("None");
     repeat_selection(0, night);
-    operation_label("Choose at least one day", 155, 617, 490, &lv_font_montserrat_28, false, night);
-    tap(menu_button("Done", NULL));
-    lv_obj_send_event(menu_button("Done", NULL), LV_EVENT_CLICKED, NULL);
-    assert(view == WAC_SETTINGS_REPEAT && task_count == 0 && fake_nvs_calls(FAKE_SET) == 0);
-    tap(menu_button("Sat", NULL)); tap(menu_button("Sun", NULL));
-    repeat_selection(0x41, night);
-    operation_label("Sat–Sun", 155, 617, 490, &lv_font_montserrat_28, true, night);
-    tap(menu_button("Done", NULL));
-    click("Repeat");
-    repeat_selection(0x41, night);
-    header_back(); click("Cancel");
+    click("Custom Days"); click("Sat"); click("Sun");
+    custom_day_selection(0x41, night);
+    click("Done"); repeat_selection(0x41, night);
+    click("Done"); menu_row("Repeat", "Sat–Sun", 428, false, night);
+    click("Cancel");
     assert(current().alarm_repeat_days == 0x3e && fake_nvs_calls(FAKE_SET) == 0);
+    click("Alarm Settings"); click("Repeat"); repeat_selection(0x3e, night);
+    click("None"); click("Custom Days"); click("Mon"); click("Wed"); click("Fri");
+    click("Done"); click("Done"); click("Save"); run_task();
+    assert(current().alarm_repeat_days == 0x2a && view == WAC_SETTINGS_ENTRY && restart_count == 0);
+    assert(device_config_init() == ESP_OK);
+    click("Alarm Settings"); menu_row("Repeat", "Mon, Wed, Fri", 428, false, night);
+    click("Repeat"); repeat_selection(0x2a, night);
+    click("Custom Days"); custom_day_selection(0x2a, night);
+    click("Done"); click("Done"); click("Cancel");
   }
   wac_settings_apply_night(false);
 }
@@ -2695,6 +2821,12 @@ static void test_alarm_sound_snooze_layout_and_drafts(void)
     assert(preview_text.x1 - preview_icon.x2 - 1 == 14);
     assert(abs(preview_icon.x1 + preview_text.x2 - 799) <= 1);
     assert(lv_color_eq(lv_obj_get_style_image_recolor(icon, 0), lv_color_hex(night ? 0xecc0c0 : 0xf5f8ff)));
+    lv_display_t *display = lv_display_get_default();
+    lv_display_add_event_cb(display, count_ui_invalidations, LV_EVENT_INVALIDATE_AREA, NULL);
+    ui_invalidations = 0;
+    wac_settings_update_audio(&audio_snapshot);
+    assert(ui_invalidations == 0);
+    lv_display_remove_event_cb_with_user_data(display, count_ui_invalidations, NULL);
     tap(preview);
     assert(menu_label(lv_screen_active(), "Stop Preview") && preview_submissions == 1
       && preview_sound == DEVICE_CONFIG_ALARM_RISING_TONES && preview_volume == 50
@@ -3138,10 +3270,10 @@ static void test_alarm_failed_save_retry_and_toggle(void)
   click("Alarm Time");
   picker_set(6, 30, true);
   click("Done");
-  click("Repeat"); tap(menu_button("Every Day", NULL));
+  click("Repeat"); tap(menu_button("Every Day", NULL)); click("Custom Days");
   const char *weekdays[] = {"Mon", "Tue", "Wed", "Thu", "Fri"};
   for (unsigned i = 0; i < 5; ++i) tap(menu_button(weekdays[i], NULL));
-  click("Done");
+  click("Done"); click("Done");
   tap(menu_button("Alarm", "Off"));
   assert(task_count == 1 && !current().alarm_enabled && fake_nvs_calls(FAKE_SET) == 0);
   run_task();
@@ -3223,6 +3355,12 @@ static void test_alarm_editor_immediate_toggle(void)
     assert(lv_obj_has_state(menu_button("Alarm", NULL), LV_STATE_DISABLED));
     tap(menu_button("Alarm", NULL));
     assert(task_count == 1);
+    /* A stale heartbeat during the queued save keeps the applied Off state
+     * and all pending fields. The successful completion then shows On. */
+    device_config_t before_toggle = current();
+    wac_settings_update_alarm(&before_toggle, &(wac_alarm_snapshot_t){0});
+    menu_switch("Alarm", false, night);
+    assert(menu_button("Alarm Time", "8:25 AM") && menu_button("Repeat", "Every Day"));
     /* A ringing screen may hide this editor while the toggle save completes. */
     wac_settings_set_visible(false);
     run_task();
@@ -3250,14 +3388,14 @@ static void test_alarm_editor_immediate_toggle(void)
   }
   wac_settings_apply_night(false);
 
-  /* Only the saved schedule is validated: an unfinished zero-day draft must
-   * not stop the user applying On/Off or be published by that operation. */
+  /* The immediate toggle uses only the saved schedule, preserving a pending
+   * one-time choice and the other draft fields. */
   fresh_editor(); click("Alarm Settings");
   click("Alarm Time"); picker_set(9, 10, true); click("Done");
-  click("Repeat");
+  click("Repeat"); click("Custom Days");
   const char *days[] = {"Mon", "Tue", "Wed", "Thu", "Fri"};
   for (unsigned i = 0; i < 5; ++i) click(days[i]);
-  header_back();
+  header_back(); header_back();
   fail_task = true;
   click("Alarm");
   assert(task_count == 0 && !current().alarm_enabled && fake_nvs_calls(FAKE_SET) == 0);
@@ -3268,12 +3406,12 @@ static void test_alarm_editor_immediate_toggle(void)
   assert(!current().alarm_enabled && view == WAC_SETTINGS_ALARM && restart_count == 0);
   menu_switch("Alarm", false, false);
   assert(menu_label(lv_screen_active(), "Could not save. Try again."));
-  assert(menu_button("Alarm Time", "9:10 AM") && menu_button("Repeat", "Choose days"));
+  assert(menu_button("Alarm Time", "9:10 AM") && menu_button("Repeat", "None"));
   fake_nvs_clear_activity();
   click("Alarm"); run_task();
   assert(current().alarm_enabled && current().alarm_repeat_days == 0x3e);
   assert(fake_nvs_calls(FAKE_SET) == 1 && fake_nvs_calls(FAKE_COMMIT) == 1);
-  assert(menu_button("Alarm Time", "9:10 AM") && menu_button("Repeat", "Choose days"));
+  assert(menu_button("Alarm Time", "9:10 AM") && menu_button("Repeat", "None"));
   click("Cancel");
   assert(current().alarm_enabled && current().alarm_hour == 7 && current().alarm_minute == 0);
   assert(fake_nvs_calls(FAKE_SET) == 1 && task_count == 0 && restart_count == 0);
@@ -3301,6 +3439,10 @@ static void test_alarm_editor_next_preview_cases(void)
     bool twelve, leading_zero;
     const char *expected;
   } cases[] = {
+    {"UTC0", 10, 9, 6, 59, 59, 7, 0, 0, true, false, "Today · 7:00 AM"},
+    {"UTC0", 10, 9, 7, 0, 0, 7, 0, 0, true, false, "Today · 7:00 AM"},
+    {"UTC0", 10, 9, 7, 0, 1, 7, 0, 0, true, false, "Tomorrow · 7:00 AM"},
+    {"UTC0", 10, 9, 23, 59, 59, 0, 0, 0, false, false, "Tomorrow · 00:00"},
     {"UTC0", 10, 9, 6, 59, 59, 7, 0, 0x3e, true, false, "Today · 7:00 AM"},
     {"UTC0", 10, 9, 7, 0, 0, 7, 0, 0x3e, true, false, "Mon · 7:00 AM"},
     {"UTC0", 10, 9, 7, 0, 1, 7, 0, 0x3e, true, false, "Mon · 7:00 AM"},
@@ -3375,11 +3517,11 @@ static void test_alarm_editor_preview_draft_and_heartbeat(void)
   assert(!strcmp(lv_label_get_text(box_label(450, 355, 170)), "05"));
   click("Done");
   operation_label("Today · 8:05 AM", 180, 169, 440, &lv_font_montserrat_28, true, false);
-  click("Repeat");
+  click("Repeat"); click("Custom Days");
   const char *weekdays[] = {"Mon", "Tue", "Wed", "Thu", "Fri"};
   for (unsigned i = 0; i < 5; ++i) tap(menu_button(weekdays[i], NULL));
   tap(menu_button("Sun", NULL));
-  click("Done");
+  click("Done"); click("Done");
   operation_label("Sun · 8:05 AM", 180, 169, 440, &lv_font_montserrat_28, true, false);
   clock.usable = false;
   wac_settings_update_clock(&clock);
@@ -3396,15 +3538,13 @@ static void test_alarm_editor_preview_draft_and_heartbeat(void)
   menu_row("Alarm Time", "7:00 AM", 320, false, false);
   menu_row("Repeat", "Mon–Fri", 428, false, false);
   menu_switch("Alarm", true, false);
-  click("Repeat");
+  click("Repeat"); click("Custom Days");
   for (unsigned i = 0; i < 5; ++i) tap(menu_button(weekdays[i], NULL));
-  header_back();
-  operation_label("Choose at least one day.", 180, 169, 440, &lv_font_montserrat_28, true, false);
+  header_back(); header_back();
+  operation_label("Tomorrow · 7:00 AM", 180, 169, 440, &lv_font_montserrat_28, true, false);
   clock.usable = false;
   wac_settings_update_clock(&clock);
-  operation_label("Choose at least one day.", 180, 169, 440, &lv_font_montserrat_28, true, false);
-  click("Save");
-  operation_label("Choose at least one day.", 180, 169, 440, &lv_font_montserrat_28, true, false);
+  operation_label("Waiting for time sync", 180, 169, 440, &lv_font_montserrat_28, true, false);
   assert(task_count == 0 && fake_nvs_calls(FAKE_SET) == 0);
   click("Cancel");
 
@@ -3424,22 +3564,96 @@ static void test_alarm_editor_preview_draft_and_heartbeat(void)
   assert(current().alarm_enabled && task_count == 0);
 }
 
+static void test_one_time_owner_preview_and_auto_off(void)
+{
+  for (unsigned night = 0; night < 2; ++night) {
+    fresh_editor(); wac_settings_apply_night(night);
+    setenv("TZ", "UTC0", 1); tzset();
+    device_config_t baseline = current(), config = baseline;
+    config.alarm_enabled = true; config.alarm_hour = 0; config.alarm_minute = 5;
+    config.alarm_repeat_days = 0;
+    assert(device_config_save_alarm(&baseline, &config) == ESP_OK);
+    wac_ui_settings_close(); open_editor(); click("Alarm Settings");
+    wac_time_snapshot_t clock = preview_clock(2026, 10, 9, 23, 59, 0);
+    wac_alarm_snapshot_t alarm = {.next = {.valid = true, .local_date = 20261010,
+      .minute = 5, .utc = preview_clock(2026, 10, 10, 0, 5, 0).utc_now}};
+    wac_settings_update_alarm(&config, &alarm);
+    wac_settings_update_clock(&clock);
+    operation_label("Tomorrow · 12:05 AM", 180, 169, 440, &lv_font_montserrat_28, true, night);
+    clock = preview_clock(2026, 10, 10, 0, 6, 0);
+    wac_settings_update_clock(&clock);
+    operation_label("Today · 12:05 AM", 180, 169, 440, &lv_font_montserrat_28, true, night);
+    /* A captured ring/snooze retains its scheduled date and minute. */
+    alarm.current = alarm.next; alarm.next.valid = false; alarm.phase = WAC_ALARM_SNOOZED;
+    wac_settings_update_alarm(&config, &alarm);
+    wac_settings_update_clock(&clock);
+    operation_label("Today · 12:05 AM", 180, 169, 440, &lv_font_montserrat_28, true, night);
+    /* Completion with an unsuccessful enabled-setting write can leave the
+     * saved switch On while its one-time occurrence is already consumed. */
+    alarm = (wac_alarm_snapshot_t){0};
+    wac_settings_update_alarm(&config, &alarm);
+    wac_settings_update_clock(&clock);
+    operation_label("No upcoming alarm", 180, 169, 440, &lv_font_montserrat_28, true, night);
+    assert(!menu_label(lv_screen_active(), "Tomorrow · 12:05 AM"));
+    assert(!menu_label(lv_screen_active(), "Waiting for time sync"));
+    click("Alarm Time"); picker_set(8, 25, true); click("Done");
+    operation_label("Today · 8:25 AM", 180, 169, 440, &lv_font_montserrat_28, true, night);
+    lv_obj_t *time_row = menu_button("Alarm Time", NULL);
+    assert(device_config_set_alarm_enabled(false) == ESP_OK);
+    config = current();
+    wac_settings_update_alarm(&config, &(wac_alarm_snapshot_t){0});
+    wac_settings_update_clock(&clock);
+    assert(menu_button("Alarm Time", "8:25 AM") == time_row);
+    menu_switch("Alarm", false, night);
+    operation_label("Alarm off", 180, 169, 440, &lv_font_montserrat_28, true, night);
+    /* A second Auto-Off while nested changes only On/Off; Done still keeps
+     * the unrelated time and Repeat draft. */
+    click("Repeat"); click("Weekdays"); click("Custom Days");
+    click("Tue");
+    wac_settings_update_alarm(&config, &(wac_alarm_snapshot_t){0});
+    wac_settings_update_clock(&clock);
+    assert(view == WAC_SETTINGS_REPEAT_CUSTOM);
+    custom_day_selection(0x3a, night); click("Done");
+    repeat_selection(0x3a, night); click("Done");
+    menu_row("Repeat", "4 days", 428, false, night);
+    assert(menu_button("Alarm Time", "8:25 AM"));
+    click("Cancel"); click("Alarm Settings");
+    menu_row("Repeat", "None", 428, false, night);
+    assert(menu_button("Alarm Time", "12:05 AM")); menu_switch("Alarm", false, night);
+    click("Alarm Time"); picker_set(8, 25, true); click("Done");
+    click("Save"); run_task();
+    config = current();
+    assert(!config.alarm_enabled && config.alarm_hour == 8 && config.alarm_minute == 25
+      && config.alarm_repeat_days == 0);
+  }
+  wac_settings_apply_night(false);
+}
+
 static void test_required_editor_fields_before_submission(void)
 {
   fresh_editor();
   click("Alarm Settings");
-  click("Repeat");
+  click("Repeat"); click("Custom Days");
   const char *weekdays[] = {"Mon", "Tue", "Wed", "Thu", "Fri"};
   for (unsigned i = 0; i < sizeof(weekdays) / sizeof(weekdays[0]); ++i) tap(menu_button(weekdays[i], NULL));
-  assert(lv_obj_has_state(menu_button("Done", NULL), LV_STATE_DISABLED));
+  assert(!lv_obj_has_state(menu_button("Done", NULL), LV_STATE_DISABLED));
   tap(menu_button("Done", NULL));
-  assert(view == WAC_SETTINGS_REPEAT);
-  header_back();
+  repeat_selection(0, false);
+  tap(menu_button("Done", NULL));
+  assert(view == WAC_SETTINGS_ALARM);
   click("Save");
-  assert(task_count == 0 && view == WAC_SETTINGS_ALARM);
-  assert(menu_label(lv_screen_active(), "Choose at least one day."));
-  assert(fake_nvs_calls(FAKE_SET) == 0);
+  assert(task_count == 1);
+  run_task();
+  assert(view == WAC_SETTINGS_ENTRY && current().alarm_repeat_days == 0);
+  assert(device_config_init() == ESP_OK);
+  assert(current().alarm_repeat_days == 0);
+  click("Alarm Settings");
+  menu_row("Repeat", "None", 428, false, false);
+  click("Repeat"); click("Weekdays"); click("Done"); click("Cancel");
+  click("Alarm Settings");
+  menu_row("Repeat", "None", 428, false, false);
   click("Cancel");
+  fake_nvs_clear_activity();
   click("Device Setup");
   click("Messaging");
   click("House Messages");
@@ -3881,6 +4095,12 @@ static void test_sound_machine_controls(void)
     unsigned slider_index = 0;
     lv_obj_t *range = find_type(lv_screen_active(), &lv_slider_class, &slider_index);
     menu_box(range, 175, 532, 450, 8);
+    lv_display_t *display = lv_display_get_default();
+    lv_display_add_event_cb(display, count_ui_invalidations, LV_EVENT_INVALIDATE_AREA, NULL);
+    ui_invalidations = 0;
+    wac_settings_update_audio(&audio_snapshot);
+    assert(ui_invalidations == 0);
+    lv_display_remove_event_cb_with_user_data(display, count_ui_invalidations, NULL);
     assert(lv_slider_get_min_value(range) == 0 && lv_slider_get_max_value(range) == 100);
     assert(lv_obj_get_style_pad_left(range, LV_PART_KNOB) == 14);
     menu_box(menu_button("Play", NULL), 270, 676, 260, 80);
@@ -4012,7 +4232,7 @@ int main(int argc, char **argv)
   menu_keyboard_assets();
   test_clock_time_font();
   lv_display_t *display = lv_display_create(800, 800);
-  static uint8_t buffer[800 * 32 * 4];
+  _Alignas(4) static uint8_t buffer[800 * 32 * 4];
   lv_display_set_buffers(display, buffer, NULL, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_set_flush_cb(display, flush);
   pointer = lv_indev_create();
@@ -4047,7 +4267,7 @@ int main(int argc, char **argv)
     test_credentials_missing_network_focus();
     test_keyboard_only_on_text_editors();
     test_shared_time_arrow_controls();
-    test_repeat_shortcuts_and_zero_guard();
+    test_repeat_shortcuts_and_one_time();
     test_night_rows_modes_and_fixed_notes();
     test_offset_direction_limits_and_drafts();
     test_alarm_sound_snooze_layout_and_drafts();
@@ -4062,6 +4282,7 @@ int main(int argc, char **argv)
     test_alarm_editor_immediate_toggle();
     test_alarm_editor_next_preview_cases();
     test_alarm_editor_preview_draft_and_heartbeat();
+    test_one_time_owner_preview_and_auto_off();
     test_required_editor_fields_before_submission();
     test_weather_error_typing_notice();
     test_weather_failure_retains_draft_and_success_restarts();
@@ -4088,6 +4309,7 @@ int main(int argc, char **argv)
 
 #include <assert.h>
 #include <stdarg.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -4280,24 +4502,49 @@ static lv_obj_t *find_widget(lv_obj_t *root, const lv_obj_class_t *type)
   }
   return NULL;
 }
+static uint32_t *radar_test_pixels;
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
-{ (void)area; (void)pixels; lv_display_flush_ready(display); }
+{
+  if (radar_test_pixels) {
+    assert(lv_display_get_color_format(display) == LV_COLOR_FORMAT_XRGB8888);
+    size_t row_bytes = lv_area_get_width(area) * sizeof(uint32_t);
+    for (int y = area->y1; y <= area->y2; ++y)
+      memcpy(&radar_test_pixels[y * 800 + area->x1],
+        pixels + (y - area->y1) * row_bytes, row_bytes);
+  }
+  lv_display_flush_ready(display);
+}
 
 static lv_indev_data_t pointer_data;
 static void read_pointer(lv_indev_t *indev, lv_indev_data_t *data)
 { (void)indev; *data = pointer_data; }
-static void swipe(lv_indev_t *pointer, int x, int y, int end_x, int end_y)
+static void pointer_press(lv_indev_t *pointer, int x, int y)
 {
   lv_obj_update_layout(lv_screen_active());
   pointer_data.point = (lv_point_t){x, y};
   pointer_data.state = LV_INDEV_STATE_PRESSED;
   lv_indev_read(pointer);
-  pointer_data.point = (lv_point_t){end_x, end_y};
+}
+
+static void pointer_move(lv_indev_t *pointer, int x, int y)
+{
+  pointer_data.point = (lv_point_t){x, y};
   lv_tick_inc(30);
   lv_indev_read(pointer);
+}
+
+static void pointer_release(lv_indev_t *pointer)
+{
   pointer_data.state = LV_INDEV_STATE_RELEASED;
   lv_tick_inc(30);
   lv_indev_read(pointer);
+}
+
+static void swipe(lv_indev_t *pointer, int x, int y, int end_x, int end_y)
+{
+  pointer_press(pointer, x, y);
+  pointer_move(pointer, end_x, end_y);
+  pointer_release(pointer);
 }
 
 static lv_obj_t *forecast_image(lv_obj_t *root, int width)
@@ -4556,6 +4803,7 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
   device_config_t config;
   assert(device_config_copy(&config) == ESP_OK);
   config.location_ready = true;
+  strcpy(config.location, "Cincinnati, Ohio, US");
   config.wifi_ready = true;
   fake_nvs_clear_activity();
   for (unsigned analog = 0; analog < 2; ++analog) {
@@ -4619,19 +4867,11 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     swipe(pointer, 600, 200, 300, 200);
     assert(!find_visible_label(lv_screen_active(), "Weather update failed."));
-    assert(find_visible_label(lv_screen_active(), "N"));
-    lv_obj_t *headline, *detail;
-    conditions_arc_objects(&headline, &detail);
-    assert_conditions_arc_text(headline, detail, "Waiting for weather…", "");
-    assert(visible(headline));
-    menu_color(headline, 0xf5f8ff, false);
-    assert(!visible(find_image_source(lv_screen_active(), &conditions_wind_arrow)));
+    assert(find_visible_label(lv_screen_active(), "Radar unavailable."));
+    assert(!find_label(lv_screen_active(), "PRESSURE"));
     runtime.night_active = true;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert(!find_visible_label(lv_screen_active(), "Weather update failed."));
-    assert_conditions_arc_text(headline, detail, "Waiting for weather…", "");
-    assert(visible(headline));
-    menu_color(headline, 0xecc0c0, false);
+    menu_color(label("Radar unavailable."), 0xc17a7a, false);
     runtime.night_active = false;
 
     runtime.weather.valid = true;
@@ -4658,18 +4898,13 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
 
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(!find_visible_label(lv_screen_active(), "Weather update failed."));
-    assert(find_visible_label(lv_screen_active(), "8"));
-    assert(find_visible_label(lv_screen_active(), "Conditions steady"));
-    assert(assert_section_dividers(lv_screen_active(), false, false) == 2);
+    assert(find_visible_label(lv_screen_active(), "Radar unavailable."));
     runtime.night_active = true;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert(assert_section_dividers(lv_screen_active(), true, false) == 2);
     runtime.night_active = false;
     runtime.weather.stale = true;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert_data_notice("Weather data stale", true);
-    assert(find_visible_label(lv_screen_active(), "8"));
-    assert(find_visible_label(lv_screen_active(), "Conditions steady"));
+    assert(!find_visible_label(lv_screen_active(), "Weather data stale"));
     swipe(pointer, 300, 350, 600, 350);
     assert_data_notice("Weather data stale", false);
     assert(find_visible_label(lv_screen_active(), "71° / 41°"));
@@ -4765,6 +5000,46 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
   assert(fake_nvs_calls(FAKE_SET) == 0);
 }
 
+static void assert_analog_tick_geometry(bool night)
+{
+  lv_obj_update_layout(lv_screen_active());
+  lv_obj_t *face = lv_obj_get_parent(find_widget(lv_screen_active(), &lv_line_class));
+  unsigned count = 0;
+  for (uint32_t child = 0; child < lv_obj_get_child_count(face); ++child) {
+    lv_obj_t *tick = lv_obj_get_child(face, child);
+    if (!lv_obj_check_type(tick, &lv_line_class)) continue;
+    unsigned i = count++;
+    assert(i < 60 && lv_line_get_point_count(tick) == 2);
+    const lv_point_precise_t *points = lv_line_get_points(tick);
+    int length = i % 15 == 0 ? 26 : i % 5 == 0 ? 24 : 16;
+    double radians = (i * 6.0 - 90.0) * (3.14159265358979323846 / 180.0);
+    /* Original face-relative endpoints, before the smaller object boxes. */
+    int x[2], y[2];
+    for (unsigned p = 0; p < 2; ++p) {
+      x[p] = (int)lround(380 + cos(radians) * (348 - (p ? length : 0)));
+      y[p] = (int)lround(380 + sin(radians) * (348 - (p ? length : 0)));
+      assert(lv_obj_get_x(tick) + points[p].x == x[p]);
+      assert(lv_obj_get_y(tick) + points[p].y == y[p]);
+    }
+    assert(lv_obj_get_width(tick) == abs(x[0] - x[1]) + 1);
+    assert(lv_obj_get_height(tick) == abs(y[0] - y[1]) + 1);
+    assert(lv_line_is_point_array_mutable(tick) && !lv_line_get_y_invert(tick));
+    assert(!lv_obj_has_flag(tick, LV_OBJ_FLAG_CLICKABLE));
+    assert(lv_obj_get_style_line_rounded(tick, 0));
+    int width = i % 5 == 0 ? 4 : 2;
+    int margin = 0;
+    lv_obj_send_event(tick, LV_EVENT_REFR_EXT_DRAW_SIZE, &margin);
+    assert(margin >= width && lv_obj_get_style_line_width(tick, 0) == width);
+    uint32_t color = i % 15 == 0 ? (night ? 0xe0acac : 0xf4f8ff)
+      : i % 5 == 0 ? (night ? 0xd6a0a0 : 0xffffff) : (night ? 0xc17e7e : 0xffffff);
+    int opacity = i % 15 == 0 ? (night ? 64 : LV_OPA_80)
+      : i % 5 == 0 ? (night ? 56 : LV_OPA_70) : (night ? 32 : LV_OPA_50);
+    assert(lv_color_eq(lv_obj_get_style_line_color(tick, 0), lv_color_hex(color)));
+    assert(lv_obj_get_style_line_opa(tick, 0) == opacity);
+  }
+  assert(count == 60);
+}
+
 static void test_normal_clock_surfaces(lv_indev_t *pointer)
 {
   fake_nvs_reset();
@@ -4796,6 +5071,7 @@ static void test_normal_clock_surfaces(lv_indev_t *pointer)
     snprintf(runtime.weather.icon_name, sizeof(runtime.weather.icon_name), "clear-day");
     assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
     assert_home_edges();
+    if (analog) assert_analog_tick_geometry(false);
     assert(find_visible_label(lv_screen_active(), "Friday"));
     assert(find_visible_label(lv_screen_active(), "Oct 9"));
 
@@ -4838,6 +5114,7 @@ static void test_normal_clock_surfaces(lv_indev_t *pointer)
     runtime.night_active = true;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert_home_edges();
+    if (analog) assert_analog_tick_geometry(true);
     assert(find_visible_label(lv_screen_active(), "Friday"));
     assert(find_visible_label(lv_screen_active(), "Oct 9"));
 
@@ -5072,6 +5349,8 @@ static void test_digital_night_layout(void)
     lv_obj_update_layout(lv_screen_active());
     assert(lv_obj_get_style_text_font(time, 0) == &lv_font_clock_time_144);
     assert(lv_obj_get_style_text_letter_space(time, 0) == -2);
+    assert(lv_obj_get_style_transform_pivot_x(time, 0) == 0);
+    assert(lv_obj_get_style_transform_pivot_y(time, 0) == 0);
     menu_color(time, 0xecc0c0, false);
     if (show_period) {
       lv_obj_t *period = find_visible_label(lv_screen_active(), "AM");
@@ -5131,6 +5410,10 @@ static void test_digital_night_layout(void)
     lv_obj_get_coords(time, &restored);
     assert(lv_obj_get_style_transform_scale_x_safe(time, 0) == 256);
     assert(lv_obj_get_style_transform_scale_y_safe(time, 0) == 256);
+    /* The original Night layout leaves this pivot at zero on returning to
+     * unscaled Day; that retained value and the final coordinates must match. */
+    assert(lv_obj_get_style_transform_pivot_x(time, 0) == 0);
+    assert(lv_obj_get_style_transform_pivot_y(time, 0) == 0);
     assert(restored.x1 == day_coords.x1 && restored.y1 == day_coords.y1
       && restored.x2 == day_coords.x2 && restored.y2 == day_coords.y2);
   }
@@ -5676,6 +5959,40 @@ static void pointer_tap(lv_indev_t *pointer, lv_obj_t *obj)
   swipe(pointer, x, y, x, y);
 }
 
+/* All ringing-dismiss callers exercise LVGL input. Snoozed Dismiss retains
+ * its existing tap, including the navigation and settings regression cases. */
+static lv_obj_t *alarm_slide_track(void)
+{
+  lv_obj_t *caption = find_visible_label(lv_screen_active(), "SLIDE TO DISMISS");
+  assert(caption);
+  return lv_obj_get_parent(caption);
+}
+
+static lv_obj_t *alarm_slide_handle(void)
+{
+  lv_obj_t *handle = menu_sized_child(alarm_slide_track(), 88, 88);
+  assert(handle);
+  return handle;
+}
+
+static void alarm_dismiss(lv_indev_t *pointer)
+{
+  if (find_visible_label(lv_screen_active(), "SLIDE TO DISMISS"))
+    swipe(pointer, 182, 600, 618, 600);
+  else pointer_tap(pointer, visible_button("DISMISS"));
+}
+
+/* Existing return-navigation checks begin after the approved presentation
+ * interval. The dedicated slide matrix measures that interval separately. */
+static void complete_alarm_dismiss(const wac_alarm_occurrence_t *occurrence, esp_err_t result)
+{
+  app_ui_complete_alarm_action(APP_ALARM_DISMISS, occurrence, result);
+  if (find_visible_label(lv_screen_active(), "DISMISSED")) {
+    lv_tick_inc(2200);
+    lv_timer_handler();
+  }
+}
+
 static lv_obj_t *alarm_label_box(const char *text, int x, int y, int width,
   const lv_font_t *font, uint32_t color)
 {
@@ -5724,16 +6041,20 @@ static void test_alarm_ringing_snoozed_surfaces(lv_indev_t *pointer)
     menu_box(divider, 150, 310, 500, 1);
     menu_color(divider, accent, true);
     assert(lv_obj_get_style_bg_opa(divider, 0) == 89);
-    lv_obj_t *snooze = visible_button("SNOOZE"), *dismiss = visible_button("DISMISS");
+    lv_obj_t *snooze = visible_button("SNOOZE"), *dismiss = alarm_slide_handle();
     menu_box(snooze, 130, 350, 540, 164);
-    menu_box(dismiss, 225, 548, 350, 96);
-    assert(lv_obj_get_style_radius(snooze, 0) == 32 && lv_obj_get_style_radius(dismiss, 0) == 32);
+    menu_box(alarm_slide_track(), 130, 548, 540, 104);
+    menu_box(dismiss, 138, 556, 88, 88);
+    assert(lv_obj_get_style_radius(snooze, 0) == 32);
+    assert(lv_obj_get_style_radius(dismiss, 0) == LV_RADIUS_CIRCLE);
+    assert(lv_obj_get_style_radius(alarm_slide_track(), 0) == 56);
     menu_color(snooze, night ? 0x643437 : 0x245289, true);
-    menu_color(dismiss, night ? 0x321c20 : 0x17263b, true);
+    menu_color(alarm_slide_track(), night ? 0x321c20 : 0x17263b, true);
+    menu_color(dismiss, night ? 0x643437 : 0x304d70, true);
     assert(lv_color_eq(lv_obj_get_style_border_color(snooze, 0), lv_color_hex(accent)));
     assert(lv_obj_get_style_text_font(find_visible_label(page, "SNOOZE"), 0) == &lv_font_montserrat_48);
     assert(lv_obj_get_style_text_font(find_visible_label(page, "10 minutes"), 0) == &wac_font_settings_28);
-    assert(lv_obj_get_style_text_font(find_visible_label(page, "DISMISS"), 0) == &lv_font_montserrat_36);
+    assert(lv_obj_get_style_text_font(find_visible_label(page, "SLIDE TO DISMISS"), 0) == &lv_font_montserrat_32);
     alarm_label_box("Alarm ringing", 200, 679, 400, &wac_font_settings_28, muted);
     swipe(pointer, 600, 200, 300, 200);
     swipe(pointer, 600, 200, 600, 400);
@@ -5751,7 +6072,7 @@ static void test_alarm_ringing_snoozed_surfaces(lv_indev_t *pointer)
     assert(submitted_alarm_occurrence.local_date == 20261009 && submitted_alarm_occurrence.minute == 426);
     assert(lv_obj_has_state(snooze, LV_STATE_DISABLED) && lv_obj_has_state(dismiss, LV_STATE_DISABLED));
     lv_obj_send_event(snooze, LV_EVENT_CLICKED, NULL);
-    lv_obj_send_event(dismiss, LV_EVENT_CLICKED, NULL);
+    alarm_dismiss(pointer);
     assert(alarm_submissions == 2);
     wac_alarm_occurrence_t wrong = submitted_alarm_occurrence;
     wrong.local_date++;
@@ -5773,7 +6094,7 @@ static void test_alarm_ringing_snoozed_surfaces(lv_indev_t *pointer)
       && !glyph.is_placeholder);
     alarm_label_box("Rings again at 7:16 AM", 150, 501, 500, &wac_font_settings_28, muted);
     assert(!find_visible_label(lv_screen_active(), "Could not save alarm state."));
-    alarm_label_box("Repeating alarm stays on", 150, 679, 500, &wac_font_settings_28, muted);
+    alarm_label_box("Alarm snoozed", 150, 679, 500, &wac_font_settings_28, muted);
     runtime.clock.utc_now++;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(find_visible_label(lv_screen_active(), "9:59"));
@@ -5791,6 +6112,256 @@ static void test_alarm_ringing_snoozed_surfaces(lv_indev_t *pointer)
     assert(!find_visible_label(lv_screen_active(), "Could not save alarm state."));
     assert(find_visible_label(lv_screen_active(), "Tomorrow · 7:06 AM"));
     assert(fake_nvs_calls(FAKE_SET) == 0);
+  }
+}
+
+static void slide_reset_finished(void)
+{
+  lv_tick_inc(240);
+  lv_timer_handler();
+  menu_box(alarm_slide_handle(), 138, 556, 88, 88);
+  assert(lv_obj_get_style_opa(find_visible_label(lv_screen_active(), "SLIDE TO DISMISS"), 0)
+    == LV_OPA_COVER);
+}
+
+static void test_alarm_slide_input_and_lifetime(lv_indev_t *pointer)
+{
+  /* These snapshots and returned failures are constructed software cases.
+   * Input goes through the actual LVGL device, not CLICKED/VALUE_CHANGED. */
+  for (unsigned night = 0; night < 2; ++night) {
+    device_config_t config;
+    app_runtime_state_t runtime;
+    alarm_fixture(&config, &runtime);
+    runtime.night_active = night;
+    runtime.alarm.phase = WAC_ALARM_RINGING;
+    assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+    lv_obj_t *track = alarm_slide_track(), *handle = alarm_slide_handle();
+    lv_obj_t *caption = find_visible_label(lv_screen_active(), "SLIDE TO DISMISS");
+    lv_obj_update_layout(lv_screen_active());
+    lv_point_t measured;
+    const lv_font_t *font = lv_obj_get_style_text_font(caption, 0);
+    lv_text_get_size(&measured, lv_label_get_text(caption), font,
+      lv_obj_get_style_text_letter_space(caption, 0), 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    assert(font == &lv_font_montserrat_32);
+    assert(lv_obj_get_style_transform_scale_x(caption, 0) == 237);
+    assert(lv_obj_get_style_transform_scale_y(caption, 0) == 237);
+    assert((measured.x * 237 + 255) / 256 < 540);
+    printf("Slide %s caption: %d x %d text bounds, %.3f x %.3f after scaling; nominal 29.625px\n",
+      night ? "Night" : "Day", (int)measured.x, (int)measured.y,
+      measured.x * 237.0 / 256, measured.y * 237.0 / 256);
+    assert(measured.x <= lv_obj_get_width(caption) && measured.y <= lv_obj_get_height(caption));
+    assert(lv_obj_get_style_text_align(caption, 0) == LV_TEXT_ALIGN_CENTER);
+    lv_area_t bounds;
+    lv_obj_get_coords(caption, &bounds);
+    assert(bounds.x1 + (lv_obj_get_width(caption) / 2) == 400);
+    assert(abs(bounds.y1 + (lv_obj_get_height(caption) / 2) - 600) <= 1);
+    assert(lv_obj_get_style_border_width(track, 0) == 1);
+    assert(lv_obj_get_style_border_width(handle, 0) == 1);
+    assert(lv_color_eq(lv_obj_get_style_border_color(track, 0),
+      lv_color_hex(night ? 0x633737 : 0x253a57)));
+    menu_color(caption, night ? 0xc17a7a : 0xa6b6cf, false);
+
+    /* Text/right-end taps and an outside-origin swipe cannot qualify. */
+    swipe(pointer, 400, 600, 400, 600);
+    swipe(pointer, 650, 600, 650, 600);
+    swipe(pointer, 130, 600, 130, 600);
+    swipe(pointer, 100, 600, 618, 600);
+    pointer_tap(pointer, handle);
+    assert(alarm_submissions == 0 && !find_visible_label(lv_screen_active(), "DISMISSED"));
+    slide_reset_finished();
+
+    pointer_press(pointer, 182, 600);
+    pointer_move(pointer, 382, 600);
+    menu_box(handle, 338, 556, 88, 88);
+    /* Ordinary heartbeat, weather and appearance changes preserve held input. */
+    runtime.clock.utc_now++;
+    runtime.weather.valid = true;
+    runtime.weather.temp = 52;
+    runtime.night_active = !night;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(handle == alarm_slide_handle());
+    menu_box(handle, 338, 556, 88, 88);
+    menu_color(handle, !night ? 0x643437 : 0x304d70, true);
+    runtime.night_active = night;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    menu_box(handle, 338, 556, 88, 88);
+    pointer_release(pointer);
+    /* Reset is animated rather than jumping straight back on release. */
+    lv_tick_inc(110);
+    lv_timer_handler();
+    lv_obj_update_layout(lv_screen_active());
+    assert(lv_obj_get_x(handle) > 8 && lv_obj_get_x(handle) < 208);
+    slide_reset_finished();
+    assert(alarm_submissions == 0);
+
+    pointer_press(pointer, 182, 600);
+    pointer_move(pointer, 618, 600);
+    menu_box(handle, 574, 556, 88, 88);
+    assert(alarm_submissions == 0); /* Reaching the end alone is insufficient. */
+    pointer_move(pointer, 382, 600);
+    pointer_release(pointer);
+    slide_reset_finished();
+    assert(alarm_submissions == 0);
+
+    /* The input device's cancellation route emits PRESS_LOST on release. */
+    pointer_press(pointer, 182, 600);
+    pointer_move(pointer, 618, 600);
+    lv_indev_wait_release(pointer);
+    pointer_release(pointer);
+    slide_reset_finished();
+    assert(alarm_submissions == 0);
+
+    /* LVGL input reset is another lost-contact route; it must also abandon
+     * a gesture already at the endpoint without submitting on later release. */
+    pointer_press(pointer, 182, 600);
+    pointer_move(pointer, 618, 600);
+    lv_indev_reset(pointer, NULL);
+    pointer_release(pointer);
+    slide_reset_finished();
+    assert(alarm_submissions == 0);
+
+    swipe(pointer, 182, 600, 591, 600); /* 409/436 is below 94 percent. */
+    slide_reset_finished();
+    assert(alarm_submissions == 0);
+    alarm_submission_result = ESP_ERR_TIMEOUT;
+    swipe(pointer, 182, 600, 592, 600); /* 410/436 reaches the endpoint tolerance. */
+    assert(alarm_submissions == 1 && submitted_alarm_action == APP_ALARM_DISMISS);
+    assert(!find_visible_label(lv_screen_active(), "DISMISSED"));
+    slide_reset_finished();
+    assert(!lv_obj_has_state(handle, LV_STATE_DISABLED));
+    assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
+
+    alarm_submission_result = ESP_OK;
+    uint32_t release_started = lv_tick_get();
+    pointer_press(pointer, 182, 600);
+    pointer_move(pointer, 382, 600);
+    runtime.clock.utc_now++;
+    runtime.weather.temp++;
+    runtime.night_active = !night;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    runtime.night_active = night;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    pointer_move(pointer, 618, 600);
+    pointer_release(pointer);
+    assert(lv_tick_elaps(release_started) < 2200);
+    assert(alarm_submissions == 2 && submitted_alarm_action == APP_ALARM_DISMISS);
+    assert(submitted_alarm_occurrence.local_date == 20261009 && submitted_alarm_occurrence.minute == 426);
+    assert(!find_visible_label(lv_screen_active(), "DISMISSED"));
+    assert(lv_obj_has_state(handle, LV_STATE_DISABLED));
+    alarm_dismiss(pointer);
+    pointer_tap(pointer, visible_button("SNOOZE"));
+    assert(alarm_submissions == 2);
+    wac_alarm_occurrence_t wrong = submitted_alarm_occurrence;
+    wrong.local_date++;
+    app_ui_complete_alarm_action(APP_ALARM_DISMISS, &wrong, ESP_OK);
+    app_ui_complete_alarm_action(APP_ALARM_SNOOZE, &submitted_alarm_occurrence, ESP_OK);
+    assert(lv_obj_has_state(handle, LV_STATE_DISABLED));
+    assert(!find_visible_label(lv_screen_active(), "DISMISSED"));
+    /* A matching result without the owner's live dismissal cannot show success. */
+    app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+    assert(!find_visible_label(lv_screen_active(), "DISMISSED"));
+    assert(!lv_obj_has_state(handle, LV_STATE_DISABLED));
+    slide_reset_finished();
+    alarm_dismiss(pointer);
+    assert(alarm_submissions == 3);
+    /* Another accepted Off operation can reach Idle before this stale
+     * command is rejected. Idle alone must not show a false success. */
+    runtime.alarm.phase = WAC_ALARM_IDLE;
+    runtime.alarm.current.valid = false;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_ERR_INVALID_STATE);
+    assert(!find_visible_label(lv_screen_active(), "DISMISSED"));
+    runtime.alarm.phase = WAC_ALARM_RINGING;
+    runtime.alarm.current.valid = true;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    alarm_dismiss(pointer);
+    assert(alarm_submissions == 4);
+    runtime.alarm.phase = WAC_ALARM_IDLE;
+    runtime.alarm.current.valid = false;
+    runtime.alarm.storage_error = ESP_ERR_TIMEOUT;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(!find_visible_label(lv_screen_active(), "DISMISSED"));
+    app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_ERR_TIMEOUT);
+    caption = find_visible_label(lv_screen_active(), "DISMISSED");
+    assert(caption);
+    menu_color(caption, night ? 0xecc0c0 : 0xf5f8ff, false);
+    assert(lv_obj_get_style_text_align(caption, 0) == LV_TEXT_ALIGN_CENTER);
+    lv_obj_update_layout(lv_screen_active());
+    lv_text_get_size(&measured, "DISMISSED", font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    assert(measured.x <= lv_obj_get_width(caption));
+    assert(measured.y <= lv_obj_get_height(caption));
+    assert(!visible(handle));
+    assert(lv_obj_has_state(visible_button("SNOOZE"), LV_STATE_DISABLED));
+    runtime.weather.temp++;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    lv_tick_inc(1000);
+    lv_timer_handler();
+    app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+    lv_tick_inc(1199);
+    lv_timer_handler();
+    assert(find_visible_label(lv_screen_active(), "DISMISSED"));
+    lv_tick_inc(1);
+    lv_timer_handler();
+    assert(!find_visible_label(lv_screen_active(), "DISMISSED"));
+    assert(find_visible_label(lv_screen_active(), "Tomorrow · 7:06 AM"));
+    assert(config.alarm_enabled && fake_nvs_calls(FAKE_SET) == 0);
+
+    /* Leaving ringing, resuming, replacing the occurrence and rebuilding all
+     * discard held input. A release belonging to the previous screen is inert. */
+    for (unsigned reset = 0; reset < 4; ++reset) {
+      runtime.alarm.current = alarm_occurrence(20261009, 426);
+      runtime.alarm.phase = WAC_ALARM_RINGING;
+      assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+      pointer_press(pointer, 182, 600);
+      pointer_move(pointer, 382, 600);
+      unsigned before = alarm_submissions;
+      if (reset == 0 || reset == 1) {
+        runtime.alarm.phase = reset == 0 ? WAC_ALARM_IDLE : WAC_ALARM_SNOOZED;
+        runtime.alarm.current.valid = reset != 0;
+        runtime.alarm.snooze_deadline = runtime.clock.utc_now + 600;
+        assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+        runtime.alarm.phase = WAC_ALARM_RINGING;
+        runtime.alarm.current.valid = true;
+        assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      } else if (reset == 2) {
+        runtime.alarm.current = alarm_occurrence(20261010, 480);
+        assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      } else assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+      pointer_move(pointer, 618, 600);
+      pointer_release(pointer);
+      slide_reset_finished();
+      assert(alarm_submissions == before);
+      assert(!find_visible_label(lv_screen_active(), "DISMISSED"));
+    }
+
+    alarm_dismiss(pointer);
+    wac_alarm_occurrence_t old = submitted_alarm_occurrence;
+    runtime.alarm.current = alarm_occurrence(20261011, 481);
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    app_ui_complete_alarm_action(APP_ALARM_DISMISS, &old, ESP_OK);
+    assert(find_visible_label(lv_screen_active(), "8:01"));
+    assert(!find_visible_label(lv_screen_active(), "DISMISSED"));
+    slide_reset_finished();
+    alarm_dismiss(pointer);
+    runtime.alarm.phase = WAC_ALARM_IDLE;
+    runtime.alarm.current.valid = false;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+    assert(find_visible_label(lv_screen_active(), "DISMISSED"));
+    /* New ringing immediately preempts confirmation, including its old timer. */
+    lv_tick_inc(1000);
+    lv_timer_handler();
+    runtime.alarm.phase = WAC_ALARM_RINGING;
+    runtime.alarm.current = alarm_occurrence(20261012, 482);
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(find_visible_label(lv_screen_active(), "8:02"));
+    lv_tick_inc(1300);
+    lv_timer_handler();
+    assert(find_visible_label(lv_screen_active(), "8:02"));
+    assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
+    assert(!find_visible_label(lv_screen_active(), "DISMISSED"));
+    menu_box(alarm_slide_handle(), 138, 556, 88, 88);
+    assert(config.alarm_enabled && fake_nvs_calls(FAKE_SET) == 0);
   }
 }
 
@@ -5956,10 +6527,10 @@ static void test_alarm_navigation_preemption_and_completion(lv_indev_t *pointer)
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   assert(!visible(room) && !visible(keyboard));
   assert(wac_ui_settings_view() == WAC_SETTINGS_DEVICE);
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   runtime.alarm.phase = WAC_ALARM_IDLE;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
   assert(!visible(room) && !visible(keyboard));
   swipe(pointer, 600, 200, 600, 400);
   assert(visible(room) && visible(keyboard));
@@ -5968,25 +6539,39 @@ static void test_alarm_navigation_preemption_and_completion(lv_indev_t *pointer)
   assert(fake_nvs_calls(FAKE_SET) == 0);
   runtime.alarm.phase = WAC_ALARM_RINGING;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   runtime.alarm.phase = WAC_ALARM_IDLE;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
   pointer_tap(pointer, visible_button("Tomorrow · 7:06 AM"));
   assert(wac_ui_settings_view() == WAC_SETTINGS_ALARM);
   assert(!find_widget(lv_screen_active(), &lv_textarea_class));
   assert(fake_nvs_calls(FAKE_SET) == 0);
-  click("Repeat");
+  click("Repeat"); click("Custom Days");
   pointer_tap(pointer, visible_button("Sun"));
   menu_color(visible_button("Sun"), 0x245289, true);
   runtime.alarm.phase = WAC_ALARM_RINGING;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   runtime.alarm.phase = WAC_ALARM_IDLE;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
+  swipe(pointer, 600, 200, 600, 400);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_REPEAT_CUSTOM);
+  menu_color(visible_button("Sun"), 0x245289, true);
+  runtime.alarm.phase = WAC_ALARM_RINGING;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  alarm_dismiss(pointer);
+  runtime.alarm.phase = WAC_ALARM_IDLE;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
   pointer_tap(pointer, visible_button("Tomorrow · 7:06 AM"));
+  assert(wac_ui_settings_view() == WAC_SETTINGS_REPEAT_CUSTOM);
+  menu_color(visible_button("Sun"), 0x245289, true);
+  pointer_tap(pointer, visible_button("Done"));
   assert(wac_ui_settings_view() == WAC_SETTINGS_REPEAT);
+  pointer_tap(pointer, visible_button("Custom Days"));
+  assert(wac_ui_settings_view() == WAC_SETTINGS_REPEAT_CUSTOM);
   menu_color(visible_button("Sun"), 0x245289, true);
   assert(fake_nvs_calls(FAKE_SET) == 0);
   wac_ui_settings_close();
@@ -5999,10 +6584,10 @@ static void test_alarm_navigation_preemption_and_completion(lv_indev_t *pointer)
   runtime.alarm.phase = WAC_ALARM_RINGING;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   assert(!visible(overlay()) && dismissal_count == warning_actions);
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   runtime.alarm.phase = WAC_ALARM_IDLE;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
   assert(visible(overlay()) && dismissal_count == warning_actions);
 
   runtime.clock.warning = WAC_TIME_WARNING_NONE;
@@ -6036,18 +6621,18 @@ static void test_alarm_navigation_preemption_and_completion(lv_indev_t *pointer)
   assert(find_visible_label(lv_screen_active(), "Snoozed · 7:16 AM"));
   assert(!find_visible_label(lv_screen_active(), "SNOOZED"));
   pointer_tap(pointer, visible_button("Snoozed · 7:16 AM"));
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   wac_alarm_occurrence_t first = submitted_alarm_occurrence;
   swipe(pointer, 600, 200, 300, 200);
   runtime.alarm.phase = WAC_ALARM_IDLE;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  app_ui_complete_alarm_action(APP_ALARM_DISMISS, &first, ESP_OK);
+  complete_alarm_dismiss(&first, ESP_OK);
   assert(!find_visible_label(lv_screen_active(), "7:06"));
   swipe(pointer, 300, 350, 600, 350);
 
   runtime.alarm.phase = WAC_ALARM_RINGING;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   first = submitted_alarm_occurrence;
   runtime.alarm.current = alarm_occurrence(20261010, 480);
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
@@ -6055,13 +6640,13 @@ static void test_alarm_navigation_preemption_and_completion(lv_indev_t *pointer)
   app_ui_complete_alarm_action(APP_ALARM_DISMISS, &first, ESP_ERR_INVALID_STATE);
   assert(find_visible_label(lv_screen_active(), "8:00") && find_visible_label(lv_screen_active(), "Alarm ringing"));
   assert(!find_visible_label(lv_screen_active(), "Action not applied. Try again."));
-  assert(!lv_obj_has_state(visible_button("DISMISS"), LV_STATE_DISABLED));
+  assert(!lv_obj_has_state(alarm_slide_handle(), LV_STATE_DISABLED));
   unsigned count = alarm_submissions;
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   assert(alarm_submissions == count + 1 && submitted_alarm_occurrence.local_date == 20261010);
   runtime.alarm.phase = WAC_ALARM_IDLE;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
   assert(fake_nvs_calls(FAKE_SET) == 0);
 }
 
@@ -6097,10 +6682,10 @@ static void test_brightness_alarm_restore(lv_indev_t *pointer)
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(!visible(sliders[0]) && !visible(sliders[1]));
     assert(wac_ui_settings_view() == WAC_SETTINGS_BRIGHTNESS);
-    pointer_tap(pointer, visible_button("DISMISS"));
+    alarm_dismiss(pointer);
     runtime.alarm.phase = WAC_ALARM_IDLE;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+    complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
     swipe(pointer, 600, 200, 600, 400);
     assert(wac_ui_settings_view() == WAC_SETTINGS_BRIGHTNESS);
     assert(root == lv_obj_get_parent(menu_label(lv_screen_active(), "Brightness")));
@@ -6142,10 +6727,10 @@ static void test_weather_provider_alarm_resume(lv_indev_t *pointer)
   runtime.alarm.phase = WAC_ALARM_RINGING;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   assert(!visible(key) && !visible(keyboard));
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   runtime.alarm.phase = WAC_ALARM_IDLE;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
   swipe(pointer, 600, 200, 600, 400);
   assert(wac_ui_settings_view() == WAC_SETTINGS_WEATHER);
   assert(key == menu_field("API Key") && !strcmp(lv_textarea_get_text(key), "test-secret-held"));
@@ -6199,10 +6784,10 @@ static void test_alarm_preempts_pending_settings(lv_indev_t *pointer)
   assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
   assert(wac_ui_settings_view() == WAC_SETTINGS_WEATHER);
   assert(!find_visible_label(lv_screen_active(), "Save"));
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   runtime.alarm.phase = WAC_ALARM_IDLE;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
   swipe(pointer, 600, 200, 600, 400);
   assert(wac_ui_settings_view() == WAC_SETTINGS_WEATHER);
   assert(!strcmp(lv_textarea_get_text(menu_field("Weather Location")), "Lookup waiting draft"));
@@ -6240,10 +6825,10 @@ static void test_alarm_preempts_pending_settings(lv_indev_t *pointer)
   assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
   assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
   assert(!find_visible_label(lv_screen_active(), "Settings"));
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   runtime.alarm.phase = WAC_ALARM_IDLE;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
   swipe(pointer, 600, 200, 600, 400);
   assert(find_visible_label(lv_screen_active(), "Settings"));
   wac_ui_settings_close();
@@ -6352,6 +6937,43 @@ static void assert_conditions_arc_text(lv_obj_t *headline, lv_obj_t *detail,
 
 /* These fabricated download/clock snapshots verify elapsed time selection,
  * independently of the provider observation time and without live requests. */
+static void test_retained_conditions_renderer(void)
+{
+  /* Constructed snapshots exercise the retained renderer directly. Production
+   * startup must never build these objects or expose their route. */
+  device_config_t config;
+  app_runtime_state_t runtime;
+  alarm_fixture(&config, &runtime);
+  assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+  assert(!find_label(lv_screen_active(), "PRESSURE"));
+  wac_weather_build_conditions(lv_screen_active());
+  lv_obj_t *headline, *detail;
+  conditions_arc_objects(&headline, &detail);
+  lv_obj_t *fixture = lv_obj_get_parent(lv_obj_get_parent(headline));
+  lv_obj_remove_flag(fixture, LV_OBJ_FLAG_HIDDEN);
+  assert_conditions_arc_text(headline, detail, "Waiting for weather…", "");
+  assert(!visible(find_image_source(fixture, &conditions_wind_arrow)));
+  timed_conditions_fixture(&runtime.weather, false);
+  for (unsigned night = 0; night < 2; ++night) {
+    wac_weather_update(&runtime.weather, NULL, false);
+    wac_weather_apply_night(&runtime.weather, false, night);
+    assert_conditions_arc_text(headline, detail, runtime.weather.conditions.headline,
+      runtime.weather.conditions.detail);
+    assert(find_visible_label(fixture, "8"));
+    assert(find_visible_label(fixture, "gusts to 58 mph"));
+    assert(find_visible_label(fixture, "Gusty"));
+    assert(find_visible_label(fixture, "Falling"));
+    assert(find_visible_label(fixture, "0.6 in"));
+    assert(assert_section_dividers(fixture, night, false) == 2);
+    menu_color(headline, night ? 0xec9682 : 0xffc466, false);
+  }
+  runtime.weather.stale = true;
+  wac_weather_apply_night(&runtime.weather, false, false);
+  wac_weather_update_status(&runtime.weather, false, WAC_WEATHER_SURFACE_CONDITIONS,
+    "Weather updated 2h ago");
+  assert_data_notice("Weather updated 2h ago", true);
+}
+
 static void test_retained_weather_age(lv_indev_t *pointer)
 {
   fake_nvs_reset();
@@ -6359,6 +6981,7 @@ static void test_retained_weather_age(lv_indev_t *pointer)
   device_config_t config;
   assert(device_config_copy(&config) == ESP_OK);
   config.location_ready = config.wifi_ready = true;
+  strcpy(config.location, "Cincinnati, Ohio, US");
   const struct {
     int elapsed;
     bool stamp, network, usable;
@@ -6404,8 +7027,8 @@ static void test_retained_weather_age(lv_indev_t *pointer)
       if (strcmp(cases[i].notice, "Weather data stale"))
         assert(!find_visible_label(lv_screen_active(), cases[i].notice));
       swipe(pointer, 600, 200, 300, 200);
-      assert_data_notice(cases[i].notice, true);
-      assert(find_visible_label(lv_screen_active(), "8"));
+      assert(find_visible_label(lv_screen_active(), "Radar unavailable."));
+      assert(!find_visible_label(lv_screen_active(), "Weather data stale"));
       swipe(pointer, 300, 350, 600, 350);
       swipe(pointer, 300, 350, 600, 350);
     }
@@ -6435,6 +7058,7 @@ static void test_conditions_saved_display_format(lv_indev_t *pointer)
     assert(device_config_save_display(&baseline, &config) == ESP_OK);
     assert(device_config_copy(&config) == ESP_OK);
     assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+    wac_weather_build_conditions(lv_screen_active());
     lv_obj_t *headline, *detail;
     conditions_arc_objects(&headline, &detail);
     assert_conditions_arc_text(headline, detail, "Waiting for weather…", "");
@@ -6467,14 +7091,17 @@ static void test_conditions_saved_display_format(lv_indev_t *pointer)
     assert(settings_restart_count == 0 && !pending_settings_task);
     click("Back to Clock");
     swipe(pointer, 600, 200, 300, 200);
+    /* Retained objects are exercised directly, outside production navigation. */
+    lv_obj_t *fixture = lv_obj_get_parent(lv_obj_get_parent(headline));
+    lv_obj_remove_flag(fixture, LV_OBJ_FLAG_HIDDEN);
     assert(visible(headline) && visible(detail));
-    assert_data_notice("Weather data stale", true);
     assert(find_visible_label(lv_screen_active(), "8"));
     assert(find_visible_label(lv_screen_active(), "gusts to 58 mph"));
     assert(find_visible_label(lv_screen_active(), "Gusty"));
     assert(find_visible_label(lv_screen_active(), "Falling"));
     assert(find_visible_label(lv_screen_active(), "0.6 in"));
     assert(lv_color_eq(lv_obj_get_style_text_color(headline, 0), lv_color_hex(0xffc466)));
+    lv_obj_add_flag(fixture, LV_OBJ_FLAG_HIDDEN);
     fake_nvs_clear_activity();
     /* A previously started download publishes its old preferred format after
      * Save. The current saved choice still selects the opposite captions. */
@@ -6484,7 +7111,7 @@ static void test_conditions_saved_display_format(lv_indev_t *pointer)
       assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
       assert_conditions_arc_text(headline, detail, supplied.conditions_alternate_headline, supplied.conditions_alternate_detail);
       assert(lv_color_eq(lv_obj_get_style_text_color(headline, 0), lv_color_hex(night ? 0xec9682 : 0xffc466)));
-      assert(!!find_visible_label(lv_screen_active(), "Weather data stale") == !night);
+      assert(find_visible_label(lv_screen_active(), "Radar unavailable."));
     }
     /* A missing publication also retains the displayed payload, including its
      * format alternatives; drawing must not write settings or start work. */
@@ -6543,6 +7170,7 @@ static void test_display_completion_under_alarm_and_replacement(lv_indev_t *poin
     fake_nvs_clear_activity();
     timed_conditions_fixture(&runtime.weather, false);
     assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+    wac_weather_build_conditions(lv_screen_active());
     lv_obj_t *headline, *detail;
     conditions_arc_objects(&headline, &detail);
     swipe(pointer, 600, 200, 600, 400);
@@ -6552,10 +7180,10 @@ static void test_display_completion_under_alarm_and_replacement(lv_indev_t *poin
     runtime.alarm.phase = WAC_ALARM_RINGING;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     if (replace) {
-      pointer_tap(pointer, visible_button("DISMISS"));
+      alarm_dismiss(pointer);
       runtime.alarm.phase = WAC_ALARM_IDLE;
       assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-      app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+      complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
       pointer_tap(pointer, visible_button("Tomorrow · 7:06 AM"));
       assert(wac_ui_settings_view() == WAC_SETTINGS_ALARM);
       if (replace == 2) {
@@ -6658,10 +7286,10 @@ static void test_weather_restart_after_alarm_replaces_editor(lv_indev_t *pointer
     assert(pending_settings_task && fake_nvs_calls(FAKE_SET) == 0);
     runtime.alarm.phase = WAC_ALARM_RINGING;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    pointer_tap(pointer, visible_button("DISMISS"));
+    alarm_dismiss(pointer);
     runtime.alarm.phase = WAC_ALARM_IDLE;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+    complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
     pointer_tap(pointer, visible_button("Tomorrow · 7:06 AM"));
     assert(wac_ui_settings_view() == WAC_SETTINGS_ALARM);
     assert(!find_widget(lv_screen_active(), &lv_textarea_class));
@@ -6744,7 +7372,7 @@ static void test_audio_preview_preemption_and_ring_error(lv_indev_t *pointer)
   assert(find_visible_label(lv_screen_active(), "Alarm ringing") == footer);
   runtime.alarm.storage_error = ESP_OK;
   alarm_submission_result = ESP_ERR_TIMEOUT;
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   assert(!find_visible_label(lv_screen_active(), "Action not sent. Try again."));
   assert(find_visible_label(lv_screen_active(), "Alarm ringing") == footer);
   runtime.audio = (wac_audio_snapshot_t){.ready = true};
@@ -6752,10 +7380,10 @@ static void test_audio_preview_preemption_and_ring_error(lv_indev_t *pointer)
   assert(!find_visible_label(lv_screen_active(), "Action not sent. Try again."));
   assert(find_visible_label(lv_screen_active(), "Alarm ringing") == footer);
   alarm_submission_result = ESP_OK;
-  pointer_tap(pointer, visible_button("DISMISS"));
+  alarm_dismiss(pointer);
   runtime.alarm.phase = WAC_ALARM_IDLE;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
   swipe(pointer, 600, 200, 600, 400);
   assert(wac_ui_settings_view() == WAC_SETTINGS_SOUND_PICKER);
   assert(find_visible_label(lv_screen_active(), "Preview Sound"));
@@ -6912,6 +7540,593 @@ static void test_machine_clock_shortcut(lv_indev_t *pointer)
   }
 }
 
+static lv_obj_t *radar_view(void)
+{
+  lv_obj_t *empty = find_label(lv_screen_active(), "Radar unavailable.");
+  assert(empty);
+  return lv_obj_get_parent(empty);
+}
+
+typedef struct {
+  unsigned foreground, halo;
+  int radius;
+  lv_opa_t halo_opa;
+} radar_label_draw_check_t;
+
+static void radar_label_task_check(lv_event_t *event)
+{
+  lv_draw_task_t *task = lv_event_get_draw_task(event);
+  if (lv_draw_task_get_type(task) != LV_DRAW_TASK_TYPE_LABEL) return;
+  radar_label_draw_check_t *check = lv_event_get_user_data(event);
+  lv_obj_t *obj = lv_event_get_current_target(event);
+  const lv_draw_label_dsc_t *dsc = lv_draw_task_get_draw_dsc(task);
+  lv_area_t area, content;
+  lv_draw_task_get_area(task, &area);
+  lv_obj_get_content_coords(obj, &content);
+  assert(dsc->font == lv_obj_get_style_text_font(obj, 0));
+  assert(dsc->align == LV_TEXT_ALIGN_CENTER);
+  assert(!strcmp(dsc->text, lv_label_get_text(obj)));
+  bool halo = lv_color_eq(dsc->color, lv_obj_get_style_bg_color(obj, 0));
+  if (halo) {
+    ++check->halo;
+    assert(dsc->opa == LV_OPA_MIX2(LV_OPA_COVER, check->halo_opa));
+    assert(abs(area.x1 - content.x1) <= check->radius);
+    assert(abs(area.y1 - content.y1) <= check->radius);
+    assert(area.x1 != content.x1 || area.y1 != content.y1);
+  } else {
+    ++check->foreground;
+    assert(dsc->opa == LV_OPA_COVER);
+    assert(lv_color_eq(dsc->color, lv_obj_get_style_text_color(obj, 0)));
+    assert(area.x1 == content.x1 && area.y1 == content.y1);
+  }
+}
+
+static void test_radar_label_drawing(lv_obj_t *obj, int radius, lv_opa_t halo_opa)
+{
+  radar_label_draw_check_t check = {.radius = radius, .halo_opa = halo_opa};
+  lv_obj_add_flag(obj, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
+  lv_obj_add_event_cb(obj, radar_label_task_check, LV_EVENT_DRAW_TASK_ADDED, &check);
+  lv_obj_invalidate(obj);
+  lv_refr_now(NULL);
+  assert(check.foreground > 0 && check.halo == check.foreground * 8);
+  lv_obj_remove_event_cb(obj, radar_label_task_check);
+  lv_obj_remove_flag(obj, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
+}
+
+static void test_radar_header_layout(lv_obj_t *heading, lv_obj_t *stamp)
+{
+  const lv_font_t *font = lv_obj_get_style_text_font(heading, 0);
+  menu_box(heading, 205, 78 - (font->line_height - font->base_line), 390, font->line_height);
+  menu_box(stamp, 150, 114 - (wac_font_weather_18.line_height - wac_font_weather_18.base_line),
+    500, wac_font_weather_18.line_height);
+  assert(lv_obj_get_style_text_align(heading, 0) == LV_TEXT_ALIGN_CENTER);
+  assert(lv_obj_get_style_text_align(stamp, 0) == LV_TEXT_ALIGN_CENTER);
+  assert(lv_label_get_long_mode(heading) == LV_LABEL_LONG_MODE_DOTS);
+  const char *text = lv_label_get_text(heading);
+  lv_point_t text_size;
+  lv_text_get_size(&text_size, text, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  assert(!strchr(text, '\n') && text_size.x <= 390);
+  text = lv_label_get_text(stamp);
+  lv_text_get_size(&text_size, text, &wac_font_weather_18, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  assert(!strchr(text, '\n') && text_size.x <= 500);
+}
+
+static void test_radar_local_darkening(lv_obj_t *view)
+{
+  lv_display_t *display = lv_display_get_default();
+  lv_color_format_t previous_format = lv_display_get_color_format(display);
+  radar_test_pixels = calloc(800 * 800, sizeof(uint32_t));
+  assert(radar_test_pixels);
+  lv_display_set_color_format(display, LV_COLOR_FORMAT_XRGB8888);
+  lv_obj_invalidate(view);
+  lv_refr_now(display);
+  /* A fabricated flat map makes a ring, fade or footer shade observable.
+   * These are native software-renderer checks, not a real map/board image. */
+  static const int unshaded[][2] = {{400, 1}, {1, 400}, {798, 400},
+    {130, 650}, {670, 650}, {180, 679}, {235, 740}, {200, 720}, {600, 740}};
+  for (unsigned i = 0; i < sizeof(unshaded) / sizeof(unshaded[0]); ++i) {
+    int x = unshaded[i][0], y = unshaded[i][1];
+    assert((radar_test_pixels[y * 800 + x] & 0xffffff) == 0x7f7f7f);
+  }
+  /* The title/date have local dark pixels and visible foreground, entirely
+   * inside the physical circle, including the long-name fallback. */
+  unsigned dark = 0, foreground = 0;
+  for (int y = 35; y < 130; ++y) {
+    for (int x = 150; x < 650; ++x) {
+      uint32_t pixel = radar_test_pixels[y * 800 + x] & 0xffffff;
+      if (pixel == 0x7f7f7f) continue;
+      int dx = x - 400, dy = y - 400;
+      assert(dx * dx + dy * dy <= 400 * 400);
+      if ((pixel & 0xff) < 100 && ((pixel >> 8) & 0xff) < 100
+          && ((pixel >> 16) & 0xff) < 100) ++dark;
+      if (((pixel >> 16) & 0xff) > 180) ++foreground;
+    }
+  }
+  assert(dark > 100 && foreground > 100);
+  /* The abrupt green/yellow and yellow/red boundaries sit at equal thirds;
+   * this changes the key's layout without changing provider thresholds. */
+  uint32_t green = radar_test_pixels[679 * 800 + 327];
+  uint32_t yellow = radar_test_pixels[679 * 800 + 328];
+  uint32_t orange = radar_test_pixels[679 * 800 + 471];
+  uint32_t red = radar_test_pixels[679 * 800 + 472];
+  assert(((green >> 8) & 0xff) > ((green >> 16) & 0xff));
+  assert(((yellow >> 16) & 0xff) > 200 && ((yellow >> 8) & 0xff) > 200);
+  assert(((orange >> 16) & 0xff) > 200 && ((orange >> 8) & 0xff) > 100);
+  assert(((red >> 16) & 0xff) > 200 && ((red >> 8) & 0xff) < 100);
+  free(radar_test_pixels);
+  radar_test_pixels = NULL;
+  lv_display_set_color_format(display, previous_format);
+}
+
+static void test_radar_page(lv_indev_t *pointer)
+{
+  /* These fabricated provider snapshots check presentation and ownership only.
+   * Live coverage, PNG decoding and opaque map edges belong to client checks. */
+  device_config_t config;
+  app_runtime_state_t runtime;
+  alarm_fixture(&config, &runtime);
+  strcpy(config.default_clock_face, "digital");
+  strcpy(config.location, "Cincinnati, Ohio, US");
+  strcpy(config.latitude, "39.1031"); strcpy(config.longitude, "-84.5120");
+  strcpy(config.time_format, "12");
+  assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+  assert(!find_label(lv_screen_active(), "PRESSURE"));
+  assert(!find_image_source(lv_screen_active(), &conditions_wind_arrow));
+  lv_obj_t *view = radar_view();
+  lv_obj_t *map = lv_obj_get_child(view, 0);
+  lv_obj_t *marker = lv_obj_get_child(view, -1);
+  lv_obj_t *heading = find_label(view, "Cincinnati Radar");
+  lv_obj_t *stamp = lv_obj_get_child(view, 2);
+  assert(heading && lv_obj_check_type(stamp, &lv_label_class));
+  assert(!strcmp(lv_label_get_text(stamp), ""));
+  test_radar_header_layout(heading, stamp);
+  assert(!lv_image_get_src(map));
+  assert(lv_obj_has_flag(marker, LV_OBJ_FLAG_HIDDEN));
+  assert(!find_visible_label(lv_screen_active(), "RainViewer · USGS"));
+  swipe(pointer, 600, 200, 300, 200); /* Normal row: Forecast then Radar. */
+  assert(find_visible_label(lv_screen_active(), "Waiting for weather…"));
+  runtime.weather.valid = runtime.weather.has_conditions = true;
+  runtime.weather.conditions.alert = true; /* Mid-visit alert keeps this order. */
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  swipe(pointer, 600, 200, 300, 200);
+  assert(find_visible_label(view, "Radar unavailable."));
+  assert(!find_visible_label(view, "Light"));
+  swipe(pointer, 600, 200, 300, 200); /* Only two pages. */
+  assert(visible(view));
+  swipe(pointer, 300, 350, 600, 350);
+  assert(!visible(view));
+  swipe(pointer, 300, 350, 600, 350);
+  assert(find_visible_label(lv_screen_active(), "Friday"));
+  swipe(pointer, 600, 200, 300, 200); /* Alert applies on the next visit. */
+  assert(visible(view));
+  runtime.weather.conditions.alert = false;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  swipe(pointer, 600, 200, 300, 200); /* Clearing mid-visit keeps Radar first. */
+  assert(!visible(view));
+  swipe(pointer, 300, 350, 600, 350);
+  assert(visible(view));
+
+  uint8_t *pixels[2];
+  for (unsigned i = 0; i < 2; ++i) {
+    pixels[i] = calloc(APP_RADAR_WIDTH * APP_RADAR_HEIGHT, 4);
+    assert(pixels[i]);
+    for (unsigned p = 0; p < APP_RADAR_WIDTH * APP_RADAR_HEIGHT; ++p) {
+      pixels[i][p * 4] = pixels[i][p * 4 + 1] = pixels[i][p * 4 + 2] = 0x7f;
+      pixels[i][p * 4 + 3] = 255;
+    }
+  }
+  runtime.radar = (app_radar_snapshot_t){.valid = true, .generation = 1,
+    .frame_time = local_epoch(2026, 10, 13, 8, 20),
+    .latitude = 39.1031, .longitude = -84.5120, .pixels = pixels[0]};
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  const lv_image_dsc_t *source = lv_image_get_src(map);
+  assert(source && source->data == pixels[0]);
+  assert(source->header.cf == LV_COLOR_FORMAT_ARGB8888);
+  assert(source->header.w == APP_RADAR_WIDTH && source->header.h == APP_RADAR_HEIGHT);
+  assert(source->header.stride == APP_RADAR_WIDTH * 4);
+  assert(source->data_size == APP_RADAR_WIDTH * APP_RADAR_HEIGHT * 4);
+  menu_box(map, 0, 0, 800, 800);
+  menu_box(marker, 394, 394, 12, 12);
+  test_radar_header_layout(heading, stamp);
+  assert(!find_visible_label(view, "Radar unavailable."));
+  assert(!strcmp(lv_label_get_text(stamp), "Oct 13 · 8:20 AM UTC"));
+  assert(lv_obj_get_style_text_font(heading, 0) == &lv_font_montserrat_32);
+  assert(lv_obj_get_style_text_font(stamp, 0) == &wac_font_weather_18);
+  lv_font_glyph_dsc_t dot;
+  assert(lv_font_get_glyph_dsc(&wac_font_weather_18, &dot, 0xb7, 0));
+  assert(!dot.is_placeholder && dot.box_w > 0);
+  lv_obj_t *credit = find_visible_label(view, "RainViewer · USGS");
+  assert(credit);
+  menu_box(credit, 240, 731, 320, -1);
+  assert(lv_obj_get_style_text_font(credit, 0) == &wac_font_settings_24);
+  assert(find_visible_label(view, "Light") && find_visible_label(view, "Moderate")
+    && find_visible_label(view, "Heavy"));
+  /* Provider town names remain in the pixels; the two footer panels are gone. */
+  assert(!find_label(view, "Cincinnati") && lv_obj_get_child_count(view) == 10);
+  lv_obj_t *legend = lv_obj_get_child(view, 4);
+  menu_box(legend, 185, 674, 430, 12);
+  static const char *const legend_text[] = {"Light", "Moderate", "Heavy"};
+  static const int legend_x[] = {185, 328, 472};
+  static const int legend_width[] = {143, 144, 143};
+  for (unsigned i = 0; i < 3; ++i) {
+    lv_obj_t *label = find_visible_label(view, legend_text[i]);
+    menu_box(label, legend_x[i], 693, legend_width[i], -1);
+    assert(lv_obj_get_style_text_font(label, 0) == &wac_font_settings_24);
+    assert(lv_obj_get_style_text_align(label, 0) == LV_TEXT_ALIGN_CENTER);
+    assert(lv_obj_get_style_bg_opa(label, 0) == LV_OPA_TRANSP);
+  }
+  assert(lv_obj_get_style_bg_opa(credit, 0) == LV_OPA_TRANSP);
+  assert(lv_obj_get_style_bg_opa(heading, 0) == LV_OPA_TRANSP);
+  assert(lv_obj_get_style_bg_opa(stamp, 0) == LV_OPA_TRANSP);
+  uint32_t objects = lv_obj_get_child_count(view);
+  for (unsigned night = 0; night < 2; ++night) {
+    runtime.night_active = night;
+    runtime.radar.stale = true;
+    runtime.clock.usable = false; /* Provider time remains available. */
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(lv_image_get_src(map) == source && source->data == pixels[0]);
+    assert(!strcmp(lv_label_get_text(stamp), "Oct 13 · 8:20 AM UTC (Old)"));
+    menu_color(view, night ? 0x18090c : 0x07101c, true);
+    menu_color(heading, night ? 0xecc0c0 : 0xf5f8ff, false);
+    menu_color(stamp, night ? 0xc17a7a : 0xa6b6cf, false);
+    menu_color(credit, night ? 0xc17a7a : 0xa6b6cf, false);
+    menu_color(marker, night ? 0xe1b6b6 : 0x93d1ff, true);
+    test_radar_header_layout(heading, stamp);
+    test_radar_label_drawing(heading, 4, 179);
+    test_radar_label_drawing(stamp, 2, 191);
+    test_radar_local_darkening(view);
+    runtime.radar.generation = 0; /* Short owner-copy failure retains pixels. */
+    runtime.radar.valid = false;
+    runtime.radar.pixels = NULL;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(lv_image_get_src(map) == source && source->data == pixels[0]);
+    runtime.radar.valid = true; runtime.radar.pixels = pixels[0]; runtime.radar.generation = 1;
+  }
+  strcpy(config.time_format, "24");
+  wac_ui_apply_display(&config);
+  assert(!strcmp(lv_label_get_text(stamp), "Oct 13 · 08:20 UTC (Old)"));
+  for (unsigned i = 2; i < 10; ++i) {
+    runtime.radar.generation = i;
+    runtime.radar.pixels = pixels[i % 2];
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert(lv_image_get_src(map) == source && source->data == pixels[i % 2]);
+    assert(lv_obj_get_child_count(view) == objects);
+    lv_tick_inc(40); lv_timer_handler(); /* Exercise draw/cache use before replacement. */
+  }
+  runtime.radar.generation = 10;
+  runtime.radar.valid = false;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(!lv_image_get_src(map) && !source->data);
+  assert(find_visible_label(view, "Radar unavailable."));
+  assert(lv_obj_has_flag(marker, LV_OBJ_FLAG_HIDDEN));
+  assert(!find_visible_label(view, "Light") && !visible(legend));
+  assert(find_visible_label(view, "RainViewer · USGS"));
+  assert(!strcmp(lv_label_get_text(stamp), ""));
+  runtime.radar.valid = true;
+  runtime.radar.generation = 11;
+  strcpy(config.location, "Columbus, Ohio, US");
+  strcpy(config.latitude, "39.9612"); strcpy(config.longitude, "-82.9988");
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(!lv_image_get_src(map)); /* Old location cannot become the new town map. */
+  assert(!strcmp(lv_label_get_text(heading), "Columbus Radar"));
+  strcpy(config.location, "Nashville-Davidson metropolitan government, Tennessee, US");
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  test_radar_header_layout(heading, stamp);
+  const char *long_title = lv_label_get_text(heading);
+  assert(strncmp(long_title, "Nashville-Davidson", 18) == 0);
+  assert(strlen(long_title) >= 3 && !strcmp(long_title + strlen(long_title) - 3, "..."));
+  assert(lv_obj_get_style_text_font(heading, 0) == &lv_font_montserrat_24);
+  runtime.radar.latitude = 39.9612; runtime.radar.longitude = -82.9988;
+  runtime.radar.generation = 12;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(lv_image_get_src(map) == source);
+  for (unsigned night = 0; night < 2; ++night) {
+    runtime.night_active = night;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    test_radar_header_layout(heading, stamp);
+    test_radar_local_darkening(view);
+  }
+  runtime.alarm.phase = WAC_ALARM_RINGING;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(find_visible_label(lv_screen_active(), "Alarm ringing") && !visible(view));
+  assert(source->data == runtime.radar.pixels); /* Hidden map still owns a reference. */
+  runtime.radar.valid = false; runtime.radar.generation = 13;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(!lv_image_get_src(map) && !source->data); /* Detach under alarm, before ack. */
+  swipe(pointer, 600, 200, 300, 200);
+  assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
+  assert(!find_label(lv_screen_active(), "PRESSURE"));
+  free(pixels[0]); free(pixels[1]);
+}
+
+static void test_radar_country_eligibility(lv_indev_t *pointer)
+{
+  /* Real place labels are supplied as constructed owner input here. No live
+   * location lookup or provider availability is implied by these fixtures. */
+  static const struct { const char *label; bool ready; } disabled[] = {
+    {"Paris, Île-de-France, FR", true},
+    {"Toronto, Ontario, CA", true},
+    {"Cincinnati, Ohio", true},
+    {"Cincinnati, Ohio, USA", true},
+    {"Cincinnati, Ohio, US", false},
+    {"", false},
+  };
+  device_config_t config;
+  app_runtime_state_t runtime;
+  for (unsigned i = 0; i < sizeof(disabled) / sizeof(disabled[0]); ++i) {
+    alarm_fixture(&config, &runtime);
+    strcpy(config.location, disabled[i].label);
+    config.location_ready = disabled[i].ready;
+    runtime.weather.valid = runtime.weather.has_conditions = true;
+    runtime.weather.conditions.alert = true;
+    assert(app_ui_show_boot_screen(&config, &runtime, false) == ESP_OK);
+    assert(!find_label(lv_screen_active(), "Radar unavailable."));
+    assert(!find_label(lv_screen_active(), "RainViewer · USGS"));
+    assert(visible_image_count(lv_screen_active(), &conditions_edge_indicator) == 1);
+    swipe(pointer, 600, 200, 300, 200); /* An alert's sole destination is Forecast. */
+    assert(find_visible_label(lv_screen_active(), "--"));
+    swipe(pointer, 600, 200, 300, 200); /* No empty or unavailable second page. */
+    assert(find_visible_label(lv_screen_active(), "--"));
+    assert(!find_label(lv_screen_active(), "Radar unavailable."));
+    swipe(pointer, 300, 350, 600, 350);
+    assert(find_visible_label(lv_screen_active(), "Friday"));
+    assert(!find_label(lv_screen_active(), "PRESSURE"));
+  }
+
+  alarm_fixture(&config, &runtime);
+  strcpy(config.location, "Cincinnati, Ohio, us ");
+  strcpy(config.latitude, "39.1031"); strcpy(config.longitude, "-84.5120");
+  runtime.weather.valid = runtime.weather.has_conditions = true;
+  runtime.weather.conditions.alert = true;
+  uint8_t *pixels = calloc(APP_RADAR_WIDTH * APP_RADAR_HEIGHT, 4);
+  assert(pixels);
+  runtime.radar = (app_radar_snapshot_t){.valid = true, .generation = 1,
+    .frame_time = local_epoch(2026, 10, 13, 8, 20),
+    .latitude = 39.1031, .longitude = -84.5120, .pixels = pixels};
+  assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+  lv_obj_t *view = radar_view();
+  const lv_image_dsc_t *source = lv_image_get_src(lv_obj_get_child(view, 0));
+  assert(source && source->data == pixels);
+  swipe(pointer, 600, 200, 300, 200);
+  assert(visible(view));
+  /* Country takes precedence over a held alert-first row, including when
+   * coordinates have not changed yet in the supplied configuration. */
+  strcpy(config.location, "Toronto, Ontario, CA");
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(!source->data);
+  assert(!find_label(lv_screen_active(), "Radar unavailable."));
+  assert(find_visible_label(lv_screen_active(), "--"));
+  swipe(pointer, 600, 200, 300, 200);
+  assert(find_visible_label(lv_screen_active(), "--"));
+  swipe(pointer, 300, 350, 600, 350);
+  assert(find_visible_label(lv_screen_active(), "Friday"));
+
+  runtime.radar = (app_radar_snapshot_t){0}; /* Copy failure cannot restore old pixels. */
+  strcpy(config.location, "Cincinnati, Ohio, US");
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  view = radar_view();
+  assert(!lv_image_get_src(lv_obj_get_child(view, 0)));
+  swipe(pointer, 600, 200, 300, 200);
+  assert(find_visible_label(view, "Radar unavailable."));
+  runtime.radar = (app_radar_snapshot_t){.valid = true, .generation = 2,
+    .frame_time = local_epoch(2026, 10, 13, 8, 20),
+    .latitude = 39.1031, .longitude = -84.5120, .pixels = pixels};
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  source = lv_image_get_src(lv_obj_get_child(view, 0));
+  assert(source && source->data == pixels);
+  runtime.alarm.phase = WAC_ALARM_RINGING;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(!visible(view));
+  strcpy(config.location, "Paris, Île-de-France, FR");
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(!source->data && !find_label(lv_screen_active(), "Radar unavailable."));
+  assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
+  strcpy(config.location, "Cincinnati, Ohio, US");
+  runtime.radar = (app_radar_snapshot_t){0};
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(!visible(radar_view()));
+  assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
+  alarm_dismiss(pointer);
+  runtime.alarm.phase = WAC_ALARM_IDLE;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
+  assert(find_visible_label(lv_screen_active(), "Friday"));
+  swipe(pointer, 600, 200, 300, 200);
+  assert(find_visible_label(lv_screen_active(), "Radar unavailable."));
+  swipe(pointer, 600, 200, 300, 200); /* Recreated below the gesture layer. */
+  assert(find_visible_label(lv_screen_active(), "--"));
+  swipe(pointer, 300, 350, 600, 350);
+  assert(find_visible_label(lv_screen_active(), "Radar unavailable."));
+  /* Also detach a displayed buffer hidden by an ordinary Forecast visit. */
+  runtime.radar = (app_radar_snapshot_t){.valid = true, .generation = 3,
+    .frame_time = local_epoch(2026, 10, 13, 8, 20),
+    .latitude = 39.1031, .longitude = -84.5120, .pixels = pixels};
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  source = lv_image_get_src(lv_obj_get_child(radar_view(), 0));
+  assert(source && source->data == pixels);
+  swipe(pointer, 600, 200, 300, 200);
+  strcpy(config.location, "Cincinnati, Ohio");
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  assert(!source->data && !find_label(lv_screen_active(), "Radar unavailable."));
+  swipe(pointer, 300, 350, 600, 350);
+  assert(find_visible_label(lv_screen_active(), "Friday"));
+  free(pixels);
+}
+
+static void test_clock_palette_refresh(void)
+{
+  fake_nvs_reset();
+  assert(device_config_init() == ESP_OK);
+  device_config_t config;
+  assert(device_config_copy(&config) == ESP_OK);
+  config.location_ready = true;
+  fake_nvs_clear_activity();
+  lv_display_t *display = lv_display_get_default();
+  for (unsigned scenario = 0; scenario < 4; ++scenario) {
+    bool analog = scenario / 2;
+    bool initial_night = scenario % 2;
+    snprintf(config.default_clock_face, sizeof(config.default_clock_face), "%s",
+      analog ? "analog" : "digital");
+    app_runtime_state_t runtime = {0};
+    runtime.clock.usable = true;
+    runtime.clock.source = WAC_TIME_SOURCE_NETWORK;
+    runtime.clock.utc_now = local_epoch(2026, 10, 16, 7, 6);
+    runtime.night_active = initial_night;
+    runtime.weather.valid = true;
+    runtime.weather.temp = 63;
+    strcpy(runtime.weather.icon_name, "cloudy");
+    assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+    lv_obj_t *tick = find_widget(lv_screen_active(), &lv_line_class);
+    lv_obj_t *icon = find_image_source(lv_screen_active(), &test_forecast_cloudy);
+    assert(tick && icon);
+    /* Each rebuild must apply its first Day or Night palette. */
+    assert(lv_color_eq(lv_obj_get_style_line_color(tick, 0),
+      lv_color_hex(initial_night ? 0xe0acac : 0xf4f8ff)));
+    assert(lv_obj_get_style_line_opa(tick, 0) == (initial_night ? 64 : LV_OPA_80));
+    lv_display_add_event_cb(display, count_ui_invalidations, LV_EVENT_INVALIDATE_AREA, NULL);
+    for (unsigned step = 0; step < 3; ++step) {
+      bool night = step == 1 ? !initial_night : initial_night;
+      runtime.night_active = night;
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      assert(lv_color_eq(lv_obj_get_style_line_color(tick, 0),
+        lv_color_hex(night ? 0xe0acac : 0xf4f8ff)));
+      assert(lv_obj_get_style_line_opa(tick, 0) == (night ? 64 : LV_OPA_80));
+      ui_invalidations = 0;
+      wac_clock_apply_night(night);
+      assert(ui_invalidations == 0);
+      /* Availability and stale notices still change without a palette change. */
+      wac_clock_update_weather(NULL);
+      assert(lv_obj_has_flag(icon, LV_OBJ_FLAG_HIDDEN));
+      wac_clock_apply_night(night);
+      assert(lv_obj_has_flag(icon, LV_OBJ_FLAG_HIDDEN));
+      wac_clock_update_weather(&runtime.weather);
+      assert(!lv_obj_has_flag(icon, LV_OBJ_FLAG_HIDDEN));
+      wac_clock_update_weather_notice("Weather data stale");
+      assert((find_visible_label(lv_screen_active(), "Weather data stale") != NULL) == !night);
+      wac_clock_apply_night(night);
+      assert((find_visible_label(lv_screen_active(), "Weather data stale") != NULL) == !night);
+      wac_clock_update_weather_notice("");
+      assert(!find_visible_label(lv_screen_active(), "Weather data stale"));
+    }
+    lv_display_remove_event_cb_with_user_data(display, count_ui_invalidations, NULL);
+  }
+  assert(fake_nvs_calls(FAKE_SET) == 0);
+}
+
+static void test_unchanged_render_updates(void)
+{
+  device_config_t config;
+  app_runtime_state_t runtime;
+  alarm_fixture(&config, &runtime);
+  strcpy(config.default_clock_face, "digital");
+  strcpy(config.location, "Cincinnati, Ohio, US");
+  strcpy(config.latitude, "39.1031");
+  strcpy(config.longitude, "-84.5120");
+  timed_conditions_fixture(&runtime.weather, false);
+  assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+  lv_display_t *display = lv_display_get_default();
+  lv_display_add_event_cb(display, count_ui_invalidations, LV_EVENT_INVALIDATE_AREA, NULL);
+  struct tm calendar;
+  assert(localtime_r(&runtime.clock.utc_now, &calendar));
+  for (unsigned night = 0; night < 2; ++night) {
+    runtime.night_active = night;
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t *time = find_visible_label(lv_screen_active(), "7:06");
+    assert(time);
+    lv_area_t before, after;
+    lv_obj_get_coords(time, &before);
+    ui_invalidations = 0;
+    wac_clock_update_time(&config, &calendar, night);
+    wac_clock_update_weather(&runtime.weather);
+    assert(ui_invalidations == 0);
+    lv_obj_get_coords(time, &after);
+    assert(!memcmp(&before, &after, sizeof(before)));
+    if (!night) {
+      strcpy(runtime.weather.icon_name, "rain");
+      wac_clock_update_weather(&runtime.weather);
+      assert(ui_invalidations > 0);
+      assert(lv_image_get_src(forecast_image(lv_screen_active(), 200)) == &test_forecast_rain);
+      strcpy(runtime.weather.icon_name, "cloudy");
+      wac_clock_update_weather(&runtime.weather);
+    }
+
+    wac_clock_set_visible(false, false, true);
+    wac_weather_set_visible(true, false, false);
+    wac_weather_apply_night(&runtime.weather, false, night);
+    lv_obj_t *frame = find_image_source(lv_screen_active(), night
+      ? &forecast_tomorrow_frame_night : &forecast_tomorrow_frame_day);
+    assert(frame && visible(frame));
+    lv_obj_t *icon = find_image_source(lv_obj_get_parent(frame), &test_forecast_cloudy);
+    assert(icon && lv_obj_get_style_opa(icon, 0) == (night ? LV_OPA_80 : LV_OPA_COVER));
+    ui_invalidations = 0;
+    wac_weather_apply_night(&runtime.weather, false, night);
+    wac_weather_update(&runtime.weather, &calendar, false);
+    assert(ui_invalidations == 0);
+    runtime.weather.valid = false;
+    wac_weather_apply_night(&runtime.weather, false, night);
+    assert(lv_obj_get_style_opa(icon, 0) == LV_OPA_TRANSP);
+    assert(find_visible_label(lv_screen_active(), "Waiting for weather…"));
+    runtime.weather.valid = true;
+    wac_weather_apply_night(&runtime.weather, false, night);
+    assert(lv_obj_get_style_opa(icon, 0) == (night ? LV_OPA_80 : LV_OPA_COVER));
+    assert(!find_visible_label(lv_screen_active(), "Waiting for weather…"));
+    runtime.weather.stale = true;
+    wac_weather_update_status(&runtime.weather, night, WAC_WEATHER_SURFACE_FORECAST, "");
+    ui_invalidations = 0;
+    wac_weather_update_status(&runtime.weather, night, WAC_WEATHER_SURFACE_FORECAST, "");
+    assert(ui_invalidations == 0);
+    runtime.weather.stale = false;
+
+    wac_weather_update_status(&runtime.weather, night, WAC_WEATHER_SURFACE_FORECAST, "");
+    wac_weather_set_visible(false, false, true);
+    lv_obj_t *title = find_visible_label(lv_screen_active(), "Message");
+    assert(title);
+    wac_weather_apply_night(&runtime.weather, true, night);
+    menu_color(title, night ? 0xecc0c0 : 0xf6d6b1, false);
+    ui_invalidations = 0;
+    wac_weather_apply_night(&runtime.weather, true, night);
+    assert(ui_invalidations == 0);
+    wac_weather_apply_night(&runtime.weather, false, night);
+    assert(lv_color_eq(lv_obj_get_style_text_color(title, 0), night
+      ? wac_ui_color_night_primary() : wac_ui_color_text_primary()));
+  }
+
+  wac_weather_set_radar_enabled(lv_screen_active(), true);
+  uint8_t *pixels = calloc(APP_RADAR_WIDTH * APP_RADAR_HEIGHT, 4);
+  assert(pixels);
+  app_radar_snapshot_t radar = {.valid = true, .generation = 1,
+    .frame_time = runtime.clock.utc_now, .latitude = 39.1031, .longitude = -84.5120,
+    .pixels = pixels};
+  wac_weather_update_radar(&radar, &config, false);
+  wac_weather_set_visible(false, true, false);
+  lv_obj_t *view = radar_view();
+  lv_obj_t *image = lv_obj_get_child(view, 0);
+  const lv_image_dsc_t *source = lv_image_get_src(image);
+  assert(source && source->data == pixels);
+  lv_obj_update_layout(lv_screen_active());
+  ui_invalidations = 0;
+  wac_weather_update_radar(&radar, &config, false);
+  assert(ui_invalidations == 0);
+  /* A new publication must invalidate even when its descriptor and pixels
+   * reuse their addresses. Immutable-asset equality must not suppress it. */
+  ++radar.generation;
+  pixels[0] = 255;
+  wac_weather_update_radar(&radar, &config, false);
+  assert(ui_invalidations > 0 && lv_image_get_src(image) == source);
+  assert(source->data == pixels && source->data[0] == 255);
+  wac_weather_update_radar(&radar, &config, true);
+  menu_color(find_label(view, "Cincinnati Radar"), 0xecc0c0, false);
+  wac_weather_set_radar_enabled(lv_screen_active(), false);
+  wac_weather_set_radar_enabled(lv_screen_active(), true);
+  wac_weather_update_radar(&radar, &config, true);
+  view = radar_view();
+  menu_color(find_label(view, "Cincinnati Radar"), 0xecc0c0, false);
+  wac_weather_set_radar_enabled(lv_screen_active(), false);
+  free(pixels);
+  lv_display_remove_event_cb_with_user_data(display, count_ui_invalidations, NULL);
+}
+
 static void test_indicator_pulses(void)
 {
   fake_nvs_reset();
@@ -7052,7 +8267,7 @@ int main(int argc, char **argv)
   lv_init();
   menu_keyboard_assets();
   lv_display_t *display = lv_display_create(800, 800);
-  static uint8_t buffer[800 * 32 * 4];
+  _Alignas(4) static uint8_t buffer[800 * 32 * 4];
   lv_display_set_buffers(display, buffer, NULL, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_set_flush_cb(display, flush);
   lv_indev_t *pointer = lv_indev_create();
@@ -7066,6 +8281,7 @@ int main(int argc, char **argv)
     }
   } else {
     assert(argc == 1);
+    test_retained_conditions_renderer();
     test_provider_forecast_dates(pointer);
     test_weather_screen_transitions(pointer);
     test_retained_weather_age(pointer);
@@ -7079,6 +8295,7 @@ int main(int argc, char **argv)
     test_settings_runtime_solar(pointer);
     test_first_use_boot(pointer);
     test_alarm_ringing_snoozed_surfaces(pointer);
+    test_alarm_slide_input_and_lifetime(pointer);
     test_alarm_caption_unavailable_and_formats(pointer);
     test_alarm_navigation_preemption_and_completion(pointer);
     test_brightness_alarm_restore(pointer);
@@ -7089,6 +8306,10 @@ int main(int argc, char **argv)
     test_alarm_preempts_pending_settings(pointer);
     test_audio_preview_preemption_and_ring_error(pointer);
     test_machine_clock_shortcut(pointer);
+    test_radar_page(pointer);
+    test_radar_country_eligibility(pointer);
+    test_clock_palette_refresh();
+    test_unchanged_render_updates();
     test_indicator_pulses();
     assert(settings_restart_count == 0);
     test_weather_restart_after_alarm_replaces_editor(pointer);

@@ -15,9 +15,25 @@
 
 /* Compile the actual decoder here so its private normalization can be checked
  * without a firmware test interface or a copied decoding implementation. */
+static size_t radar_fail_alloc_size;
+static unsigned radar_failed_allocations;
+static void *radar_test_malloc(size_t size)
+{
+  if (radar_fail_alloc_size && size==radar_fail_alloc_size) {
+    radar_fail_alloc_size=0;
+    ++radar_failed_allocations;
+    return NULL;
+  }
+  return malloc(size);
+}
+#define malloc radar_test_malloc
 #define TAG native_weather_client_tag
 #include "../main/weather_client.c"
 #undef TAG
+#undef malloc
+
+_Static_assert(LODEPNG_MAX_ALLOC==RADAR_PNG_ALLOC_MAX,
+  "Native LodePNG must enforce the firmware allocation cap");
 
 /* Controlled provider and platform responses exercise the actual decoder and
  * worker. These examples do not establish live network or board behavior. */
@@ -66,9 +82,18 @@ static char *make_conditions_response(void)
 
 static device_config_t applied_config;
 static const char *http_body;
+static bool radar_http_test;
+static const unsigned char *radar_base_png, *radar_echo_png;
+static size_t radar_base_png_size, radar_echo_png_size;
+static const char *radar_metadata_body;
+static const char *radar_saved_directory, *radar_saved_sample;
+static unsigned char *radar_saved_tile;
+static unsigned radar_image_requests, radar_base_requests;
+static unsigned char *radar_read_binary(const char *path, size_t *size);
+static size_t http_binary_length;
 static esp_http_client_config_t http_config;
 static unsigned http_requests, http_cleanups;
-static TickType_t request_ticks[256], sync_ticks[64];
+static TickType_t request_ticks[256], sync_ticks[256];
 static unsigned request_durations_ms[256];
 static esp_err_t request_results[256];
 static int http_status;
@@ -82,7 +107,8 @@ static bool wifi_connected, actual_time_synced;
 static wac_time_snapshot_t download_clock;
 static esp_err_t wifi_init_result, wifi_wait_result;
 static unsigned delay_count, delay_limit;
-static TickType_t delays[64];
+static TickType_t delays[256];
+static TickType_t worker_stop_ms;
 static jmp_buf worker_finished;
 static void (*on_delay)(void);
 static void (*on_request)(void);
@@ -149,6 +175,33 @@ esp_err_t esp_crt_bundle_attach(void *config)
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *config)
 {
   assert(config && config->event_handler && config->user_data);
+  if (radar_http_test && config->url && !strstr(config->url,"api.open-meteo.com")) {
+    assert(config->user_agent && strstr(config->user_agent,"ESP32-P4"));
+    if (strstr(config->url,"weather-maps.json")) http_body=radar_metadata_body;
+    else {
+      bool base=strstr(config->url,"basemap.nationalmap.gov")!=NULL;
+      assert(base || strstr(config->url,"tilecache.rainviewer.com"));
+      assert(base || strstr(config->url,"/256/7/")!=NULL);
+      assert(base || strstr(config->url,"/2/0_0.png")!=NULL);
+      assert(!base || (strstr(config->url,"size=800,800") && strstr(config->url,"format=png32")));
+      if (base) ++radar_base_requests;
+      else if (radar_saved_directory) {
+        int x=-1,y=-1;const char *tile=strstr(config->url,"/256/7/");
+        assert(tile && sscanf(tile,"/256/7/%d/%d/2/0_0.png",&x,&y)==2);
+        char path[1024];
+        snprintf(path,sizeof(path),"%s/rainviewer-%s-z7-%d-%d.png",radar_saved_directory,radar_saved_sample,x,y);
+        free(radar_saved_tile);
+        radar_saved_tile=radar_read_binary(path,&radar_echo_png_size);
+        radar_echo_png=radar_saved_tile;
+      }
+      ++radar_image_requests;
+      http_body=(const char *)(base ? radar_base_png : radar_echo_png);
+      http_binary_length=base ? radar_base_png_size : radar_echo_png_size;
+    }
+    assert(config->timeout_ms==(strstr(config->url,"basemap.nationalmap.gov") ? 30000 : 10000));
+    http_config=*config;
+    return &http_config;
+  }
   if (applied_config.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING || config->host) {
     assert(config->url == NULL);
     assert(strcmp(config->host, "weather.visualcrossing.com") == 0);
@@ -200,7 +253,8 @@ esp_err_t esp_http_client_perform(esp_http_client_handle_t handle)
     assert(http_config.event_handler(&header)==ESP_OK);
   }
   /* Deliberately split the body, exercising the production response buffer. */
-  size_t length = strlen(http_body), split = length / 3;
+  size_t length = http_binary_length ? http_binary_length : strlen(http_body), split = length / 3;
+  http_binary_length=0;
   esp_http_client_event_t event = {
     .event_id = HTTP_EVENT_ON_DATA,
     .data = (void *) http_body,
@@ -233,14 +287,87 @@ void vTaskDelay(TickType_t ticks)
   assert(delay_count < sizeof(delays) / sizeof(delays[0]));
   delays[delay_count++] = ticks;
   if (on_delay) on_delay();
-  if (delay_count == delay_limit) longjmp(worker_finished, 1);
+  if ((delay_limit && delay_count == delay_limit) ||
+      (worker_stop_ms && xTaskGetTickCount() >= worker_stop_ms))
+    longjmp(worker_finished, 1);
   fake_clock_advance(ticks);
 }
 
+/* Worker scheduling uses a narrow step substitute for bounded-duration Radar
+ * work. The actual client, HTTP/PNG path and slot barrier are checked below;
+ * the worker itself is always extracted from production main.c. */
+static bool worker_radar_step(const device_config_t *, weather_radar_step_t, uint32_t,
+                              app_radar_snapshot_t *, bool *);
+#define weather_client_radar_step worker_radar_step
 /* Generated from main.c by the native build. The decoder is separately
  * compiled from weather_client.c; neither production implementation is copied
  * into this maintained test. */
 #include "weather_service_task.inc"
+#undef weather_client_radar_step
+
+enum { RADAR_REAL_CLIENT, RADAR_IDLE_STEPS, RADAR_BUSY_STEPS, RADAR_PENDING_COPY,
+       RADAR_RETAINED_FRAME, RADAR_INTERRUPTED_FRAME };
+static const uint8_t worker_radar_pixel[4] = {20, 30, 40, 255};
+static unsigned worker_radar_mode, worker_radar_calls, worker_radar_starts;
+static unsigned worker_radar_previous_delay;
+static TickType_t worker_radar_ticks[256], worker_radar_start_ticks[256];
+static uint32_t worker_radar_acknowledged[256];
+static weather_radar_step_t worker_radar_actions[256];
+static SemaphoreHandle_t held_runtime_mutex;
+
+static bool worker_radar_step(const device_config_t *config, weather_radar_step_t action, uint32_t displayed,
+                              app_radar_snapshot_t *out, bool *active)
+{
+  if (worker_radar_mode == RADAR_REAL_CLIENT)
+    return weather_client_radar_step(config, action, displayed, out, active);
+  assert(worker_radar_calls < 256 && worker_radar_starts < 256);
+  if (worker_radar_calls) assert(delay_count > worker_radar_previous_delay);
+  worker_radar_previous_delay = delay_count;
+  worker_radar_ticks[worker_radar_calls] = xTaskGetTickCount();
+  worker_radar_actions[worker_radar_calls] = action;
+  worker_radar_acknowledged[worker_radar_calls++] = displayed;
+  if (action==WEATHER_RADAR_CHECK) worker_radar_start_ticks[worker_radar_starts++] = xTaskGetTickCount();
+  if (worker_radar_mode == RADAR_RETAINED_FRAME ||
+      worker_radar_mode == RADAR_INTERRUPTED_FRAME) {
+    /* Constructed client replies only: production owns when CHECK/OFFLINE is
+     * called. Actual client preservation and cancellation are tested below. */
+    if (action == WEATHER_RADAR_OFFLINE) {
+      *active = false;
+      if (out->stale) return false;
+      out->stale = true;
+      ++out->generation;
+      return true;
+    }
+    assert(action == WEATHER_RADAR_CHECK);
+    *out = (app_radar_snapshot_t){ .valid = true, .generation = 1,
+      .frame_time = 1700000000, .pixels = worker_radar_pixel };
+    *active = worker_radar_mode == RADAR_INTERRUPTED_FRAME;
+    return true;
+  }
+  if (action==WEATHER_RADAR_OFFLINE) { *active=false; return false; }
+  *active = worker_radar_mode != RADAR_IDLE_STEPS;
+  if (worker_radar_mode == RADAR_BUSY_STEPS) {
+    /* A near-timeout request per turn represents a slow image preparation.
+     * Work due at this boundary must already have run before the next step. */
+    TickType_t now = xTaskGetTickCount();
+    if (now == 20000 || now == 40000) assert(sync_ticks[sync_calls - 1] == now);
+    if (now == 600000) assert(http_requests == 2 && request_ticks[1] == now);
+    fake_clock_advance(9900);
+  }
+  if (worker_radar_mode == RADAR_PENDING_COPY && worker_radar_calls == 1) {
+    *out = (app_radar_snapshot_t){ .generation = 77, .frame_time = 1700000000 };
+    /* A missing runtime mutex makes the actual publication helper decline
+     * the copy, without changing native mutex timeout behavior. */
+    held_runtime_mutex = s_runtime_mutex;
+    s_runtime_mutex = NULL;
+    return true;
+  }
+  if (worker_radar_mode == RADAR_PENDING_COPY) {
+    assert(s_runtime_state.radar.generation == 77);
+    assert(s_runtime_state.radar.frame_time == 1700000000);
+  }
+  return false;
+}
 
 static void reset_platform(void)
 {
@@ -258,6 +385,7 @@ static void reset_platform(void)
   http_status = 200;
   retry_header = reset_header = date_header = NULL;
   expect_max_encoded_key=false;
+  radar_http_test=false; http_binary_length=0;
   memset(request_results, 0, sizeof(request_results));
   memset(request_durations_ms, 0, sizeof(request_durations_ms));
   memset(request_ticks, 0, sizeof(request_ticks));
@@ -265,6 +393,11 @@ static void reset_platform(void)
   memset(delays, 0, sizeof(delays));
   http_requests = http_cleanups = sync_calls = sync_failures = wifi_init_calls = 0;
   delay_count = clock_polls = 0;
+  delay_limit = 0; worker_stop_ms = 0;
+  s_radar_displayed_generation = 0;
+  worker_radar_mode = RADAR_REAL_CLIENT;
+  worker_radar_calls = worker_radar_starts = worker_radar_previous_delay = 0;
+  held_runtime_mutex = NULL;
   wifi_connected = true;
   wifi_init_result = wifi_wait_result = ESP_OK;
   actual_time_synced = false;
@@ -433,14 +566,129 @@ static void run_worker(unsigned stop_after_delays)
   assert(clock_polls == 0); /* Actual synchronization belongs to clock_control_task. */
 }
 
+/* Stop after processing the turn at a real elapsed deadline. Radar may add
+ * intermediate wakeups; the observable forecast and retry times stay exact. */
+static void run_worker_until(TickType_t stop_ms)
+{
+  delay_limit = 0;
+  worker_stop_ms = stop_ms;
+  if (setjmp(worker_finished) == 0) weather_service_task(NULL);
+  assert(xTaskGetTickCount() == stop_ms);
+  assert(http_requests == http_cleanups && clock_polls == 0);
+}
+
+static void move_wall_clock_on_radar_wake(void)
+{
+  if (xTaskGetTickCount() == 300000) fake_clock_set(100); /* A backward clock correction. */
+}
+
+static void resume_radar_publication(void)
+{
+  assert(worker_radar_calls == 1 && s_runtime_state.radar.generation == 0);
+  assert(s_radar_displayed_generation == 0); /* Publication never acknowledges display. */
+  if (delay_count == 2) {
+    s_runtime_mutex = held_runtime_mutex;
+    held_runtime_mutex = NULL;
+    s_radar_displayed_generation = 77; /* Controlled UI replacement acknowledgment. */
+    on_delay = NULL;
+  }
+}
+
+static void check_worker_radar_schedule(void)
+{
+  reset_platform();
+  worker_radar_mode = RADAR_IDLE_STEPS;
+  on_delay = move_wall_clock_on_radar_wake;
+  run_worker_until(600000);
+  assert(worker_radar_calls == 3 && worker_radar_starts == 3);
+  assert(worker_radar_start_ticks[0] == 0 && worker_radar_start_ticks[1] == 300000 &&
+         worker_radar_start_ticks[2] == 600000);
+  assert(http_requests == 2 && request_ticks[0] == 0 && request_ticks[1] == 600000);
+
+  reset_platform();
+  sync_failures = 2;
+  worker_radar_mode = RADAR_BUSY_STEPS;
+  run_worker(61);
+  assert(worker_radar_calls == 61 && worker_radar_starts == 1);
+  assert(worker_radar_ticks[0] == 0 && worker_radar_ticks[60] == 600000);
+  assert(sync_ticks[0] == 0 && sync_ticks[1] == 20000 && sync_ticks[2] == 40000);
+  assert(http_requests == 2 && request_ticks[1] == 600000);
+  for (unsigned i = 0; i < delay_count; ++i) assert(delays[i] == 100);
+
+  reset_platform();
+  worker_radar_mode = RADAR_PENDING_COPY;
+  on_delay = resume_radar_publication;
+  run_worker(3);
+  assert(held_runtime_mutex == NULL && worker_radar_calls == 2);
+  assert(worker_radar_ticks[0] == 0 && worker_radar_ticks[1] == 200);
+  assert(worker_radar_acknowledged[0] == 0 && worker_radar_acknowledged[1] == 77);
+  assert(s_runtime_state.radar.generation == 77);
+}
+
+static void lose_worker_radar_connection(void)
+{
+  assert(s_runtime_state.radar.valid);
+  assert(s_runtime_state.radar.pixels == worker_radar_pixel);
+  assert(s_runtime_state.radar.frame_time == 1700000000);
+  if (delay_count == 1) {
+    assert(!s_runtime_state.radar.stale);
+    wifi_connected = false;
+    wifi_wait_result = ESP_ERR_TIMEOUT;
+  } else assert(s_runtime_state.radar.stale);
+}
+
+static void allow_first_worker_radar_connection(void)
+{
+  if (xTaskGetTickCount() <= 20000) {
+    assert(worker_radar_calls == 0 && !s_runtime_state.radar.valid && http_requests == 0);
+    if (xTaskGetTickCount() == 20000) wifi_wait_result = ESP_OK;
+  }
+}
+
+static void check_worker_radar_offline(void)
+{
+  reset_platform();
+  worker_radar_mode = RADAR_RETAINED_FRAME;
+  on_delay = lose_worker_radar_connection;
+  run_worker_until(900000);
+  assert(worker_radar_calls == 4 && worker_radar_starts == 1);
+  assert(worker_radar_actions[0] == WEATHER_RADAR_CHECK && worker_radar_ticks[0] == 0);
+  for (unsigned i = 1; i < worker_radar_calls; ++i) {
+    assert(worker_radar_actions[i] == WEATHER_RADAR_OFFLINE);
+    assert(worker_radar_ticks[i] == i * 300000);
+  }
+  assert(s_runtime_state.radar.stale && s_runtime_state.radar.generation == 2);
+  assert(http_requests == 1 && request_ticks[0] == 0); /* No HTTP while offline. */
+
+  reset_platform();
+  worker_radar_mode = RADAR_INTERRUPTED_FRAME;
+  on_delay = lose_worker_radar_connection;
+  run_worker_until(20100);
+  assert(worker_radar_calls == 2 && worker_radar_starts == 1);
+  assert(worker_radar_actions[0] == WEATHER_RADAR_CHECK && worker_radar_ticks[0] == 0);
+  assert(worker_radar_actions[1] == WEATHER_RADAR_OFFLINE && worker_radar_ticks[1] == 100);
+  assert(s_runtime_state.radar.stale && http_requests == 1);
+
+  reset_platform();
+  worker_radar_mode = RADAR_RETAINED_FRAME;
+  wifi_connected = false;
+  wifi_wait_result = ESP_ERR_TIMEOUT;
+  on_delay = allow_first_worker_radar_connection;
+  run_worker_until(40000);
+  assert(worker_radar_calls == 1 && worker_radar_starts == 1);
+  assert(worker_radar_actions[0] == WEATHER_RADAR_CHECK && worker_radar_ticks[0] == 40000);
+  assert(s_runtime_state.radar.valid && !s_runtime_state.radar.stale);
+  assert(http_requests == 1 && request_ticks[0] == 40000);
+}
+
 static void check_pending_time(void)
 {
   reset_platform();
   fake_clock_set(0);
   wifi_connected = false; /* Joining Wi-Fi also must not add a time prerequisite. */
-  run_worker(2);
+  run_worker_until(600000);
   assert(http_requests == 2 && request_ticks[0] == 0 && request_ticks[1] == 600000);
-  assert(delays[0] == 600000 && delays[1] == 600000);
+  assert(delays[0] == 300000 && delays[1] == 300000);
   assert(!actual_time_synced && sync_calls >= 1);
   assert_forecast(&s_runtime_state.weather);
   assert(!s_runtime_state.weather.stale);
@@ -466,10 +714,10 @@ static void check_time_start_failure(void)
 {
   reset_platform();
   sync_failures = 2;
-  run_worker(4);
+  run_worker_until(600000);
   assert(sync_calls >= 3 && sync_ticks[0] == 0 && sync_ticks[1] == 20000 && sync_ticks[2] == 40000);
   assert(http_requests == 2 && request_ticks[0] == 0 && request_ticks[1] == 600000);
-  assert(delays[0] == 20000 && delays[1] == 20000 && delays[2] == 560000);
+  assert(delays[0] == 20000 && delays[1] == 20000 && delays[2] == 260000);
   assert_forecast(&s_runtime_state.weather);
   assert(!s_runtime_state.weather.stale && !actual_time_synced);
 }
@@ -517,10 +765,10 @@ static void check_slow_weather_and_time_retry(void)
   reset_platform();
   sync_failures = 2;
   request_durations_ms[0] = 10000; /* The client's existing HTTP timeout. */
-  run_worker(4);
+  run_worker_until(610000);
   assert(sync_ticks[0] == 0 && sync_ticks[1] == 20000 && sync_ticks[2] == 40000);
   assert(http_requests == 2 && request_ticks[0] == 0 && request_ticks[1] == 610000);
-  assert(delays[0] == 10000 && delays[1] == 20000 && delays[2] == 570000);
+  assert(delays[0] == 10000 && delays[1] == 20000 && delays[2] == 270000);
   assert_forecast(&s_runtime_state.weather);
 }
 
@@ -530,10 +778,10 @@ static void check_weather_failure(void)
   sync_failures = 2;
   request_results[0] = ESP_ERR_TIMEOUT;
   on_request = observe_weather_notice_at_request;
-  run_worker(4);
+  run_worker_until(620000);
   assert(sync_ticks[0] == 0 && sync_ticks[1] == 20000 && sync_ticks[2] == 40000);
   assert(http_requests == 3 && request_ticks[0] == 0 && request_ticks[1] == 20000 && request_ticks[2] == 620000);
-  assert(delays[0] == 20000 && delays[1] == 20000 && delays[2] == 580000);
+  assert(delays[0] == 20000 && delays[1] == 20000 && delays[2] == 260000);
   assert_forecast(&s_runtime_state.weather);
 }
 
@@ -545,10 +793,10 @@ static void check_overlapping_failure_deadlines(void)
   request_durations_ms[0] = 10000;
   /* A slow failed weather request puts its retry at 30s, between time-start
    * retries at 20s and 40s. Waking for weather must preserve the latter. */
-  run_worker(6);
-  const TickType_t expected_sync[] = {0,20000,40000,60000,630000};
+  run_worker_until(630000);
+  const TickType_t expected_sync[] = {0,20000,40000,60000,310000,610000,630000};
   const TickType_t expected_requests[] = {0,30000,630000};
-  const TickType_t expected_delays[] = {10000,10000,10000,20000,570000,600000};
+  const TickType_t expected_delays[] = {10000,10000,10000,20000,250000,300000,20000,280000};
   assert(sync_calls == sizeof(expected_sync) / sizeof(expected_sync[0]));
   assert(http_requests == sizeof(expected_requests) / sizeof(expected_requests[0]));
   assert(memcmp(sync_ticks, expected_sync, sizeof(expected_sync)) == 0);
@@ -559,15 +807,18 @@ static void check_overlapping_failure_deadlines(void)
 }
 
 static app_weather_snapshot_t retained_weather;
+static bool retained_weather_seen, stale_weather_seen;
 
 static void observe_retention(void)
 {
-  if (delay_count == 1) {
+  if (!retained_weather_seen) {
+    retained_weather_seen = true;
     retained_weather = s_runtime_state.weather;
     assert_forecast(&retained_weather);
     if (retained_weather.has_conditions) assert_timed_conditions(&retained_weather, false);
-  } else if (delay_count == 2) {
-    assert(s_runtime_state.weather.stale);
+  }
+  if (s_runtime_state.weather.stale) {
+    stale_weather_seen = true;
     app_weather_snapshot_t stale = s_runtime_state.weather;
     stale.stale = false;
     assert(memcmp(&stale, &retained_weather, sizeof(stale)) == 0);
@@ -577,12 +828,13 @@ static void observe_retention(void)
 static void check_retained_weather(void)
 {
   reset_platform();
+  retained_weather_seen = stale_weather_seen = false;
   request_results[1] = ESP_ERR_TIMEOUT;
   on_delay = observe_retention;
   on_request = observe_weather_notice_at_request;
-  run_worker(3);
+  run_worker_until(620000);
   assert(http_requests == 3 && request_ticks[1] == 600000 && request_ticks[2] == 620000);
-  assert(delays[0] == 600000 && delays[1] == 20000);
+  assert(stale_weather_seen);
   assert_forecast(&s_runtime_state.weather);
   assert(!s_runtime_state.weather.stale);
 }
@@ -590,10 +842,14 @@ static void check_retained_weather(void)
 static void observe_wifi_loss(void)
 {
   observe_retention();
-  if (delay_count == 1) {
+  /* Lose Wi-Fi at the forecast boundary, after the new intervening Radar
+   * wakeup. Reconnect only after observing the offline retained payload. */
+  if (xTaskGetTickCount() < 600000 &&
+      xTaskGetTickCount() + delays[delay_count - 1] == 600000) {
     wifi_connected = false;
     wifi_wait_result = ESP_ERR_TIMEOUT;
-  } else if (delay_count == 2) {
+  } else if (xTaskGetTickCount() == 600000) {
+    assert(s_runtime_state.weather.stale);
     wifi_wait_result = ESP_OK;
   }
 }
@@ -601,12 +857,13 @@ static void observe_wifi_loss(void)
 static void check_retained_weather_after_wifi_loss(void)
 {
   reset_platform();
+  retained_weather_seen = stale_weather_seen = false;
   on_delay = observe_wifi_loss;
   on_request = observe_weather_notice_at_request;
-  run_worker(3);
+  run_worker_until(620000);
   assert(http_requests == 2 && wifi_init_calls == 1);
   assert(request_ticks[0] == 0 && request_ticks[1] == 620000);
-  assert(delays[0] == 600000 && delays[1] == 20000 && delays[2] == 600000);
+  assert(stale_weather_seen);
   assert_forecast(&s_runtime_state.weather);
   assert(!s_runtime_state.weather.stale);
 }
@@ -614,15 +871,15 @@ static void check_retained_weather_after_wifi_loss(void)
 static void check_retained_conditions(void)
 {
   reset_platform();
+  retained_weather_seen = stale_weather_seen = false;
   char *body = make_conditions_response();
   http_body = body;
   request_results[1] = ESP_ERR_TIMEOUT;
   on_delay = observe_retention;
-  run_worker(2);
+  run_worker_until(600000);
   assert(http_requests == 2 && http_cleanups == 2);
   assert(request_ticks[0] == 0 && request_ticks[1] == 600000);
-  assert(delays[0] == 600000 && delays[1] == 20000);
-  assert(s_runtime_state.weather.stale);
+  assert(stale_weather_seen && s_runtime_state.weather.stale);
   assert_timed_conditions(&s_runtime_state.weather, false);
   free(body);
 }
@@ -870,11 +1127,13 @@ static void check_request_overlap(void)
 
 static void quota_retention_delay(void)
 {
-  if (delay_count==1) {
+  if (!retained_weather_seen) {
+    retained_weather_seen=true;
     retained_weather=s_runtime_state.weather;
     assert(retained_weather.valid);
     http_status=429;http_body="Daily cost limit exceeded";
-  } else {
+  } else if (http_requests >= 2) {
+    stale_weather_seen=true;
     app_weather_snapshot_t stale=s_runtime_state.weather;
     assert(stale.stale);stale.stale=false;
     assert(memcmp(&stale,&retained_weather,sizeof(stale))==0);
@@ -883,10 +1142,14 @@ static void quota_retention_delay(void)
 static void check_worker_quota_schedule(void)
 {
   reset_platform();use_vc("quota-worker-retention");
+  retained_weather_seen=stale_weather_seen=false;
+  worker_radar_mode=RADAR_IDLE_STEPS;
   char *body=make_vc_response(false);http_body=body;on_delay=quota_retention_delay;
-  run_worker(3);
+  run_worker_until(4200000);
   assert(http_requests==3 && request_ticks[0]==0 && request_ticks[1]==600000 && request_ticks[2]==4200000);
-  assert(delays[0]==600000 && delays[1]==3600000 && delays[2]==3600000);
+  assert(stale_weather_seen && worker_radar_starts==15);
+  for (unsigned i=0; i<worker_radar_starts; ++i) assert(worker_radar_start_ticks[i]==i*300000);
+  for (unsigned i=0; i<delay_count; ++i) assert(delays[i]==300000);
   free(body);
   reset_platform();use_vc("quota-worker-transient");
   http_status=429;http_body="Maximum concurrent jobs has been exceeded";
@@ -1006,12 +1269,472 @@ static void check_saved_live_response(const char *path)
   cJSON_Delete(hourly);cJSON_Delete(root);free(body);
 }
 
+/* These generated PNGs and frame times are constructed test inputs.
+ * They exercise the bundled decoder and publication rules, not live services. */
+static unsigned char *radar_test_png(unsigned width, unsigned height,
+                                     const uint8_t color[4], size_t *size)
+{
+  uint8_t *pixels=malloc((size_t)width*height*4);
+  assert(pixels);
+  for (size_t i=0; i<(size_t)width*height; ++i) memcpy(pixels+i*4,color,4);
+  unsigned char *png=NULL;
+  assert(lodepng_encode32(&png,size,pixels,width,height)==0);
+  free(pixels);
+  return png;
+}
+static void check_radar_download_growth(void)
+{
+  /* Binary PNG bytes must survive growth, including embedded zeroes. */
+  unsigned char body[10000];
+  for (size_t i=0; i<sizeof(body); ++i) body[i]=(unsigned char)i;
+  http_response_t response={.external=true,.maximum=sizeof(body)};
+  esp_http_client_event_t event={.event_id=HTTP_EVENT_ON_DATA,
+    .user_data=&response,.data=body,.data_len=3000};
+  assert(http_event(&event)==ESP_OK);
+  event.data=body+3000;event.data_len=7000;
+  assert(http_event(&event)==ESP_OK);
+  assert(response.length==sizeof(body) && response.capacity==sizeof(body)+1);
+  assert(memcmp(response.data,body,sizeof(body))==0 && response.data[sizeof(body)]=='\0');
+  char *saved=response.data;
+  event.data_len=1;
+  assert(http_event(&event)==ESP_ERR_INVALID_SIZE && response.data==saved);
+  assert(response.length==sizeof(body) && memcmp(response.data,body,sizeof(body))==0);
+  free(response.data);
+
+  response=(http_response_t){.external=true,.maximum=sizeof(body)};
+  event.data=body;event.data_len=3000;
+  assert(http_event(&event)==ESP_OK);
+  saved=response.data;
+  unsigned previous_failures=radar_failed_allocations;
+  radar_fail_alloc_size=sizeof(body)+1;
+  event.data=body+3000;event.data_len=7000;
+  assert(http_event(&event)==ESP_ERR_NO_MEM && response.data==saved);
+  assert(response.length==3000 && response.capacity==4096 && response.data[3000]=='\0');
+  assert(memcmp(response.data,body,3000)==0 && radar_failed_allocations==previous_failures+1);
+  assert(http_event(&event)==ESP_ERR_NO_MEM && response.data==saved);
+  free(response.data);
+  radar_failed_allocations=previous_failures;
+}
+
+static void check_radar_tile_sampling(void)
+{
+  /* A half-pixel step gives independently known samples: output 1/2 use
+   * source 0, output 511/512 use 255, and all other edges stay untouched. */
+  uint8_t *pixels=malloc(256*256*4), *mapped=malloc(256*256*4);
+  uint8_t *expected=malloc(RADAR_PIXELS*4);
+  assert(pixels && mapped && expected);
+  for (unsigned y=0; y<256; ++y) for (unsigned x=0; x<256; ++x) {
+    uint32_t color=radar_source_rgba[(x*17+y*29)%128];
+    uint8_t *rgba=pixels+((size_t)y*256+x)*4;
+    rgba[0]=color>>24;rgba[1]=color>>16;rgba[2]=color>>8;
+    rgba[3]=(x+y)%7 ? (uint8_t)color : 0;
+    uint8_t *target=mapped+((size_t)y*256+x)*4;
+    memcpy(target,rgba,4);assert(radar_map_pixel(target));
+  }
+  unsigned char *png=NULL;size_t size;
+  assert(lodepng_encode32(&png,&size,pixels,256,256)==0);
+  radar_http_test=true;http_status=200;radar_echo_png=png;radar_echo_png_size=size;
+  radar.tile_x=radar.tile_y=1;
+  radar.geometry=(radar_geometry_t){.left=255.5,.top=255.5,.step=0.5};
+  radar.slot=0;radar.image[0]=malloc(RADAR_PIXELS*4);assert(radar.image[0]);
+  for (size_t pixel=0; pixel<RADAR_PIXELS; ++pixel) {
+    uint8_t *bgra=radar.image[0]+pixel*4;
+    bgra[0]=pixel%251;bgra[1]=pixel%239;bgra[2]=pixel%227;bgra[3]=255;
+  }
+  memcpy(expected,radar.image[0],RADAR_PIXELS*4);
+  for (int y=1; y<=512; ++y) for (int x=1; x<=512; ++x) {
+    const uint8_t *rgba=mapped+((size_t)((y-1)/2)*256+(x-1)/2)*4;
+    uint8_t *bgra=expected+((size_t)y*APP_RADAR_WIDTH+x)*4;
+    for (unsigned c=0; c<3; ++c)
+      bgra[c]=(uint8_t)((rgba[2-c]*rgba[3]+bgra[c]*(255-rgba[3])+127)/255);
+  }
+  assert(radar_tile()==ESP_OK);
+  assert(memcmp(radar.image[0],expected,RADAR_PIXELS*4)==0);
+  lv_free(png);
+  /* This unknown opaque source pixel is outside all selected output samples.
+   * Full source validation must still reject it before changing any output. */
+  pixels[0]=1;pixels[1]=2;pixels[2]=3;pixels[3]=255;
+  assert(lodepng_encode32(&png,&size,pixels,256,256)==0);
+  radar_echo_png=png;radar_echo_png_size=size;
+  radar.geometry=(radar_geometry_t){.left=356,.top=356,.step=0.125};
+  assert(radar_tile()==ESP_ERR_INVALID_RESPONSE);
+  assert(memcmp(radar.image[0],expected,RADAR_PIXELS*4)==0);
+  lv_free(png);free(pixels);free(mapped);free(expected);
+  free(radar.image[0]);radar.image[0]=NULL;radar_http_test=false;
+}
+
+static void check_radar_geometry_palette_png(void)
+{
+  check_radar_download_growth();
+  lv_init();
+  assert(weather_client_init_images()==ESP_OK);
+  assert(APP_RADAR_WIDTH==800 && APP_RADAR_HEIGHT==800);
+  assert(RADAR_PIXELS*9==5760000); /* One luminance and two BGRA buffers. */
+  /* Include the decoder's 260-byte speculative reserve and 1.5 growth,
+   * which exceed the decoded pixel count near the end of a valid PNG. */
+  size_t scanline_bound=RADAR_PIXELS*4+APP_RADAR_HEIGHT*4;
+  assert(RADAR_PNG_ALLOC_MAX>=scanline_bound+scanline_bound/2+260);
+  assert(WEATHER_RESPONSE_MAX==192*1024);
+  static const double latitudes[]={0,30.58,40.45476,70,-60};
+  for (unsigned i=0; i<sizeof(latitudes)/sizeof(latitudes[0]); ++i) {
+    radar_geometry_t geometry;
+    assert(radar_geometry(latitudes[i],179.95,&geometry));
+    double meters=APP_RADAR_HEIGHT*geometry.step*156543.033928*
+      cos(latitudes[i]*RADAR_PI/180)/128;
+    assert(fabs(meters-75*1609.344)<0.00001);
+    double world=RADAR_WORLD_PIXELS;
+    double center_x=geometry.left+APP_RADAR_WIDTH*geometry.step/2;
+    double center_y=geometry.top+APP_RADAR_HEIGHT*geometry.step/2;
+    assert(fabs(center_x/world*360-180-179.95)<1e-10);
+    assert(fabs(center_y-radar_world_y(latitudes[i],world))<1e-10);
+    assert(geometry.last_x>=128);
+    assert(radar_wrapped_x(geometry.last_x)<128);
+    assert(radar_geometry(latitudes[i],-179.95,&geometry));
+    assert(geometry.first_x<0);
+    assert(radar_wrapped_x(-1)==127);
+  }
+  radar_geometry_t geometry;
+  assert(radar_geometry(30.58,-97.85,&geometry));
+  assert(radar_geometry(40.45476,-105,&geometry));
+  assert(geometry.first_x==26 && geometry.last_x==26);
+  assert(geometry.first_y==47 && geometry.last_y==48);
+  assert(radar_geometry(30.5788,-97.8531,&geometry));
+  assert(geometry.first_x==28 && geometry.last_x==29);
+  assert(geometry.first_y==52 && geometry.last_y==52);
+  assert(location_scoring_label_has_country("Leander, Texas, US","US"));
+  assert(location_scoring_label_has_country("Fort Collins, Colorado, us  ","US"));
+  assert(!location_scoring_label_has_country("Ottawa, Ontario, CA","US"));
+  assert(!location_scoring_label_has_country("Leander, Texas","US"));
+  assert(!location_scoring_label_has_country("Leander Texas US","US"));
+  assert(!location_scoring_label_has_country("Unknown, USA","US"));
+  const struct { int strength; uint8_t rgb[3]; } cases[]={
+    {-10,{195,230,189}},{34,{5,107,30}},{35,{255,232,0}},
+    {40,{255,194,0}},{44,{255,153,0}},{45,{240,49,36}},
+    {55,{188,12,25}},{75,{115,0,17}},{95,{85,0,12}}};
+  for (unsigned i=0; i<sizeof(cases)/sizeof(cases[0]); ++i) {
+    uint8_t rgb[3]; radar_color(cases[i].strength,rgb);
+    assert(memcmp(rgb,cases[i].rgb,3)==0);
+  }
+  for (unsigned i=0; i<128; ++i) {
+    uint32_t packed=radar_source_rgba[i];
+    uint8_t rgba[4]={(uint8_t)(packed>>24),(uint8_t)(packed>>16),(uint8_t)(packed>>8),(uint8_t)packed};
+    uint8_t alpha=rgba[3];
+    assert(radar_map_pixel(rgba) && rgba[3]==alpha);
+    if (alpha) {
+      unsigned first=0;
+      while (radar_source_rgba[first]!=packed) ++first;
+      uint8_t expected[3];radar_color((int)first-32,expected);
+      assert(memcmp(rgba,expected,3)==0);
+      /* Source duplicates occur only inside one of the approved bands. */
+      assert(((int)i-32<35)==((int)first-32<35));
+      assert(((int)i-32>=45)==((int)first-32>=45));
+    }
+  }
+  uint8_t transparent[4]={100,9,200,0}, unknown[4]={1,2,3,255};
+  assert(radar_map_pixel(transparent) && transparent[3]==0);
+  assert(!radar_map_pixel(unknown));
+  radar.base=malloc(RADAR_PIXELS);
+  radar.image[0]=malloc(RADAR_PIXELS*4);assert(radar.base && radar.image[0]);
+  radar.slot=0;
+  for (size_t pixel=0; pixel<RADAR_PIXELS; ++pixel) radar.base[pixel]=(uint8_t)pixel;
+  radar_prepare_image();
+  for (size_t pixel=0; pixel<RADAR_PIXELS; ++pixel) {
+    double luminance=radar.base[pixel]/255.0;
+    const double reference[]={.74-.63*luminance,.68-.60*luminance,.62-.56*luminance};
+    for (unsigned channel=0; channel<3; ++channel)
+      assert(radar.image[0][pixel*4+channel]==rounded(reference[channel]*255+1e-9));
+    assert(radar.image[0][pixel*4+3]==255);
+  }
+  free(radar.base);free(radar.image[0]);radar.base=radar.image[0]=NULL;
+  const uint8_t color[4]={1,20,230,127};
+  size_t size;
+  unsigned char *png=radar_test_png(256,256,color,&size);
+  http_response_t response={.data=(char *)png,.length=size};
+  lv_draw_buf_t *decoded=NULL;
+  assert(radar_decode_png(&response,false,&decoded)==ESP_OK && decoded);
+  assert(memcmp(decoded->data,color,4)==0);
+  assert(decoded->header.w==256 && decoded->header.h==256);
+  lv_draw_buf_destroy(decoded);
+  response.length=size/2;
+  assert(radar_decode_png(&response,false,&decoded)!=ESP_OK && !decoded);
+  lv_free(png);
+  png=radar_test_png(257,256,color,&size);
+  response=(http_response_t){.data=(char *)png,.length=size};
+  assert(radar_decode_png(&response,false,&decoded)!=ESP_OK && !decoded);
+  lv_free(png);
+  png=radar_test_png(APP_RADAR_WIDTH,APP_RADAR_HEIGHT,color,&size);
+  response=(http_response_t){.data=(char *)png,.length=size};
+  assert(radar_decode_png(&response,true,&decoded)==ESP_OK && decoded);
+  assert(memcmp(decoded->data,color,4)==0);
+  lv_draw_buf_destroy(decoded);
+  assert(radar_decode_png(&response,false,&decoded)!=ESP_OK && !decoded);
+  response.length=size/2;
+  assert(radar_decode_png(&response,true,&decoded)!=ESP_OK && !decoded);
+  lv_free(png);
+  png=radar_test_png(APP_RADAR_WIDTH,APP_RADAR_HEIGHT+1,color,&size);
+  response=(http_response_t){.data=(char *)png,.length=size};
+  assert(radar_decode_png(&response,true,&decoded)!=ESP_OK && !decoded);
+  lv_free(png);
+  http_response_t capped={.maximum=RADAR_BASE_RESPONSE_MAX};
+  esp_http_client_event_t oversized={.event_id=HTTP_EVENT_ON_DATA,.user_data=&capped,
+    .data=(void *)color,.data_len=RADAR_BASE_RESPONSE_MAX+1};
+  assert(http_event(&oversized)==ESP_ERR_INVALID_SIZE && !capped.data);
+  capped=(http_response_t){0};
+  oversized.user_data=&capped;oversized.data_len=WEATHER_RESPONSE_MAX+1;
+  assert(http_event(&oversized)==ESP_ERR_INVALID_SIZE && !capped.data);
+  check_radar_tile_sampling();
+}
+static void check_radar_publication(void)
+{
+  reset_platform();
+  radar_http_test=true;
+  strcpy(applied_config.location,"Chicago, Illinois, US");
+  radar_image_requests=radar_base_requests=0;
+  radar_metadata_body="{\"host\":\"https://tilecache.rainviewer.com\",\"radar\":{\"past\":[{\"time\":1700000000,\"path\":\"/v2/radar/opaque-frame\"}]}}";
+  const uint8_t base_color[4]={210,200,180,255}, echo_color[4]={255,238,0,255};
+  unsigned char *base=radar_test_png(APP_RADAR_WIDTH,APP_RADAR_HEIGHT,base_color,&radar_base_png_size);
+  unsigned char *echo=radar_test_png(256,256,echo_color,&radar_echo_png_size);
+  radar_base_png=base; radar_echo_png=echo;
+  app_radar_snapshot_t snapshot={0};
+  bool active=false;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,0,&snapshot,&active));
+  assert(active && !snapshot.valid && snapshot.generation!=0 && http_requests==0);
+  uint32_t acknowledged=snapshot.generation;
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active));
+  assert(active && radar.phase==RADAR_BASE);
+  radar_fail_alloc_size=RADAR_PIXELS;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active));
+  assert(!active && !snapshot.valid && snapshot.stale && !snapshot.pixels);
+  acknowledged=snapshot.generation;
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  unsigned steps=0;
+  while (active && steps++<64) {
+    unsigned before=http_requests;
+    bool published=weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active);
+    assert(http_requests-before<=1);
+    if (published) acknowledged=snapshot.generation;
+  }
+  assert(!active && steps<64 && snapshot.valid && !snapshot.stale);
+  assert(snapshot.frame_time==1700000000 && snapshot.pixels);
+  assert(radar_base_requests==1 && radar_image_requests>1);
+  const uint8_t *old_pixels=snapshot.pixels;
+  size_t center=((size_t)APP_RADAR_HEIGHT/2*APP_RADAR_WIDTH+APP_RADAR_WIDTH/2)*4;
+  const uint8_t yellow_bgra[4]={0,232,255,255};
+  assert(memcmp(old_pixels+center,yellow_bgra,4)==0);
+  /* Complete opaque coverage includes every edge and the square's corners;
+   * the round display provides the physical crop without an image fade. */
+  for (size_t pixel=0; pixel<RADAR_PIXELS; ++pixel)
+    assert(memcmp(old_pixels+pixel*4,yellow_bgra,4)==0);
+  unsigned images=radar_image_requests, requests=http_requests;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_OFFLINE,acknowledged,&snapshot,&active));
+  assert(!active && snapshot.valid && snapshot.stale && snapshot.pixels==old_pixels);
+  assert(snapshot.frame_time==1700000000 && http_requests==requests);
+  uint32_t offline_generation=snapshot.generation;
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_OFFLINE,acknowledged,&snapshot,&active));
+  assert(!active && snapshot.generation==offline_generation && http_requests==requests);
+  acknowledged=snapshot.generation;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(!active && snapshot.valid && !snapshot.stale && snapshot.pixels==old_pixels);
+  assert(snapshot.frame_time==1700000000 && radar_image_requests==images);
+  acknowledged=snapshot.generation;
+  requests=http_requests;
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(!active && http_requests==requests+1 && radar_image_requests==images);
+  assert(snapshot.pixels==old_pixels && snapshot.frame_time==1700000000);
+  http_status=503;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(!active && snapshot.valid && snapshot.stale && snapshot.pixels==old_pixels);
+  assert(snapshot.frame_time==1700000000);
+  acknowledged=snapshot.generation;
+  http_status=200;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(!active && !snapshot.stale && radar_image_requests==images);
+  radar_metadata_body="{\"host\":\"https://tilecache.rainviewer.com\",\"radar\":{\"past\":[{\"time\":1699999400,\"path\":\"/older/cache\"}]}}";
+  acknowledged=snapshot.generation;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(!active && snapshot.stale && snapshot.frame_time==1700000000);
+  assert(snapshot.pixels==old_pixels && radar_image_requests==images);
+  radar_metadata_body="{\"host\":\"https://tilecache.rainviewer.com\",\"radar\":{\"past\":[{\"time\":1700000000,\"path\":\"/v2/radar/opaque-frame\"}]}}";
+  acknowledged=snapshot.generation;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(!active && !snapshot.stale && radar_image_requests==images);
+  /* A newer frame waits for the displayed generation before slot preparation. */
+  radar_metadata_body="{\"host\":\"https://tilecache.rainviewer.com\",\"radar\":{\"past\":[{\"time\":1700000600,\"path\":\"/another/opaque-path\"}]}}";
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(active && radar.phase==RADAR_WAIT_SLOT);
+  requests=http_requests;
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active));
+  assert(active && radar.phase==RADAR_WAIT_SLOT && http_requests==requests);
+  assert(memcmp(old_pixels+center,yellow_bgra,4)==0);
+  acknowledged=snapshot.generation;
+  radar_fail_alloc_size=RADAR_PIXELS*4;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active));
+  assert(!active && snapshot.valid && snapshot.stale && snapshot.pixels==old_pixels);
+  assert(snapshot.frame_time==1700000000 && radar_failed_allocations==2);
+  acknowledged=snapshot.generation;
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  while (active) {
+    bool published=weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active);
+    if (published) acknowledged=snapshot.generation;
+  }
+  assert(snapshot.valid && snapshot.frame_time==1700000600 && snapshot.pixels!=old_pixels);
+  assert(radar_base_requests==1); /* Same-location background is retained. */
+  const uint8_t *second_pixels=snapshot.pixels;
+  radar_metadata_body="{\"host\":\"https://tilecache.rainviewer.com\",\"radar\":{\"past\":[{\"time\":1700001200,\"path\":\"/newer/frame\"}]}}";
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active));
+  assert(active && radar.phase==RADAR_ECHO);
+  requests=http_requests;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_OFFLINE,acknowledged,&snapshot,&active));
+  assert(!active && snapshot.stale && snapshot.pixels==second_pixels);
+  assert(snapshot.frame_time==1700000600 && http_requests==requests && radar.phase==RADAR_IDLE);
+  acknowledged=snapshot.generation;
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active));
+  assert(!active && http_requests==requests);
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(active && snapshot.stale); /* A newer incomplete frame cannot clear old. */
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active));
+  radar_echo_png_size/=2; /* Actual decoder rejects the truncated replacement. */
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active));
+  assert(!active && snapshot.valid && snapshot.stale && snapshot.pixels==second_pixels);
+  assert(snapshot.frame_time==1700000600);
+  radar_echo_png_size*=2;
+  /* A complete transparent echo image is valid and removes prior echoes. */
+  const uint8_t clear_color[4]={0,0,0,0};
+  size_t clear_size;
+  unsigned char *clear=radar_test_png(256,256,clear_color,&clear_size);
+  radar_echo_png=clear; radar_echo_png_size=clear_size;
+  acknowledged=snapshot.generation;
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  while (active) {
+    bool published=weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active);
+    if (published) acknowledged=snapshot.generation;
+  }
+  assert(snapshot.valid && !snapshot.stale && snapshot.frame_time==1700001200);
+  /* Luminance 200 maps to the approved brighter blue-gray background. */
+  assert(radar.base[center/4]==200);
+  const uint8_t expected_base[4]={63,53,46,255};
+  for (size_t pixel=0; pixel<RADAR_PIXELS; ++pixel)
+    assert(memcmp(snapshot.pixels+pixel*4,expected_base,4)==0);
+  lv_free(clear);
+  strcpy(applied_config.location,"Ottawa, Ontario, CA");
+  requests=http_requests;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(!active && !snapshot.valid && !snapshot.pixels && http_requests==requests);
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,snapshot.generation,&snapshot,&active));
+  assert(!active && http_requests==requests);
+  strcpy(applied_config.location,"Fort Collins, Colorado, US");
+  strcpy(applied_config.latitude,"40.45476");
+  strcpy(applied_config.longitude,"-105");
+  requests=http_requests;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_OFFLINE,acknowledged,&snapshot,&active));
+  assert(!active && !snapshot.valid && !snapshot.pixels && snapshot.frame_time==0);
+  assert(snapshot.latitude==40.45476 && http_requests==requests);
+  assert(!radar.base_ready);
+  /* A failed first image remains unavailable, without leaking the old place. */
+  http_status=503;
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,snapshot.generation,&snapshot,&active));
+  assert(!active && !snapshot.valid && !snapshot.pixels);
+  lv_free(base);lv_free(echo);
+  free(radar.base);free(radar.image[0]);free(radar.image[1]);
+  memset(&radar,0,sizeof(radar));
+  radar_http_test=false;
+}
+
+static unsigned char *radar_read_binary(const char *path, size_t *size)
+{
+  FILE *file=fopen(path,"rb");assert(file);
+  assert(fseek(file,0,SEEK_END)==0);long length=ftell(file);assert(length>0);
+  *size=(size_t)length;rewind(file);
+  unsigned char *bytes=malloc(*size);assert(bytes);
+  assert(fread(bytes,1,*size,file)==*size);fclose(file);return bytes;
+}
+static void check_saved_radar_data(const char *directory)
+{
+  /* Consume captured public provider data through the real client. Outputs are
+   * data-only map compositions, not finished UI/board proof. */
+  static const struct { const char *name,*latitude,*longitude,*location; } cases[]={
+    {"leander","30.5788","-97.8531","Leander, Texas, US"},
+    {"colorado","40.4547622191","-105","Fort Collins, Colorado, US"}};
+  for (unsigned i=0; i<sizeof(cases)/sizeof(cases[0]); ++i) {
+    reset_platform();lv_init();assert(weather_client_init_images()==ESP_OK);
+    lv_mem_monitor_t initial;lv_mem_monitor(&initial);
+    radar_http_test=true;
+    snprintf(applied_config.latitude,sizeof(applied_config.latitude),"%s",cases[i].latitude);
+    snprintf(applied_config.longitude,sizeof(applied_config.longitude),"%s",cases[i].longitude);
+    snprintf(applied_config.location,sizeof(applied_config.location),"%s",cases[i].location);
+    char path[1024];
+    snprintf(path,sizeof(path),"%s/usgs-%s-800x800.png",directory,cases[i].name);
+    unsigned char *base=radar_read_binary(path,&radar_base_png_size);radar_base_png=base;
+    radar_saved_directory=directory;radar_saved_sample=cases[i].name;
+    snprintf(path,sizeof(path),"%s/rainviewer-live-metadata.json",directory);
+    char *metadata=read_response_file(path);radar_metadata_body=metadata;
+    app_radar_snapshot_t snapshot={0};bool active=false;uint32_t acknowledged=0;
+    assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+    acknowledged=snapshot.generation;
+    unsigned steps=0;
+    while (active && steps++<32) {
+      if (weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active)) acknowledged=snapshot.generation;
+    }
+    assert(!active && snapshot.valid);
+    assert(radar.geometry.first_x==(i==0 ? 28 : 26));
+    assert(radar.geometry.last_x==(i==0 ? 29 : 26));
+    assert(radar.geometry.first_y==(i==0 ? 52 : 47));
+    assert(radar.geometry.last_y==(i==0 ? 52 : 48));
+    for (size_t pixel=0; pixel<RADAR_PIXELS; ++pixel) assert(snapshot.pixels[pixel*4+3]==255);
+    snprintf(path,sizeof(path),"%s/client-%s-composed.bgra",directory,cases[i].name);
+    FILE *out=fopen(path,"wb");assert(out);
+    assert(fwrite(snapshot.pixels,1,RADAR_PIXELS*4,out)==RADAR_PIXELS*4);fclose(out);
+    cJSON *report=cJSON_CreateObject();assert(report);
+    cJSON_AddStringToObject(report,"sample",cases[i].name);
+    cJSON_AddNumberToObject(report,"width",APP_RADAR_WIDTH);cJSON_AddNumberToObject(report,"height",APP_RADAR_HEIGHT);
+    cJSON_AddNumberToObject(report,"frame_time",snapshot.frame_time);
+    cJSON_AddNumberToObject(report,"latitude",snapshot.latitude);cJSON_AddNumberToObject(report,"longitude",snapshot.longitude);
+    cJSON_AddNumberToObject(report,"compressed_basemap_bytes",radar_base_png_size);
+    cJSON_AddNumberToObject(report,"ground_diameter_meters",RADAR_GROUND_M);
+    cJSON_AddNumberToObject(report,"retained_pixel_bytes",RADAR_PIXELS*9);
+    cJSON_AddNumberToObject(report,"first_tile_x",radar.geometry.first_x);
+    cJSON_AddNumberToObject(report,"last_tile_x",radar.geometry.last_x);
+    cJSON_AddNumberToObject(report,"first_tile_y",radar.geometry.first_y);
+    cJSON_AddNumberToObject(report,"last_tile_y",radar.geometry.last_y);
+    lv_mem_monitor_t memory;lv_mem_monitor(&memory);
+    cJSON_AddNumberToObject(report,"native_codec_peak_above_init",memory.max_used-(initial.total_size-initial.free_size));
+    assert(memory.free_size==initial.free_size); /* Decoder scratch is released. */
+    char *json=cJSON_Print(report);assert(json);
+    snprintf(path,sizeof(path),"%s/client-%s-composed.json",directory,cases[i].name);
+    out=fopen(path,"wb");assert(out);assert(fwrite(json,1,strlen(json),out)==strlen(json));fclose(out);
+    cJSON_free(json);cJSON_Delete(report);
+    printf("PASS: saved real %s USGS/RainViewer inputs composed; %u client steps.\n",cases[i].name,steps);
+    free(base);free(radar_saved_tile);free(metadata);
+    radar_saved_tile=NULL;radar_saved_directory=radar_saved_sample=NULL;
+    free(radar.base);free(radar.image[0]);free(radar.image[1]);memset(&radar,0,sizeof(radar));
+    radar_http_test=false;lv_deinit();
+  }
+}
+
 int main(int argc, char **argv)
 {
   s_runtime_mutex = xSemaphoreCreateMutex();
   assert(s_runtime_mutex);
+  if (argc==3 && strcmp(argv[1],"--radar-saved-data")==0) {
+    check_saved_radar_data(argv[2]);
+    assert(pthread_mutex_destroy(s_runtime_mutex)==0);free(s_runtime_mutex);
+    return 0;
+  }
+  if (argc>1 && strcmp(argv[1],"--radar-only")==0) {
+    check_worker_radar_schedule();
+    check_worker_radar_offline();
+    check_radar_geometry_palette_png();
+    check_radar_publication();
+    assert(pthread_mutex_destroy(s_runtime_mutex)==0);
+    free(s_runtime_mutex);
+    puts("PASS: constructed Radar PNG, palette, ground coverage, replacement and failure cases.");
+    return 0;
+  }
   check_decoder();
   check_conditions_decoder();
+  check_worker_radar_schedule();
+  check_worker_radar_offline();
   check_pending_time();
   check_download_timestamp();
   check_time_start_failure();
@@ -1033,6 +1756,8 @@ int main(int argc, char **argv)
   check_request_scratch_bounds();
   const char *live_response=argc>1?argv[1]:getenv("WAC_WEATHER_LIVE_RESPONSE");
   if (live_response && live_response[0]) check_saved_live_response(live_response);
+  check_radar_geometry_palette_png();
+  check_radar_publication();
   assert(pthread_mutex_destroy(s_runtime_mutex) == 0);
   free(s_runtime_mutex);
   puts("PASS: both providers and units, real forecast captures, constructed current/DST/optional/error cases, bounded responses, serialized overlap, key-specific quota recovery, independent time/weather scheduling and retained data.");

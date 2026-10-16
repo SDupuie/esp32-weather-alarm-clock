@@ -1,6 +1,6 @@
 # Weather alarm clock architecture and product specification
 
-Revised October 15, 2026. This is the main authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. Detailed weather condition mappings and their decision status are maintained in [weather.md](weather.md). Neither document is an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
+Revised October 16, 2026. This is the main authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. Detailed weather condition mappings and their decision status are maintained in [weather.md](weather.md). Neither document is an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
 
 Build the weather alarm clock for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C using the existing ESP-IDF application. Only ESP32-P4 is supported. There is no requirement to maintain Raspberry Pi behavior, another firmware implementation, or backward compatibility with their settings or interfaces.
 
@@ -33,14 +33,14 @@ Use ordinary saves with ESP-IDF storage.
 
 Cancel discards unsaved edits. Nested Done returns to the parent draft without saving. Sound Machine is the immediate-control exception described in its [playback rules](#sound-machine-playback); its Back and Done controls navigate without undoing applied choices. Display Settings has independent Cancel/Save controls. Save applies Home Screen, Time Format, Leading Zero and Day/Night brightness without restarting, then returns to Settings. Display Cancel and Back discard its edits and return to Settings. Apply the chosen Home Screen when returning to the clock, while preserving later manual clock-face navigation.
 
-Alarm Save applies without restart. The On/Off switch in Alarm Settings applies and saves immediately, writing only the enabled value. The Alarm Settings switch does not apply pending time, repeat, sound, volume or snooze edits; those still require Save. A successful switch change remains applied after Cancel or Back, while those other edits are discarded. Failed switch saves retain the applied On/Off state and pending edits for retry. Device Setup and Wi-Fi share pending edits for Save & Restart. Weather retains its independent save and restart, including location, coordinates, timezone and units. Its Back and Cancel return to Device Setup without discarding pending device edits. A Weather Save must not apply those unsubmitted device edits.
+Alarm Save applies without restart. The On/Off switch in Alarm Settings applies and saves immediately, writing only the enabled value. The Alarm Settings switch does not apply pending time, repeat, sound, volume or snooze edits; those still require Save. A successful switch change remains applied after Cancel or Back, while those other edits are discarded. Failed switch saves retain the applied On/Off state and pending edits for retry. The approved one-time alarm completion below also saves Off through the settings owner. Device Setup and Wi-Fi share pending edits for Save & Restart. Weather retains its independent save and restart, including location, coordinates, timezone and units. Its Back and Cancel return to Device Setup without discarding pending device edits. A Weather Save must not apply those unsubmitted device edits.
 
 Apply only changes made in that editor, preserving unrelated applied choices. Display saves cover only its five existing fields; Device saves cover the remaining Device Setup choices. Keep the existing settings owner, stored keys and ordinary save facilities. Validation errors remain in the editor; save failure retains the draft and does not automatically restart.
 
 A submitted Save continues if its editor is hidden, closed or replaced. A successful Device or Weather Save still completes its required restart. Results specific to the old editor must not reopen it or change a newer editor; the general saved/restarting notice may appear on the current screen. Preserve the existing restart delay, including when ringing hides the editor. Failed saves never trigger that restart.
 
 - Validate settings, perform ordinary saves, and report returned errors.
-- Save user settings only when the user explicitly applies a change: for example, pressing Save or using a control intended to apply immediately, such as enabling an alarm.
+- Save user settings only when the user explicitly applies a change: for example, pressing Save or using a control intended to apply immediately, such as enabling an alarm. Completing a user-armed one-time alarm is the approved automatic Off exception below.
 - Editing a draft, refreshing weather, and normal clock operation must not rewrite user settings. There is no background autosave.
 - If power fails during a save, some settings may be updated while others remain unchanged. The user may need to check and save them again. This is an accepted limitation, not a guarantee that the user will check.
 - Do not add application-level backup snapshots, selectors, rollback, or a recovery coordinator to make settings saves all-or-nothing.
@@ -51,9 +51,48 @@ Device/display defaults are room name `Clock`, device ID `clock-esp32-p4`, digit
 
 ### Alarm and snooze
 
-One recurring alarm uses the saved local hour/minute and repeat days. For a skipped or repeated local time, use the UTC offset after the transition without changing the saved schedule. A skipped 2:30 AM in a one-hour spring jump therefore rings at 1:30 AM before the jump; a repeated fall time rings at its second occurrence. Preserve the intended schedule date when identifying a ringing occurrence. Backward clock corrections must not replay an already handled occurrence.
+One alarm uses the saved local hour/minute and either selected repeat days or **None** for one-time operation. For a skipped or repeated local time, use the UTC offset after the transition without changing the saved schedule. A skipped 2:30 AM in a one-hour spring jump therefore rings at 1:30 AM before the jump; a repeated fall time rings at its second occurrence. Preserve the intended schedule date when identifying a ringing occurrence. Backward clock corrections must not replay an already handled occurrence.
 
 Defaults: alarm Off, 07:00 Monday–Friday, Classic Beep at 50% volume and ten-minute snooze. Snooze choices are 5/10/15 minutes. Alarm operation continues while menus are open and slow network work is pending.
+
+**One-time operation:** Repeat **None** means no weekdays are selected. The
+Alarm Settings Repeat row shows **None**. The Repeat editor presents **None**,
+**Every Day**, **Weekdays** and **Custom Days**, in that order. Derive its selected
+row from the existing weekday mask; no separate preset is stored. Custom Days
+opens the preserved draft selection, with Monday–Friday on the first centered
+row and Saturday/Sunday below. Both Repeat editors show **Rings once** for an
+empty selection. Clearing all weekdays selects None; selecting any weekday
+returns to recurring operation. Custom Days Back/Done returns to Repeat;
+Repeat Back/Done returns to Alarm, retaining the draft. Alarm Save applies it
+and Alarm Cancel/Back discards it, preserving the independent On/Off switch.
+The Alarm Repeat row summarizes actual selected days using the existing compact
+names/day-count rules rather than saying Custom. The visual reference owns
+geometry and styles; LVGL rounds its half-pixel Custom Days row positions
+consistently to whole pixels, retaining the gap and a half-pixel center offset.
+
+Enabling a one-time alarm, or applying a changed time/repeat choice while it is
+On, selects the next occurrence of that local time: today if it has not passed,
+otherwise tomorrow. An exactly due occurrence may ring. Wait for usable time
+before choosing the date. Save that specific dated occurrence with the alarm
+owner and keep it across restarts; it must not advance to a later day merely
+because the clock restarts or the UI refreshes. Use the existing 30-minute
+recovery rule for that occurrence. A later sound, volume or snooze-only change
+does not choose a new date.
+
+Snooze keeps the same one-time occurrence active. Dismiss consumes it and saves
+Alarm Off, retaining time, Repeat None, sound, volume and snooze preferences.
+If its ordinary occurrence is too old to recover, keep the existing missed
+notice and also consume it/save Off. An expired snooze is discarded under the
+existing snooze rule and finishes the one-time alarm. Turning it On again arms
+another one-time occurrence. Completing a captured alarm must not turn Off a
+newly applied different schedule.
+
+Keep the dated target and whether it was consumed in the existing alarm storage
+namespace; preserve existing dismissal/snooze records. A consumed target must
+not rearm tomorrow if saving Off fails. Save Off through `device_config`, writing
+only the enabled entry and following ordinary settings-error rules. Operational
+state still changes in memory when its save fails, as below. There is no new
+alarm history, worker, automatic retry service or settings snapshot.
 
 Turning Alarm Off stops current ringing and cancels a pending snooze, including
 one restored before usable time is available. Preserve the saved hour/minute,
@@ -67,9 +106,14 @@ scheduled time does not cause retroactive ringing or a new missed notice. An
 occurrence due exactly when the change is observed may ring. If usable time is
 not yet available, make that arming decision when it becomes available. Preserve
 an existing captured ringing or snoozed alarm and pending missed notice. Changes
-only to sound, volume or snooze duration do not rearm the schedule. This runtime
-rule does not replace normal restart recovery below; no separate arming history
-is stored.
+only to sound, volume or snooze duration do not rearm the schedule. Once usable
+time permits this decision while no alarm is ringing or snoozed, save the skipped
+past occurrence in the existing handled-occurrence record. A successful save
+prevents a restart from treating that earlier time as missed or due. Returned
+save failures follow the operating-record limitations below. No separate arming
+history is stored. Edits during captured ringing or snooze retain their runtime
+skip without advancing the saved handled occurrence; preserve genuine captured
+alarm recovery. Later scheduled occurrences retain normal restart recovery below.
 
 Classic Beep, Classic Bell and Rising Tones share sound definitions between preview and ringing. Ringing increases volume gradually. Preview stops after approximately five seconds or cancellation; ringing takes priority.
 
@@ -99,7 +143,7 @@ Use one fixed 30-minute catch-up window for ordinary alarms and snooze. Evaluate
 
 Use the same overdue-deadline check for ordinary alarm recovery and snooze recovery; do not introduce separate configurable policies.
 
-Remember which scheduled ringing was dismissed so, after its dismissal record is successfully saved, a restart does not replay it through the 30-minute catch-up rule. This refers to the individual occurrence of the one recurring alarm (for example, Monday at 7:00 AM), not multiple alarm schedules. Dismissal does not disable future scheduled alarms. Store only the information needed for this behavior, not an alarm-history log.
+Remember which scheduled ringing was dismissed so, after its dismissal record is successfully saved, a restart does not replay it through the 30-minute catch-up rule. This refers to an individual occurrence (for example, Monday at 7:00 AM), not multiple alarm schedules. Dismissal does not disable future recurring occurrences; one-time completion follows the Off rule above. Store only the information needed for this behavior, not an alarm-history log.
 
 Keep one pending missed-alarm notice across restarts, including the missed alarm's date/time for display. Clear it when the user dismisses the notice or the next alarm actually rings. Dismissing the notice does not disable or change the recurring alarm schedule. This is a pending notice, not a list or history of missed alarms.
 
@@ -284,6 +328,22 @@ and verification status belong in
 Ringing preempts menus, notices and previews; preemption alone does not acknowledge a notice or apply a draft.
 
 The single approved visual entry point is [mockups/alarm-design.html](../mockups/alarm-design.html). It contains the complete combined device preview and the House Messages browser preview, selected using the controls above the previews. Images, fonts and both previews are embedded in that file. It owns appearance and controls; this specification owns behavior, defaults and source placement. Preview selectors and sample values are not production features. The digital ringing layout is the chosen ringing presentation; carousel alternatives are not additional screens.
+
+On October 16, 2026, the user approved replacing the chosen ringing layout's
+Dismiss button with **SLIDE TO DISMISS**, keeping **SNOOZE** as a tap button.
+Start at the left handle and drag to the right end to dismiss. A track tap does
+nothing; an incomplete or canceled drag returns the handle and keeps ringing.
+Completing the slide uses the existing dismissal rules above. The visual
+reference owns the centered labels, Day/Night styling and **DISMISSED**
+confirmation. The snoozed screen's existing Dismiss control is unchanged.
+Submit the existing dismissal command immediately on a qualifying release.
+The confirmation follows the matching owner's applied live dismissal, including
+an operating-record save failure; it never delays stopping the alarm through
+its owners or requires storage success. Hold the confirmation briefly without
+blocking, then use the existing return destination. A newer alarm immediately
+replaces old input or confirmation; stale releases, completions and expiry must
+not act on it. Implementation and verification are recorded in
+[work.md](work.md#slide-to-dismiss--authorized-october-16-2026).
 
 Settings pages use the reviewed lower Back/title placement. Messaging's distinct
 Device ID guidance is vertically centered in the fourth-row space, with its
@@ -473,8 +533,8 @@ retry interval. See the [provider's error guidance](https://www.visualcrossing.c
   pressure measurements/trend and any non-alert explanatory use; the thunder,
   wind/gust and heavy-precipitation thresholds above are unchanged.
 - `summary.headline` / `summary.detail`: the first alert as a sentence with
-  its timing (`now` or `by <hour>`), the second alert (or the pressure
-  meaning) as the detail.
+  its timing (`now` or `by <hour>`), and the second alert, when present, as the
+  detail. Pressure retains its separate informational wording below.
 - Things already happening say when they end, things on the way say when
   they start: `Thunderstorms until 8 PM`, `Gusts up to 58 mph until 9 PM`,
   `Heavy rain until 5 PM`, `Rain ending by 4 PM` vs `Thunderstorms likely by
@@ -563,11 +623,15 @@ a background map and town labels. It is a palette reference, not an approved
 clock screen layout or a location default.
 
 Weather Radar replaces the Conditions screen on the working clock for this
-pass, as selected on October 15, 2026. The weather row contains Forecast then
-Radar normally, and Radar then Forecast during a storm alert, using the existing
-left/right swipes and row order retained for the current visit. The storm
-indicator remains active and its first weather destination becomes Radar.
-Radar is not a settings/menu page and has no return button.
+pass, as selected on October 15, 2026. For supported U.S. locations the weather
+row contains Forecast then Radar normally, and Radar then Forecast during a
+storm alert, using the existing left/right swipes and row order retained for
+the current visit. Radar is disabled elsewhere: do not create its display
+objects or expose a route to it. Forecast is then the sole weather page and
+the storm indicator's destination. A country change that disables Radar exits
+an open Radar page to Forecast, overriding the held visit order. The storm
+indicator remains active. Radar is not a settings/menu page and has no return
+button.
 
 Keep Conditions available in the official mockup as a retained design reference.
 Retain its existing implementation, required assets and useful tests in their
@@ -580,32 +644,56 @@ this is an approved reduction in visible information. Preserve current weather
 data, calculations and storm detection used by the clock, Forecast and alert
 indicator. Removing the Conditions page does not disable those shared functions.
 
-Use a dark background map that blends into the surrounding clock surface,
-with subdued but clearly visible roads and terrain, and legible town labels.
-Keep the selected radar colors distinct. Fade the map and radar gradually into
-that background, keeping enough definition that the map does not look overly
-soft. On October 13, 2026 the user selected the refined design in the
-[official visual reference](../mockups/alarm-design.html), using its Weather Radar
-preview: curved heading and frame timestamp, charcoal map with clearer roads
-and terrain, enlarged town labels, a 48-pixel eased edge fade on the 800-pixel
-screen, and the selected palette with a strength legend and visible source
-credits. Use this as the working radar screen design. The northern Colorado
-frame is recorded reference data, not a location default or live radar.
-The production background provider remains to be selected.
-The October 15 follow-up capitalizes Radar in the screen heading and carries
-over the tighter fade selected in the preview.
+Use the dark USGS National Map USGSTopo background with brighter printed town
+labels, roads and terrain, following the Weather Radar page in the
+[official visual reference](../mockups/alarm-design.html). Fill the round screen
+without an edge fade or surrounding ring. Provider labels retain the size and
+placement supplied in the map; do not add a separate name download, label
+service or text-extraction mechanism. Keep the center marker and location heading.
+The northern Colorado frame in the reference is recorded sample data, not a
+location default or live radar.
 
-The first version uses a fixed map **50 miles across** (about 80.5 km), centered
-on the saved weather location: 25 miles (about 40.2 km) from the center to the
-map's circular edge before its visual fade. This is a ground-distance coverage
+The October 15 horizontal revision centers the title and frame timestamp on
+straight lines at baselines 78 and 114 on the 800-pixel display. Retain the
+32-pixel title and 18-pixel timestamp fonts, Day/Night colors and thin darkening
+around those letters. For long location titles, use the existing 24-pixel
+fallback and an ellipsis if still too wide for the 390-pixel title area. Frame
+time keeps its date, timezone, 12/24-hour format and old-image indication.
+
+The strength key keeps its colors, position and width, with three equal-width
+green, yellow and red sections and centered **Light**, **Moderate** and **Heavy**
+labels. These are broad intensity categories; the underlying radar palette and
+thresholds below are unchanged. Keep the source credits on their existing single
+centered line. Remove shaded panels behind the key and credits; the map remains
+visible behind them. These choices replace the earlier curved headings and
+bottom backdrops. Implementation and verification belong in
+[work.md](work.md#horizontal-radar-heading-and-plain-language-key--october-15-2026).
+
+The user approved this U.S.-first source route
+on October 15, 2026. Admit the existing resolved location label's final `US`
+country code; other or missing country codes disable Radar without changing
+any other weather feature. Do not infer a country from a broad latitude/
+longitude rectangle or add a saved country field, migration or extra lookup.
+This first pass does not promise coverage of territories with separate country
+codes.
+The October 15 follow-up capitalizes Radar in the screen heading.
+Keep the original approved single-line source-credit layout for this pass. The
+user deferred the proposed three-line, 18-pixel credit redesign on October 15.
+Source names must still match the data providers actually used; the layout
+deferral does not approve attributing a replacement map source to USGS.
+
+The approved full-screen revision uses a fixed map **75 miles across** (about
+120.7 km), centered on the saved weather location: 37.5 miles (about 60.4 km)
+from the center to the screen's circular edge. It replaces the initial 50-mile
+inset map. This is a ground-distance coverage
 requirement, not a provider zoom-level number. Keep this coverage when units or
 latitude change. Use a small marker for that location, automatic updates and a
 visible frame timestamp. The marker represents the resolved weather location, not the
 clock's precise physical position. Show only the latest image; no animation,
 timeline, zoom or pan controls are introduced. Preserve the selected appearance,
 town labels, legend and source credits. After a failed update, keep the last
-image with its original timestamp and clearly mark it as old. If no image has
-been received, show “Radar unavailable.” These first-version choices were
+image with its original timestamp and clearly mark it as old. For an enabled
+Radar page with no image yet received, show “Radar unavailable.” These first-version choices were
 approved on October 15, 2026; they do not establish a completed implementation.
 
 Check RainViewer for a newer frame every **five minutes** after the initial
@@ -654,9 +742,11 @@ two hours of past frames at ten-minute intervals, a maximum zoom of 7 and
 100 requests per IP per minute; future radar frames are unavailable. These
 detailed limits take precedence over the main API page's older FAQ statements.
 
-The background-map source remains undecided. This choice
-does not introduce new radar settings, source paths or task ownership; those
-depend on the eventual implementation design. Implementation status belongs in
+The [USGS map services](https://www.usgs.gov/faqs/what-are-terms-uselicensing-map-services-and-data-national-map)
+are public-domain sources. Requested acknowledgment: “Map services and data
+available from U.S. Geological Survey, National Geospatial Program.” The original
+single-line `RainViewer · USGS` screen credit remains. Keep the current location's
+background and names in RAM; no persistent map store is introduced. Implementation status belongs in
 [work.md](work.md#radar-source-and-palette-decision--october-13-2026).
 
 ### House Messages
@@ -711,14 +801,14 @@ UI screen assignments follow the [approved visual reference](#ui-and-visual-refe
 
 | Owner | Responsibility and authoritative state |
 |---|---|
-| `main.c` | Startup and application task creation. Its existing weather worker owns refresh/retry timing, the last successful weather payload and fetch/stale status. The UI heartbeat assembles copied owner snapshots; UI selects their presentation. Alarm, time-trust and appearance decisions remain with their feature owners. |
+| `main.c` | Startup and application task creation. Its existing weather worker owns forecast refresh/retry and independent Radar check deadlines, the retained forecast payload and copied Radar publication. It reports an offline due Radar check to the image owner. The UI heartbeat assembles copied owner snapshots and acknowledges safe image replacement; UI selects their presentation. Alarm, time-trust and appearance decisions remain with their feature owners. |
 | `device_config.c/.h` | Applied user settings, defaults, validation, serialized settings writes and publication after successful saves. Settings UI owns drafts. |
 | `connectivity.c/.h` | Network initialization, connection and scan state, and network-time synchronization transport/completion. Time trust and system timezone application belong to `clock_time`. |
-| `weather_client.c/.h` | Serialized weather requests, provider decoding and in-memory key-specific quota admission deadlines. Refresh/recovery scheduling and the retained payload belong to the weather worker in `main.c`. |
+| `weather_client.c/.h` | Serialized weather/Radar requests, provider and PNG decoding, in-memory forecast-key quota admission, and the current Radar preparation/image buffers. Forecast/Radar scheduling and copied publication belong to the existing weather worker in `main.c`. |
 | `forecast_representative.c/.h` | Representative forecast calculation; no live weather state. |
 | `storm_conditions.c/.h` | Conditions and storm-summary calculation; no live weather state. |
 | `location_lookup.c/.h` | Geocoding requests and lookup results. `device_config` owns saved location values. |
-| `location_scoring.c/.h` | Query parsing, candidate ranking and label formatting; no saved location state. |
+| `location_scoring.c/.h` | Query parsing, candidate ranking, resolved-label formatting and country-token checks; no saved location state. |
 | `timezone_table.c/.h` | Timezone mapping data used for validation and conversion. `clock_time` applies the selected mapping to the system clock's local-time rules. |
 | `weather_icon_names.c/.h` | Condition-to-icon mapping and rendering resources, including generated image assets; no weather state or refresh decisions. |
 | `message_service.c/.h` | Message records, acknowledgments, shared-client cache, hub role/discovery, message network operations and browser delivery. UI owns device navigation. |
@@ -738,7 +828,44 @@ UI screen assignments follow the [approved visual reference](#ui-and-visual-refe
 
 A copied value is a snapshot for a consumer, not another authority. Runtime fields about time and appearance come from their owners. Screens do not calculate alarm eligibility, infer RTC health, or drive the backlight. Feature-owner headers declare their own data; `app_runtime.h` holds data used for display, including values required by the approved weather age/stale presentation. Intermediate forecast calculations stay with `weather_client`; the display consumes the selected icon. The weather snapshot retains both time-format versions of the visible Conditions captions, produced from the same downloaded data by the existing calculation. The view selects the applied format; it does not retain another weather model or recalculate weather decisions. There is no general `wac_types.h` container. DS3231 access reuses the board bus and existing driver facilities without creating a second bus or an application fork of downloaded drivers.
 
-Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. Clock object handles remain private to `clock_views.c`; its private interface receives display inputs and callbacks from `ui.c` without exporting the shell's state or retaining another service/configuration model. Forecast, Conditions, message and weather-status object handles remain private to `weather_views.c`; the shell supplies current drawing inputs and visibility, without directly manipulating those objects. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
+Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. Clock object handles remain private to `clock_views.c`; its private interface receives display inputs and callbacks from `ui.c` without exporting the shell's state or retaining another service/configuration model. Forecast, Radar, retained Conditions, message and weather-status object handles remain private to `weather_views.c`; the shell supplies current drawing inputs and visibility, without directly manipulating those objects. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
+
+Repeated UI updates leave unchanged static image sources, palettes and playback
+labels alone. Compare immutable assets with the source already held by LVGL;
+small private applied-palette markers reset with their views. Weather validity,
+message importance, Day/Night changes and dynamic notices still update their
+existing objects. Apply Digital's final Day or Night layout directly. Mutable
+Radar image descriptors retain their explicit generation-based replacement and
+eviction; source-pointer equality alone cannot identify a new Radar frame.
+
+Analog tick objects use small bounds around their unchanged line endpoints,
+with the line widget's normal stroke margin. This lets LVGL skip ticks outside
+the drawing strip without changing their appearance or adding an image cache.
+
+Radar uses the bundled LVGL LodePNG decoder, with dimensions and decompressed
+sizes checked before decoding. Large request, decoder and pixel allocations use
+PSRAM. Grow Radar HTTP response and PNG decoder buffers by allocating, copying
+and freeing, so a large copy runs outside the SDK heap lock that masks interrupts.
+The existing PNG hook uses the SDK's allocated-size query, without a size registry.
+A failed allocation retains the old buffer and follows the existing failure path;
+growth temporarily holds both buffers. Initialize only the decoder's image-buffer
+allocation handlers under the
+initial display lock; preserve display, layer and font handlers. Decode and
+compose outside the display lock. The weather client owns one current-location
+luminance background and two final BGRA images. At 800×800 pixels these three
+buffers use 5,760,000 bytes; request and decoder scratch is separate and released
+after each image step. The same owner keeps 1,600 bytes of horizontal sampling
+scratch, calculating each output column's source coordinate once per tile.
+Validate all source colors before composition, and skip fully transparent blends
+without changing sampling, palette or alpha arithmetic. The final image is opaque through the circular rim; the
+physical screen clips its square corners. A complete image stays immutable
+while published. The heartbeat replaces or detaches the UI image source and
+evicts its cached descriptor under the display lock, then acknowledges that
+generation. Only then may the client reuse the previous slot, including when
+Radar is hidden. Keep a failed short-copy publication pending instead of losing
+its buffer handoff. The existing weather worker advances one bounded image step
+between opportunities to service forecast and time work; no new worker, queue,
+image store or general job mechanism is introduced.
 
 ### Execution
 
@@ -759,9 +886,11 @@ paths on hardware rather than relying on native stack behavior.
 
 Use ESP-IDF's existing memory-placement settings to keep larger software
 allocations and TLS working data in PSRAM, preserving internal memory for task
-stacks and hardware transfers. The ordinary allocation preference is 2,048
-bytes, keeping the MP3 input and smaller filesystem buffers internal-preferred;
-the SDK may still fall back when its preferred region cannot satisfy a request.
+stacks and hardware transfers. Ordinary allocations above 1,024 bytes prefer
+PSRAM, including typical received Wi-Fi packet copies and audio software buffers.
+Smaller ordinary allocations prefer internal RAM; the SDK may still fall back
+when its preferred region cannot satisfy a request. Explicit hardware memory
+requirements and the existing 32 KiB internal reserve remain unchanged.
 TLS selects external software allocation while its hardware transfer descriptors
 remain internal. Keep these choices in `sdkconfig.defaults`, without a custom
 allocator or driver fork. They preserve save behavior and weather validation
@@ -778,7 +907,11 @@ work on core 0. Set the existing LVGL worker and UI heartbeat to core 0 through
 the public BSP display configuration and ESP-IDF task creation facilities;
 retain the other BSP defaults and task priorities. This prevents an unpinned
 display task or the P4's floating-point pinning from placing drawing on the
-audio core. Recording repeats close and reopen the same retained filename,
+audio core. Pin the existing weather worker to core 1 at its existing priority,
+shared with audio, so network and Radar processing do not consume the heavily
+loaded drawing core. Preserve normal request spacing and bounded publication
+under the display lock. Recording repeats close and reopen the same retained
+filename,
 using SPIFFS's cached lookup rather than a backward seek through the partition;
 retain decoder reset, exact sample counts and joined tail/head chunks. Failed
 reopens follow the existing Stopped/error and explicit-retry rules.
@@ -850,10 +983,15 @@ Dismiss and alarm recovery. This does not change audio feedback inside the
 preview or Sound Machine editors.
 
 The Alarm editor previews its draft's next scheduled time through the existing
-pure `alarm_schedule` calculation using supplied usable clock time. This is
-display-only: it does not handle, arm or save an occurrence. Live recovery,
-handled occurrences and snooze remain with `alarm`; the editor retains its
-existing alarm-time formatter and caption layout.
+pure `alarm_schedule` calculation using supplied usable clock time. For an
+unchanged saved one-time schedule, display the alarm owner's copied dated target
+or captured ringing/snoozed occurrence instead of calculating a new day. With
+usable time but no upcoming/captured occurrence, show **No upcoming alarm**;
+do not invent tomorrow's alarm or claim synchronization is pending. This is
+display-only: the editor does not handle, arm or save an occurrence. Live
+recovery, handled occurrences and snooze remain with `alarm`; the editor retains
+its existing alarm-time formatter and caption layout. Automatic Off refreshes
+only the immediate enabled control/baseline, preserving other draft edits.
 
 Ringing hides the existing Settings root without closing it; the draft, active
 input and keyboard retain their single owner. A later Settings swipe resumes
@@ -867,7 +1005,10 @@ The existing UI heartbeat gathers owner snapshots before taking the display lock
 Schedule its updates at fixed one-second intervals, including its work in that
 period. After an overrun, update current state without replaying missed frames.
 Retain the UI task's minimum-stack observation after valid weather updates,
-outside the display lock, for the measured stack-fault correction. Retire the
+outside the display lock, for the measured stack-fault correction.
+The existing UI heartbeat uses a 12 KiB stack after board runs came within
+332 bytes of 6 KiB and 580 bytes of 8 KiB. Keep margin beyond the measured demand without
+adding a task or changing drawing priorities. Retire the
 visual-only object/asset/hand-angle diagnostics and their renderer interface;
 ordinary operational status and error logs remain.
 It consumes a pending message-dismissal result only after acquiring that lock, so the message owner retains the result while the display is busy. On consuming an alarm completion, refresh only its short copied owner state under that lock so an earlier frame or result cannot replace a newly resumed ring. That read performs no I/O. Only UI code under the display lock changes LVGL objects. Keep state-copy locks short; never hold them during I/O. Hardware reads and small operating-record writes can take time; this design does not promise uninterrupted real-time execution during flash operations. Measure interaction and alarm latency during implementation rather than adding speculative workers now.
@@ -882,7 +1023,7 @@ Use explicit update operations for the actual Save actions. The settings UI owns
 
 Serialize settings writers. Validate before writing, check NVS return values, and publish a new in-memory configuration after a successful save. Use a short lock for copying the published configuration, distinct from the slow save operation. On failure, follow the [editing and saving rules](#editing-and-saving-user-settings) and keep the previously applied running configuration; do not report rollback. Some stored keys may already have changed and will be read on the next normal startup, as allowed under [Editing and saving user settings](#editing-and-saving-user-settings).
 
-Alarm data needs only the current relevant occurrence, snooze, dismissal and one pending missed notice, not a history log. Use a small explicit representation for those fields. Failed operating-record writes follow the [alarm and snooze recovery rule](#alarm-and-snooze). Use one last-effective-appearance value in the Night Shift owner. Warning persistence is governed by [Time and RTC](#time-and-rtc) and introduces no record. These operating records are not part of settings Save and do not rewrite preferences.
+Alarm data needs only the current relevant occurrence, the one-time target/consumed state when used, snooze, dismissal and one pending missed notice, not a history log. Use a small explicit representation for those fields. Failed operating-record writes follow the [alarm and snooze recovery rule](#alarm-and-snooze). Use one last-effective-appearance value in the Night Shift owner. Warning persistence is governed by [Time and RTC](#time-and-rtc) and introduces no record. These operating records are not part of settings Save; one-time automatic Off is saved separately through the settings owner as approved above.
 
 Initialize NVS once in startup. A reported initialization failure must be visible and must not trigger a blanket erase/retry. Stop storage-dependent startup on that failure rather than adding an automatic repair service. Normal missing settings receive defaults; an actual read error is reported rather than treated as a missing key.
 
@@ -911,16 +1052,16 @@ Paths are relative to the repository root. This is the structural allocation, no
 ```text
 targets/esp32-p4/
   main/
-    main.c                              Startup, application tasks and weather refresh
+    main.c                              Startup, application tasks and weather/Radar scheduling
     app_runtime.h                       Copied status for display
     app_ui.h                            Sole public UI interface
     device_config.c / .h                Settings defaults, validation and NVS saves
     connectivity.c / .h                 Wi-Fi connections/scans and network time
-    weather_client.c / .h               Weather requests and response decoding
+    weather_client.c / .h               Weather/Radar requests, decoding and image buffers
     forecast_representative.c / .h      Representative forecast calculations
     storm_conditions.c / .h             Conditions and storm summaries
     location_lookup.c / .h              Geocoding requests and lookup results
-    location_scoring.c / .h             Location query parsing, ranking and labels
+    location_scoring.c / .h             Location query parsing, ranking and resolved labels
     timezone_table.c / .h               Timezone mapping data
     weather_icon_names.c / .h           Weather code to icon-name mapping
     message_service.c / .h              Message records, hub and browser operations

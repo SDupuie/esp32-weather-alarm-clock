@@ -14,6 +14,7 @@
 /* Pressure naturally swings about 1 hPa twice a day (the atmospheric tide),
  * so anything inside this band reads as steady rather than as weather. */
 #define PRESSURE_STEADY_HPA 1.5
+#define PRESSURE_FAST_DROP_HPA 3.0
 
 #define KMH_PER_MPH 1.609344
 #define HPA_PER_INHG 33.8639
@@ -54,7 +55,6 @@ typedef struct {
 typedef struct {
   double gust_kmh;
   double wind_kmh;
-  double pressure_drop_hpa;
   double heavy_precip_mm_hr;
 } thresholds_t;
 
@@ -286,7 +286,6 @@ static thresholds_t storm_thresholds(const storm_conditions_config_t *config)
   thresholds_t t;
   t.gust_kmh = imperial ? 40.0 * KMH_PER_MPH : 64.0;
   t.wind_kmh = imperial ? 25.0 * KMH_PER_MPH : 40.0;
-  t.pressure_drop_hpa = 3.0;
   t.heavy_precip_mm_hr = 7.6;
   return t;
 }
@@ -297,7 +296,6 @@ const char *storm_alert_kind_name(storm_alert_kind_t kind)
     case STORM_ALERT_THUNDER: return "thunder";
     case STORM_ALERT_GUSTS: return "gusts";
     case STORM_ALERT_WIND: return "wind";
-    case STORM_ALERT_PRESSURE: return "pressure";
     case STORM_ALERT_PRECIP: return "precip";
   }
   return "";
@@ -427,9 +425,6 @@ bool storm_conditions_build(
   } else if (ahead_wind.ok && ahead_wind.value >= t.wind_kmh) {
     add_alert(out, STORM_ALERT_WIND, "High winds");
   }
-  if (pressure_change.ok && pressure_change.value <= -t.pressure_drop_hpa) {
-    add_alert(out, STORM_ALERT_PRESSURE, "Falling pressure");
-  }
   if (ahead_precip.ok && ahead_precip.value >= t.heavy_precip_mm_hr) {
     add_alert(out, STORM_ALERT_PRECIP, ahead_snow.ok && ahead_snow.value > 0 ? "Heavy snow" : "Heavy rain");
   }
@@ -449,7 +444,7 @@ bool storm_conditions_build(
   const char *pressure_status = NULL;
   const char *pressure_meaning = NULL;
   if (pressure_change.ok) {
-    if (pressure_change.value <= -t.pressure_drop_hpa) {
+    if (pressure_change.value <= -PRESSURE_FAST_DROP_HPA) {
       pressure_status = "Dropping fast";
       pressure_meaning = "Can mean a storm is coming";
     } else if (pressure_falling) {
@@ -628,8 +623,6 @@ bool storm_conditions_build(
       } else {
         snprintf(phrase, STORM_TEXT_LEN, "%s now", out->alerts[a].label);
       }
-    } else {
-      snprintf(phrase, STORM_TEXT_LEN, "Pressure dropping fast");
     }
     phrase_count++;
   }
@@ -639,9 +632,6 @@ bool storm_conditions_build(
     if (phrase_count > 1) {
       out->has_detail = true;
       snprintf(out->detail, sizeof(out->detail), "%s", phrases[1]);
-    } else if (out->alerts[0].kind == STORM_ALERT_PRESSURE) {
-      out->has_detail = true;
-      snprintf(out->detail, sizeof(out->detail), "%s", pressure_meaning);
     }
   } else {
     /* Nothing alert-worthy in the next few hours, but the headline still

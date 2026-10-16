@@ -38,3 +38,6 @@ void location_scoring_format_label(
   char *output,
   size_t output_size
 );
+
+/* Read the final country token from an already resolved label, not a user query. */
+bool location_scoring_label_has_country(const char *label, const char *country_code);

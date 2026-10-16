@@ -48,7 +48,7 @@ this work record tracks delivery and evidence.
    Weather controls. New provider behavior expands the available choice; no menu
    redesign, provider framework, permanent worker, queue or extra store is planned.
 4. Closure and board pass. Independently review correctness and necessity,
-   run affected checks plus the regression suite, compile ESP-IDF5.5.5, inspect
+   run affected checks plus the regression suite, compile ESP-IDF 5.5.5, inspect
    payload/heap/stack/asset sizes, then flash and verify images/boot. Check real
    provider/key switching, units and weather rendering with bounded user
    observations. Restore temporary choices, keep normal firmware operating and
@@ -326,13 +326,918 @@ remains unimplemented. This follow-up changes documentation only.
 
 ## Prepared Weather Radar sprint — October 15, 2026
 
-**Status: prepared locally and held unsent at the user's explicit request.**
-Intended recipient: **Development Orchestration**
-(`01a11e52-7ce0-78f3-a2e5-efcb90c7aa16`). No message has been sent and no
-implementation, board load or remote action starts through this preparation.
-Obtain the user's instruction to dispatch before sending the handoff. Preserve
+**Status: software implemented and verified October 15, 2026; authorized board
+load, initial live Radar and basic physical stability/touch checks pass. Detailed
+layout and broader concurrency/recovery checks remain.** The sprint was dispatched with delivery confirmed
+by the task messaging tool.
+Recipient: **Development Orchestration**
+(`01a11e52-7ce0-78f3-a2e5-efcb90c7aa16`). The user explicitly instructed sending
+the reviewed sprint, ending the earlier hold. Preparation itself changed no
+firmware or board state. Implementation and verification now belong to the
+recipient; confirmed delivery is not evidence of implementation completion.
+No commit, push, merge, flash or release packaging was authorized. Preserve
 the recipient's current notification review, pending firmware list, Sound
 Machine work and other changes in this shared `main` checkout.
+
+### Implementation start — October 15, 2026
+
+Development Orchestration received the handoff after creating checkpoint
+`b6add54`. The initial slice is checking actual 50-mile background images,
+readable dynamic town names, current RainViewer inputs and bounded PNG decoding
+before changing firmware. Existing source/tests remain at the verified
+notification checkpoint. Public image samples and findings are local evidence
+under `.reviews/main/radar-sprint-2026-10-15/`; provider and decoder proposals do
+not become requirements merely by being recorded there. No additional commit,
+board load or source path is authorized.
+
+Credit-layout follow-up, October 15: after reviewing the proposed three-line,
+18-pixel footer, the user instructed continuing with the originally specified
+design and handling the credit redesign later. Keep the approved single-line
+footer for this pass; the proposed redesign is deferred, not a reason to pause
+independent sprint work. Source attribution must remain accurate for the chosen
+provider. The production-provider choice remains subject to the specification
+and the first implementation slice.
+
+Implementation continuation, October 15: resumed at the user's request. The user
+then approved the original USGS route for a U.S.-first Radar page. The subsequent
+instruction disables Radar outside U.S. locations rather than showing an
+unavailable page there: Forecast is the sole weather route, including during
+storm alerts, with other weather features unchanged. Actual GNIS queries
+provide nearby names without the extra providers/credits of the earlier global
+candidate. That candidate is being replaced, not adopted beside the USGS route.
+The native PNG, image handoff, five-minute worker scheduling and new UI checks
+pass; source-specific integration, full build and independent closure continue.
+Review identified and corrected the ordinary offline-check gap through the
+existing client owner: retained Radar becomes old without losing its frame time
+or pixels. Conditions rendering/tests stay retained without a production route.
+The official mockup now includes the center marker and current/old/unavailable
+Radar previews, keeping the original single-line footer. No commit or flash is
+authorized. Detailed completion evidence and remaining hardware limits will be
+recorded at the software checkpoint.
+
+### Software checkpoint — October 15, 2026
+
+Implemented in the existing weather client/worker and UI owners. The production
+page uses USGSTopo, actual GNIS names and RainViewer, with the shared resolved
+country check disabling Radar outside U.S. locations. Native UI checks cover
+the Forecast-only route, storm destination, no Radar objects and both country
+transitions, including a hidden image or ringing alarm. U.S. locations retain
+normal/alert ordering and current/old/unavailable presentation. The approved
+pressure-only alert removal preserves pressure information and other triggers.
+Conditions code/assets and its useful tests remain, without a device route.
+
+Parent verification: all 44 native tests pass (19.36 seconds); the weather,
+location and 41 storm fixtures pass; the focused Radar checks and both actual
+Leander/Colorado saved-data compositions pass. Each real sample decodes its
+636×534 USGS PNG, aligns the captured radar tile and selects seven real nearby
+GNIS names. Parent inspected both data-only previews; these are not finished
+screen captures. Independent gpt-6.1-sol/high review found no remaining
+actionable defect after closure of the offline stale-publication gap. Firmware
+build passes with application size 17,270,944 bytes and 3,700,576 bytes (18%) of
+the application partition free. The mockup keeps Conditions and the original
+single-line credits, and adds the marker plus old/unavailable previews; all 11
+inline scripts parse and the Radar state checks pass without browser access.
+
+The implementation adds a net 1,114 lines across existing application, build,
+configuration and font-generator files, including 148 generated font/header
+lines. There are no new source paths, tasks, queues, dependencies or persistent
+stores. One grayscale background and two immutable final images use 3,056,616
+bytes; two image slots prevent drawing a partially replaced frame. The bundled
+decoder's PSRAM allocator binding uses one LVGL private header, which is an
+upstream-coupling cost. Real native codec high-water is about 3.40MB beyond LVGL
+startup, excluding temporary realloc copies. A conservative large-buffer
+allowance including those copies is about 8.3MB for the actual Texas sample,
+or 10.7MB under configured caps, plus smaller JSON, network and platform
+overhead. These are native observations/calculations, not measured board peaks.
+Compiler reports 2,416 bytes for the weather-worker frame, 1,552 for GNIS
+selection and 448 for PNG setup; individual frames do not establish complete
+call-chain headroom. Existing worker/UI stack allocations and the UI stack
+monitor are unchanged.
+
+Remaining: separately authorize flashing, then measure actual memory/stack and
+download/decode timing, physical layout/gestures, frame replacement and offline
+recovery, alarm preemption and concurrent recording/generated-noise continuity.
+No board result is claimed. No flash, commit, push, merge or release packaging
+was performed. Logs, actual samples, data previews and
+[closure evidence](../.reviews/main/radar-sprint-2026-10-15/closure.md) remain local.
+
+### Radar board load — October 15, 2026
+
+The user authorized flashing for Radar testing. A fresh incremental build passes;
+the application-only load on `/dev/cu.usbmodem8331401` writes 17,270,944 bytes at
+`0x10000` and verifies the written hash. NVS, bootloader, partition table and
+recorded-sound storage were not rewritten. Boot ELF identity matches
+`24312173c9d7f116d77ee97ca9b08eb6c0c7bb97cc33610b1479845004c43ec3`.
+The 65-second startup log confirms display/touch initialization, live Visual
+Crossing HTTP 200 weather and no recorded panic, overflow or Radar failure.
+The existing UI stack monitor reports a 3,240-byte observed minimum in this
+short run; this does not establish full workload headroom.
+
+A brief read-only debugger inspection confirms the saved `Leander, Texas, US`
+location, a valid non-stale Radar frame with seven real town labels, idle
+preparation, matching published/displayed generation 2 and the UI's image
+descriptor referencing the published pixels. Saved settings were not changed.
+These checks establish the first real network/image handoff, not physical
+rendering or concurrent audio performance. The first physical check was
+interrupted by the debugger issue below. Night appearance, repeated replacement/
+offline recovery, measured resource/timing and audio/alarm concurrency remain
+unverified. Evidence is in the same local sprint
+folder (`preflash-build.log`, `flash.log`, `flash-image-identity.json`,
+`startup-serial.log`, `board-first-radar-state.txt`, `board-openocd.log`).
+
+The user first saw the unavailable state, then the Leander map, unfamiliar nearby
+names and a persistent blue screen. No reset was performed before capture.
+Passive serial and all-task backtraces show no crash or blocked operation, but
+the UI time remained exactly at the earlier debugger probe. Explicit debugger
+resume changes FreeRTOS ticks from 39,311 to 53,143 and UI time by 14 seconds.
+The initial bare debugger detach had left the processors paused. The ESP-IDF
+DPI driver's per-frame DMA restart requires a running CPU; its underrun handler
+explicitly documents possible persistent blue output. A halt-induced display
+underrun is therefore the leading explanation, not a confirmed Radar source
+defect. Initial serial capture ended before resume, so no underrun log was
+captured. The debugger server is now fully shut down using its shutdown command
+(SIGINT had not stopped it). The same firmware was restarted with passive
+serial only; the user confirms Radar remains visible for the prompted minute,
+with clock and touch working. This closes that bounded retest and supports the
+debugger-pause explanation; it does not establish long-term display performance.
+The passive log contains no recorded panic/overflow/underrun/Radar failure; the
+existing UI stack monitor reaches 1,976 bytes free in this broader visit. No
+source change or reflash was made. Logs are `blue-screen-*.txt`, `blue-screen-serial.log`,
+`debugger-shutdown.txt` and `passive-retest-serial.log`.
+
+The resolved coordinates are correct for Leander. GNIS selected actual nearby
+named communities, including Walkerton, White Stone, Jinks Branch and Hunt
+Crossing, as well as Cedar Park/Jonestown. The nearest-place selection is not a
+major-city ranking; the user's unfamiliar-name observation remains an open
+presentation concern. The subsequent approved revision below replaces that
+additional label selection.
+
+### Full-screen Radar revision — approved design, October 15, 2026
+
+The user requested a full-screen map covering 75 miles across, then approved
+keeping the existing heading/timestamp/legend/credits over the map with subtle
+darkening behind them, and using brighter labels already printed in the USGS
+map instead of the separately downloaded/placed names. Product details belong
+in the [Radar specification](architecture.md#radar-source-and-palette).
+
+The user then approved removing the fade and requested an official mockup update
+for review before firmware changes. The Radar preview in
+`mockups/alarm-design.html` now uses a fresh USGSTopo 800×800 export for the
+75-mile square/circular screen, centered at the same northern Colorado sample
+location. The recorded October 13 radar is cropped using its original geographic
+extent, preserving source alignment, colors and illustrative frame time. Map
+labels/markings are brighter, additional town labels/dots and the edge fade are
+removed, and the center marker is retained. Heading/time arcs and legend/credit
+positions, sizes and Day/Night colors are preserved, with local darkening for
+readability. Current/old/unavailable states remain available.
+
+Verification: all 11 inline scripts parse; six Day/Night/status variants pass
+direct rendering-function checks. Native SVG snapshots cover all six variants,
+including opaque map pixels to the rim and transparent physical corners. The
+native renderer omits SVG textPath, so snapshot exports place the same font
+glyphs along the same arcs; official HTML retains its original textPath drawing.
+These are static render/source checks, not browser or board screenshots. The
+non-Radar renderer content and outer document are byte-identical after excluding
+the Radar CSS/markup changes. Hash checks preserve all 191 protected firmware,
+build/test/tool, README and other source paths. Independent projection/source
+review found no actionable issue. Evidence is local under
+`.reviews/main/radar-fullscreen-mockup-2026-10-15/`.
+
+Only the official mockup and its architecture/work records changed in this slice.
+No firmware source, build, flash or board state changed. The board retains the
+verified initial 50-mile implementation at that checkpoint.
+
+Firmware implementation authorized after the user approved the revised mockup,
+October 15, including testing and flashing. Objective: deliver that reference
+through the existing Radar owners. Permitted source paths, all existing under
+`targets/esp32-p4/`: `main/app_runtime.h`, `main/weather_client.c`,
+`main/ui/weather_views.c`, `tests/test_weather_service.c`, `tests/test_ui.c`,
+`tests/CMakeLists.txt` and `sdkconfig.defaults` if the retired town font no
+longer has a consumer. Documentation: this record, architecture, user README
+and test README. No new source paths, tasks, queues, caches or storage are planned.
+
+The approved behavior changes are full-screen 75-mile coverage, brighter map
+markings, removal of extra names and the fade, and local darkening behind retained
+information. Reuse the current two-frame publication/acknowledgment mechanism;
+retain U.S. eligibility, stale/unavailable handling, navigation, weather timing,
+alarm recovery and audio ownership. Check 800×800 PNG/response/allocation bounds,
+75-mile projection and source alignment, opaque map edges, expected color mapping,
+complete retirement of name lookups/fields/objects, existing state transitions,
+Day/Night information geometry, and unchanged other weather/alarm behavior.
+A text/font comparison in the existing curved-heading setter also avoids a
+whole-screen repaint when the heading has not changed; this rendering cleanup
+preserves appearance and was disclosed before implementation.
+Then run the full native suite and weather fixtures, build ESP-IDF 5.5.5, review
+correctness/necessity, flash without rewriting settings/sounds, and observe boot
+and real requests with passive serial only. No debugger halt is planned.
+
+#### Full-screen software verification — October 15, 2026
+
+The client now requests the 800×800, 75-mile USGS image and composes the required
+RainViewer tiles over its brighter printed map labels. All image pixels remain
+opaque; the physical round screen clips the square corners. The separate GNIS
+request, name selection, label fields/objects and fade are removed. Heading/time
+arcs, center marker, legend and single-line credits keep their approved positions.
+Small glyph halos and two softened local backdrops preserve readability over the
+map without a surrounding ring or full footer band. Unchanged heading text/font
+no longer invalidates the full display. The unused 30px town font is disabled in
+firmware and native configuration.
+
+The existing owners, two-image handoff, U.S. eligibility, navigation,
+stale/unavailable handling and forecast deadlines are retained. No new source
+path, worker, queue, cache or storage mechanism was introduced. Application source
+has a net reduction of 141 lines against the pre-revision files. Native tests add
+130 lines. Retained map/final-image buffers grow from 3,056,616 to 5,760,000 bytes;
+request/decoder scratch is separate. The Radar response limit is 3 MiB and the
+individual decoder-allocation limit is 4 MiB; forecasts retain their 192 KiB cap.
+
+Verification passes: all 44 native tests (16.98 seconds), focused Radar checks,
+weather/location and 41 storm fixtures, and real saved Leander/Colorado inputs.
+Both real 75-mile samples span two RainViewer tiles and compose successfully in
+five client steps. Native decoder peak above initialization is about 6.4 MB, with
+scratch released afterward; this uses native LVGL allocation and is not a board
+heap measurement. UI checks exercise actual drawing tasks and pixels for local
+shade and unshaded map edges/footer, plus geometry, Day/Night, status, cache
+replacement, country changes, navigation and alarm preemption. Initial new-test
+failures involved an incorrect opacity assertion and an oversized test string;
+both are corrected. The first board load exposed a missed decoder growth
+allocation: the library can reserve about 3.84 MB for a valid 800×800 PNG. The
+initial 3 MiB cap rejected it. A native run enforcing that cap reproduces the
+failure; the corrected cap is 4 MiB, with a compile-time check keeping the native
+limit in step with firmware. Dimension and decompressed-byte bounds are retained.
+Independent review confirmed the growth calculation. Final revalidation passes
+with the allocation cap enforced: all 44 native tests, focused Radar checks and
+both actual map compositions.
+
+ESP-IDF 5.5.5 builds successfully: application 17,219,584 bytes, 18% of its
+partition free. Hash checks preserve all 250 protected tracked paths, including
+the user-approved official mockup, and no source path was added or renamed.
+`git diff --check` passes. Evidence: `.reviews/main/radar-fullscreen-firmware-2026-10-15/`.
+The corrected application-only flash completed: 17,219,584 bytes written at
+0x10000 in 84.3 seconds, hash verified. NVS, recordings, partition table and
+bootloader were outside that write. Passive 75-second startup capture confirms
+the final ELF identity, display/touch initialization, Visual Crossing HTTP 200,
+five successful TLS certificate validations, and no recorded Radar failure,
+panic, overflow or display underrun. Lowest reported UI stack reserve is
+3,288 bytes. No debugger was attached. The first load's failed decode and the
+native 3 MiB reproduction are retained separately from this final result.
+
+The user confirms the screen and Radar look right and swiping back works. This
+closes the bounded full-screen revision's basic physical appearance/navigation
+check. Broader concurrency, long-running recovery and simultaneous audio checks
+remain separate; startup logs and this visual check do not establish them.
+
+### One-time alarm — authorized October 15, 2026
+
+The user approved Repeat None, its one-time scheduling/completion rules, official
+mockup/documentation updates, tests and flashing. Exact labels are confirmed:
+Alarm Settings shows Repeat **None**; the Repeat editor explains **Rings once**.
+Approved behavior belongs in [architecture](architecture.md#alarm-and-snooze).
+
+Objective: add one-time operation to the existing alarm, preserving recurring
+alarms, captured ringing/snooze, restart recovery, ordinary storage-error rules,
+drafts and approved appearance. New behavior is confined to None: retain one
+scheduled date across restarts and save Off when that occurrence finishes. A
+new optional target entry in the existing alarm namespace preserves the current
+snooze/dismissal blob without a migration or another store. No new files,
+workers, queues, history or generic scheduling/storage mechanisms are planned.
+
+Permitted existing sources: `main/alarm.c/.h`, `main/alarm_schedule.c/.h`,
+`main/device_config.c/.h`, `main/main.c`, `main/ui/settings.c`, `main/ui/ui.c`,
+`main/ui/ui_private.h`, and existing `tests/test_alarm.c`,
+`tests/test_alarm_schedule.c`, `tests/test_device_config.c`, `tests/test_ui.c`
+under `targets/esp32-p4/`. Supporting changes: the official mockup, architecture,
+user README, this record and test README. The settings UI receives the existing
+copied alarm state through the heartbeat to retain the fixed date and reflect
+automatic Off without applying or discarding unrelated draft edits.
+
+Delegation: gpt-6.1-sol/high for core/calendar and focused recovery tests;
+gpt-6.1-sol/high for Repeat controls, UI tests and official mockup; independent
+gpt-6.1-sol/high correctness/YAGNI/MECE review. The parent owns settings storage,
+UI hookup, docs, integration and final verification. One writer per file.
+
+Acceptance: None shortcut and all-days-cleared state, None/Rings once labels,
+Done/Save/reload/Cancel, Today/Tomorrow and fixed-date previews in both appearances;
+today/tomorrow/exact-due/midnight/DST scheduling; restart before/during/after due,
+ordinary missed handling, snooze and Dismiss/Off/rearm; recurring/one-time edits
+and pending notices; conditional enabled-only save and failures. Run affected
+and full native checks, validate official mockup scripts/handlers and geometry,
+build ESP-IDF 5.5.5, then app-only flash and passive startup verification. Hardware
+observations remain separate from native simulated time/storage cases.
+
+Implemented in the existing owners. Zero repeat days is valid None; the calendar
+calculator chooses one candidate at or after now, and the alarm owner retains
+its date and consumed state in an optional 16-byte `one_time` entry. The original
+56-byte operating blob is unchanged. The existing clock writer calls the settings
+owner's conditional completion operation, which saves only enabled Off if the
+applied None time still matches. Successful explicit Snooze/Dismiss also saves
+the current target; no tick-based retries or unrelated settings writes were introduced.
+
+The editor and official mockup show None in the Repeat row and Rings once below
+the day buttons. None, Weekdays and Every Day fit on the same shortcut row using
+the original font and Day/Night styles. Clearing all days, Done/Save and Cancel
+work normally. The unchanged saved None preview consumes the owner's dated
+next/current occurrence; an empty consumed target shows No upcoming alarm,
+without inventing tomorrow or claiming time is unavailable. Automatic Off changes
+the immediate switch/baseline in place, retaining unrelated drafts. Mockup
+one-time Dismiss also turns Off; recurring Dismiss and Snooze remain unchanged.
+
+Parent verification: all 44 native tests pass; the final run takes 16.39 seconds. Coverage includes
+None today/tomorrow/exact due, midnight/year/DST dates, restart catch-up/missed
+and snooze recovery, Off/Dismiss/rearming, replacement schedules, fixed owner
+previews and automatic Off, all-days-cleared selection, Save/reload/Cancel, actual
+font/round-screen geometry in Day/Night and storage failures. Old tests that
+classified zero days as invalid were updated; the invalid stored mask case now
+uses bit 7. A parent mockup-check substitute initially read its fake time from
+the wrong JavaScript context; correcting that test binding made the independent
+Today/Tomorrow check pass. No production timing defect was involved.
+
+All 12 wrapper/embedded scripts parse, escaped content round-trips exactly, and
+the actual extracted mockup helpers/handlers pass None labels/selection,
+Today/Tomorrow/exact due, Save/Cancel, Snooze and one-time/recurring Dismiss checks.
+These are source/native checks, not browser screenshots or physical touch tests;
+no prior browser-access restriction was bypassed.
+
+Independent correctness/YAGNI/MECE review found no remaining consequential issue
+after correcting the consumed-target preview and test-guide wording. The fixed
+date and consumed flag have a current restart-recovery purpose; existing owners
+keep settings, alarm state and presentation separate. Net production growth for
+this slice is 157 lines including comments and the two copied-state hookup lines.
+No source path, worker, queue, framework or store was added. The additional NVS
+entry has a 16-byte payload, plus NVS metadata. All 242 protected tracked files
+remain unchanged. ESP-IDF 5.5.5 builds successfully: image 17,219,920 bytes,
+2,000 bytes above the preceding image, with 18% application partition free.
+Final ELF SHA-256: `72623cfd114710ea54b7c6e92df681932de47c2ad23a91a8518a850819ab6612`.
+
+The first verified load (`1f8109e9a…`) initializes display/touch and live weather,
+but its 60-second capture reports UI-stack reserve falling from 3,412 to 332
+bytes. This is a measured reliability concern, not a crash reproduction; the
+triggering call chain and whether the board was being used are unestablished.
+Disassembly shows the new copied-state update uses a 16-byte frame and no large
+config stack copy. The two caption refreshes were sequential, so they do not
+explain the 3,080-byte drop. The duplicate refresh was nevertheless removed from
+the new input update; the heartbeat now copies alarm state before its existing
+single clock/caption refresh. Actual UI tests follow that same order.
+
+An 8 KiB comparison (`940203759…`) still reports only 580 bytes remaining, so it
+was not accepted as sufficient. The associated logs/identity use `-8k` suffixes.
+A temporary 12 KiB diagnostic build recorded static per-stage watermarks and
+the active route, emitting only after sampling to avoid misattributing logging
+cost. Its 60-second capture records `route=0` and remains at 9,464 bytes spare
+through every measured update stage and before/after the existing monitor log.
+It did not reproduce the earlier low readings or identify their triggering path.
+The retained route value alone does not establish Settings visibility or prior
+interaction. The user later reported being unsure whether Alarm or Repeat was
+opened. That detail and the low path's cause remain unknown.
+
+Disclosed final correction: retain 12 KiB in the existing UI heartbeat, adding
+6 KiB RAM without another task or changed priorities/rendering. This leaves
+4,676 bytes beyond the largest observed demand (8,192 minus 580). Independent
+review agrees that this is proportionate sizing for the observation; it is not
+claimed to explain the call chain. All temporary trace globals, calls and logs
+are removed from source, and the existing stack monitor remains. All 44 tests
+and the firmware build pass again. `main.c` differs from its preceding source
+only in the stack-size literal; unrelated startup/Radar work remains intact.
+Diagnostic logs are retained as evidence of the measurement, not additional
+requirements or production code.
+
+Authorized final app-only flash passes: 17,219,920 bytes at `0x10000` in 84.6
+seconds, with the written hash verified. Settings, recordings, bootloader and
+partition table remain outside the write. The completed 75-second passive capture
+confirms final ELF identity, display/touch readiness, Visual Crossing HTTP 200
+and live weather, without a recorded panic, overflow, display underrun or alarm
+operating failure. Minimum reported UI stack reserve is 9,428 bytes on this
+startup/normal-clock run. No debugger was used; flash/capture processes are
+closed and the trace-free normal firmware remains running.
+
+Completed: implementation, mockup/docs, native and firmware verification,
+independent review, verified flash and passive startup. The earlier low-stack
+trigger remains unexplained; the larger allowance covers the largest measured
+demand, while this run does not establish every possible UI peak. No physical
+None-editor interaction, one-time audible ring or power-cut case was performed
+in this slice. Their state/calendar/recovery behavior is tested through actual
+production functions with native clock/storage substitutions. No saved settings
+were changed for the board check, and no commit or push was performed. Evidence:
+`.reviews/main/one-time-alarm-2026-10-15/`.
+
+### Snooze caption and Repeat test-guide correction — authorized October 16, 2026
+
+The user approved fixing both October 15 review leftovers and selected the
+common Snoozed footer **Alarm snoozed**. This replaces the recurrence claim for
+both one-time and recurring alarms, using the same position, font and style.
+Snooze, Dismiss, automatic Off, scheduling and restart recovery are unchanged.
+The official mockup owns the approved wording; no extra state is needed.
+
+Permitted existing files: `main/ui/clock_views.c`, `tests/test_ui.c` and
+`tests/README.md` under `targets/esp32-p4/`, `mockups/alarm-design.html` and
+this work record. Correct the stale test-guide claim that selecting no weekdays
+blocks Done: None is accepted. No new source paths, modules or mechanisms.
+
+Acceptance: the existing Day/Night Snoozed layout checks expect the new caption;
+firmware and official mockup use the same text; the guide describes valid None
+selection; native checks and ESP-IDF 5.5.5 build pass.
+
+Completed: renderer, official mockup, existing Day/Night layout assertion and
+test-guide sentence corrected. All 44 native checks pass in 19.34 seconds,
+including the actual LVGL Snoozed caption/layout and alarm recovery checks.
+All 11 nonempty wrapper/embedded mockup scripts parse, and its escaped device
+document round-trips exactly. Restoring the old text in memory reproduces the
+pre-slice hashes of all four caption/guide files, proving their remaining bytes
+are unchanged. ESP-IDF 5.5.5 builds successfully: 17,219,904-byte application,
+18% of its partition free. No source path, state or interface was added.
+Independent bounded review found no remaining mismatch or unnecessary mechanism.
+No board flash or physical check was performed. Local evidence:
+`.reviews/main/snooze-caption-2026-10-16/`.
+
+### Repeat row centering — authorized October 16, 2026
+
+The user reported that Mon–Thu was not centered with None/Weekdays/Every Day
+and requested all rows centered. The first weekday row's midpoint was 384.5px;
+Fri–Sun was 385px. The shortcut row, explanatory labels and Done already use
+the 800px screen's 400px center. Correct both weekday rows to that center,
+using 12px gaps and the existing 116×96 buttons. Keep vertical positions,
+selection/checkmarks, shortcuts, typography and draft/save behavior unchanged.
+The official mockup receives the same positions.
+
+Permitted existing files: `main/ui/settings.c`, `tests/test_ui.c` and
+`tests/README.md` under `targets/esp32-p4/`, `mockups/alarm-design.html` and
+this record. No new source paths or layout machinery. Acceptance: actual
+Day/Night LVGL checks measure all three button rows centered at x=400; the
+reference uses matching coordinates; native checks and firmware build pass.
+
+Completed: both weekday rows now center at x=400, matching the shortcut row,
+captions and Done. The existing Day/Night checks verify actual LVGL row edges,
+button geometry, selected/unselected styling and draft/Cancel behavior. Executing
+the actual mockup Repeat helper with drawing substitutes measures the same
+centers and 12px gaps. All 11 nonempty scripts parse and escaped device HTML
+round-trips exactly. Reversing the coordinate replacement in memory reproduces
+the pre-slice renderer/mockup hashes: all their other bytes are unchanged.
+
+All 44 native cases have passing results. The first suite run passed 43/44;
+the broader `ui_shell` case reached its 15-second limit. Its unchanged binary
+then passed alone in 11.16 seconds and under CTest in 11.00 seconds with the
+original limit retained. The cause of the initial overrun was not established;
+its log remains alongside the passing runs. ESP-IDF 5.5.5 builds successfully:
+17,219,904-byte application, 18% partition free. Independent bounded review
+found no remaining alignment or ownership issue. All 256 other tracked paths
+are unchanged. No board flash or physical check was performed.
+Evidence: `.reviews/main/repeat-centering-2026-10-16/`.
+
+### Repeat presets mockup — requested October 16, 2026
+
+Status: official mockup updated for user review. Firmware implementation and
+physical verification remain pending; this request authorizes the mockup first.
+The selected design changes the Repeat editor to four choices: Once, Every Day,
+Weekdays and Custom Days. Custom Days opens the existing seven day controls;
+its Back/Done return to Repeat, whose Back/Done return to Alarm. The Alarm Repeat
+row shows the actual selected-day summary, including **Mon, Wed, Fri**, with the
+existing day-count fallback for longer combinations. Empty selection reads
+**Once**, with **Rings once** guidance in the Repeat editors. This replaces the
+previous None shortcut and combined shortcuts/day-button screen in the preview.
+Scheduling, immediate On/Off and Alarm Save/Cancel behavior are unchanged.
+
+The change uses the existing mockup, one shared Alarm draft and a second rendering
+function for the nested day screen. It removes obsolete shortcut-only styling;
+no new maintained source path, settings store or firmware mechanism is added.
+Independent review and parent execution checks cover all 128 day combinations,
+selected presets, custom toggles and compact summaries. Independent execution of
+the actual action branches covers nested Back/Done, Save, Cancel and immediate
+On/Off. All 11 nonempty inline script blocks parse, including the existing JSON
+block, and escaped device HTML round-trips exactly. Wrapper and House Messages
+content remain byte-for-byte unchanged. Browser review uses the official file
+in Safari, including actual Monday/Wednesday/Friday selection and return to the
+Alarm Repeat row; rendered Day/Night evidence is retained locally. These are
+mockup checks, not firmware or hardware verification. No build, flash or commit
+is part of this slice. The approved architecture remains unchanged while the
+revised mockup awaits review; update it to the accepted wording/menu before any
+later firmware implementation.
+
+Evidence: `.reviews/main/repeat-presets-mockup-2026-10-16/`.
+
+Follow-up requested October 16: the user accepted the overall menu and requested
+Monday–Friday on one row, with Saturday/Sunday on a second row. The official
+Custom Days mockup now uses that grouping. Both rows remain centered at x=400,
+with the existing 116×96 buttons, 12px gaps and unchanged vertical positions,
+labels, selection/checkmarks, summary and Back/Done behavior. This is a coordinate
+change within the existing renderer; no new controls or state are added.
+Source checks verify all seven day buttons, both centered rows, gaps, circular
+screen clearance and unchanged selected states for all 128 combinations. All
+inline scripts parse; reversing the coordinate replacement restores the prior
+device HTML exactly, and all other mockup content is preserved. Browser security
+policy blocked access to the local-file preview in this turn, so the revised
+rendering was not inspected and no alternate browser route was used. User visual
+review of the new grouping and later firmware implementation remain pending.
+No firmware source, build or hardware changes are part of this follow-up.
+Evidence: `.reviews/main/repeat-weekday-grouping-2026-10-16/`.
+
+Centering follow-up requested October 16: the Custom Days button group now sits
+at the round display's horizontal and vertical center (400, 400). Both rows
+were already centered horizontally; moving each down 28.5px centers the pair
+vertically while preserving button sizes and all gaps. Heading, guidance,
+summary, footer and interaction behavior stay unchanged. Execution of the actual
+renderer with drawing substitutes confirms both row centers, the combined
+vertical center, button dimensions, spacing, screen bounds and summary clearance.
+All 11 nonempty script/JSON blocks parse. Reversing the sole coordinate-array
+replacement exactly reproduces the prior device HTML. Fresh visual inspection
+remains unavailable under the previously reported local-file browser policy;
+the user can refresh the open mockup to review the placement. Firmware remains
+unchanged and pending a later implementation request.
+
+Subtitle follow-up requested October 16: Custom Days now places **Choose alarm
+days** at y=174 in muted 28px type, matching the existing Sound and Alarm Sound
+short subtitles. It previously retained y=198 and 32px type from the old Repeat
+editor. This changes only that subtitle's position and size; the centered day
+rows, summary, footer and interaction remain unchanged. Execution of the actual
+renderer confirms those values, and all 11 nonempty script/JSON blocks parse.
+The exact one-line reversal reproduces the prior device HTML. Firmware remains
+unchanged; fresh browser inspection remains unavailable under the previously
+reported local-file URL policy. Source check evidence is recorded in
+`.reviews/main/repeat-weekday-grouping-2026-10-16/subtitle-validation.txt`.
+
+Repeat wording follow-up requested October 16: the user prefers None or Off
+because this choice does not repeat. The official mockup now uses **None** for
+the preset and empty-schedule summary; this supersedes the earlier Once wording
+in this preview. **Rings once** remains the explanatory text in both Repeat
+editors. None avoids confusing the choice with the separate Alarm On/Off
+switch. Only two display strings change; zero selected weekdays still means the
+same one-time schedule, with unchanged controls, draft and Save/Cancel behavior.
+Execution checks of the actual helpers/renderers confirm None selection and
+summaries, retained guidance and unchanged custom/standard/day-count summaries.
+All 11 script/JSON blocks parse; reversing the two string replacements restores
+the prior device HTML exactly. No firmware, architecture or hardware changes.
+Fresh browser inspection remains unavailable under the previously reported
+local-file URL policy. Evidence:
+`.reviews/main/repeat-weekday-grouping-2026-10-16/none-wording-validation.txt`.
+
+### Display-task stack investigation — October 16, 2026
+
+The user requested investigation of the earlier low readings and whether an
+ongoing issue remains. Scope: current source, retained raw captures/image
+identities, actual compiled stack frames and passive serial output. Preserve
+firmware behavior and saved settings. Initial read-only work did not reset or
+flash the board; the user subsequently authorized the measurement application.
+No debugger was used. Independent gpt-6.1-sol/high reviews covered the
+raw history and current call paths while the parent collected stack-usage data.
+
+Confirmed: the old 6 KiB task reported 3,412 bytes spare, then 332; the first
+8 KiB reading was already 580. These are byte-valued lifetime minima, not live
+free-memory readings or evidence that weather caused the demand. The final
+12 KiB capture reported 9,556, 9,476 and 9,428 bytes spare. The original trigger
+is unestablished; no retained capture establishes a menu visit. No overflow or
+panic was recorded in those bounded captures.
+
+Current compiler data measures a 704-byte heartbeat frame, an unconditional
+1,232-byte Settings completion-poll frame and a 512-byte render frame. A credible
+completion-to-Alarm-caption path accounts for 4,176 known nested bytes before
+helpers/context. Neither review established the full path responsible for the
+earlier 7,612-byte observed demand. This does not justify a new task, refactor
+or claimed worst-case bound. Keep the existing 12 KiB allocation.
+
+A 55-second passive USB capture completed without resetting/flashing and
+received no application output. The current monitor reports only new minima;
+silence does not reveal today's retained minimum, image identity or screen
+state. No fresh hardware headroom conclusion follows from this capture.
+
+Authorized measurement: a temporary build uses the existing `main/main.c` monitor
+every valid-weather heartbeat, removing its new-low filter and saved value.
+It adds no task, state or interface and keeps the same 704-byte heartbeat frame.
+It includes the already-approved Snooze wording and Repeat alignment fixes.
+The diagnostic binary/ELF were retained while under evaluation and retired
+after the later autonomous menu experiment restored normal firmware. All 44 native
+checks pass in 16.25 seconds and ESP-IDF 5.5.5 builds it successfully: 17,219,904
+bytes, 18% partition free. Normal source is restored byte-for-byte; its rebuilt
+ELF also matches the pre-investigation ELF exactly. Only this work record changed
+among tracked files. No diagnostic code is retained in production source.
+The user authorized “Flash the measurement build” on October 16. App-only
+flashing at `0x10000` completed with written-data hash verification, preserving
+saved settings and the other flash regions. The diagnostic ELF is
+`1987ea4fcc40c7c4d1e1500d10d0275a6921240c0b152f92f20ae99ecf91353b`.
+The unattended 12-minute serial capture completed: all 704 valid-weather
+heartbeat samples reported 9,428 bytes spare out of 12,288. Startup and the
+ordinary 10-minute Visual Crossing refresh both returned HTTP 200. During the
+refresh window, the largest logged heartbeat interval was 1,047 ms. No overflow,
+panic or unexpected reboot appears in the capture. Read-only GET requests for
+the browser page and messaging runtime also returned HTTP 200 without changing
+settings or messages. These observations do not reproduce the old low reading
+or establish a worst-case stack bound. Periodic logging can affect timing and
+also contributes to the measured stack use.
+
+One separate delay occurred at approximately 348 seconds: two display-lock
+failures accompanied a 2,900 ms interval between heartbeat entries. The log
+does not identify the lock holder or establish whether anyone interacted with
+the device. This does not establish a stack problem or a visible screen freeze;
+keep it as an unattributed observation. It did not recur during the captured
+scheduled weather refresh.
+
+Autonomous coverage uses the existing serial capture tool; no debugger or
+settings writes are needed. Current firmware has no serial or HTTP command for
+Settings navigation. A further temporary script could exercise editor rendering
+and real Wi-Fi scan completion through LVGL, but would not establish physical
+touch accuracy. No such menu script has been added, so Settings completion
+paths and physical touch/visual checks remain unmeasured in this run. The already-approved Snooze
+caption and Repeat alignment changes are included in the loaded diagnostic
+application; their physical appearance has not been checked by this capture.
+
+That run left the board on the authorized periodic-log measurement image.
+The subsequent autonomous menu experiment below restored normal firmware and
+retired the temporary images. Normal source and build artifacts are restored. All 260 other tracked paths
+still match the investigation baseline. No permanent source code, new task,
+remote-control interface or settings machinery was added. Flash and capture
+processes have finished and the serial port is closed.
+
+Evidence: `.reviews/main/stack-investigation-2026-10-16/`. This is an unresolved
+verification item, not a confirmed continuing fault or an approved redesign.
+
+### Autonomous menu stack measurement — authorized October 16, 2026
+
+The user authorized a temporary scripted build to exercise menus on the board,
+measure stack use, preserve saved settings and remove the test code afterward.
+Scope stayed within existing `main/main.c`, `main/ui/ui.c` and
+`main/ui/settings.c`. No new source path, product feature, permanent interface
+or visual change was introduced.
+
+The script ran on the existing LVGL task and sent the normal button events,
+including the existing draft/navigation handling. It opened/closed Room Name,
+Device ID, Weather Location, configured API Key, Network Name and Password
+without typing. Wi-Fi used the real scan worker; a temporary counter advanced
+only after the heartbeat consumed and rendered the matching result. Expected
+views and unchanged applied settings were checked throughout. Save, Alarm
+On/Off, network selection, Sound Machine choices/sliders and audio actions
+were not submitted. No synthetic save completion or network response was used.
+
+The first run stopped safely at Network Details because the script found both
+its header and footer Back buttons. The script was corrected to use the normal
+header arrow; no application control changed. The corrected run completed both
+61-step passes, all 25 views in each pass, 12 keyboard open/close cycles and two
+heartbeat-applied scans, each showing two networks. The completion mask was
+`0x03fffffe`. Independent gpt-6.1-sol/high review checked the script and the raw
+completed-run evidence; reviewer agreement alone was not used as verification.
+
+Lowest reported spare stack across the completed run:
+
+| Task | Allocation | Minimum spare |
+| --- | ---: | ---: |
+| Display-update heartbeat | 12,288 bytes | 8,088 bytes |
+| LVGL menu/drawing task | 8,192 bytes | 2,680 bytes |
+
+The final Settings close produced the lowest LVGL sample; earlier step samples
+bottomed at 2,812 bytes. The corrected capture contains 345 heartbeat samples
+and no watchdog, display-lock failure, stack fault, abort or unexpected restart.
+The old 332/580-byte reserve was not reproduced. These are reported lifetime
+minima for the exercised operations, not current free memory or a worst-case
+bound. Timer dispatch differs from physical pointer dispatch. Save, changed-value
+branches, gestures and physical hit targets are outside this experiment; their
+omission does not create a new required manual retest for this code-free result.
+
+Saved settings were preserved: private reads of the actual `0x9000` NVS
+partition (`0x6000` bytes) before and after the experiments were byte-for-byte
+identical, SHA-256 `d118a9a9085327558b63f6e87898c853188a492ed5c366b50fa794b917970f8f`.
+No NVS restore or erase was performed. The raw files were private mode 0600,
+never printed, and deleted after comparison; only equality/hash evidence remains.
+
+All temporary source additions were removed. The three files match their
+pre-experiment hashes exactly; all 260 other tracked paths still match the
+investigation baseline. Normal ELF and application binary also exactly match
+the pre-experiment normal build. No task allocation, priority, timeout, owner,
+queue or persistence mechanism changed. The diagnostic application was 3,472
+bytes larger only while under test; the lasting production source cost is zero.
+Private compiler outputs and test images were removed, including the now-retired
+periodic-log image from the preceding measurement. Logs, hashes and stack-usage
+evidence remain local.
+
+Validation: the diagnostic firmware builds and all 44 native cases passed in
+17.10 seconds. After source removal, normal firmware builds (17,219,904 bytes;
+18% partition free). The restored native suite passed 43 cases but `ui_shell`
+hit its existing 15-second limit at 15.01 seconds. That same binary then passed
+alone in 11.15 seconds at the unchanged limit; this is not a clean restored-suite
+pass. All 44 cases passed across those restored runs. App-only normal flashing
+at `0x10000` completed with written-data hash verification. The 90-second normal
+startup capture identifies ELF `558e4061d...`, reports display/touch readiness,
+loads live weather successfully, and reports heartbeat reserves of 9,556 then
+9,476 bytes. No watchdog, stack fault, test marker or unexpected restart appears;
+a read-only browser runtime request also succeeds. No visual/touch accuracy or
+uninterrupted drawing claim follows from these startup logs.
+
+One separate observation remains unresolved: the first partial run reported
+CPU0 idle-task watchdog starvation at uptime 19.044 seconds, before menu script
+START at 35.016 seconds. Panic was disabled and heartbeat updates continued;
+there was no reboot or stack-overflow report. Offline ELF symbols place the
+sampled PC in `lv_color_mix32` and its return address in `transform_argb8888`.
+They do not identify the image or one continuous five-second call. The storm
+pulse can cause redraw, but neither timing nor those registers establishes it
+as the cause. The corrected full run and restored normal startup did not repeat
+it. A targeted drawing-load investigation is a recommendation, not an approved
+fix or justification for changing priorities/timeouts. The earlier unrelated
+2.9-second display-lock gap likewise remains unattributed.
+
+Normal firmware is running; flash/capture processes finished and the serial
+port is closed. No permanent test code or new source file was added. No commit or push occurred.
+Evidence: `.reviews/main/menu-stack-2026-10-16/summary.md` and its raw logs,
+`menu-results.json`, `storage-comparison.json`, `source-restoration.json`,
+`normal-identity.json`, `normal-results.json` and `cleanup.json`.
+
+### Drawing watchdog investigation — authorized October 16, 2026
+
+Status: investigation complete; no production fix retained. The warning is
+reproduced in both temporary measurement builds and the restored,
+uninstrumented normal firmware. It concerns core-0 idle starvation, not the old
+low-stack reading. No stack allocation, priority or watchdog setting was changed.
+
+The board's actual weather warning was active on Digital Day during startup,
+before forced test cases. Individual initial-phase refreshes stayed below
+137 ms while the measured idle gap reached seconds; a later gap reached
+39.868 seconds. Repeated short drawing work and weather/Radar processing can
+therefore keep core 0 busy without one five-second drawing call. Flush-callback
+and image timing distinguish this from assuming a long panel-transfer wait.
+Their elapsed times include preemption; they are not CPU-use percentages.
+
+Temporary logging confirms the existing weather worker begins without core
+restriction on core 0 and becomes tied to core 0 after forecast processing.
+The installed ESP-IDF P4 port pins a task to its current core when it first uses
+a coprocessor, such as floating-point arithmetic or PIE; the log does not
+identify the first such instruction. Drawing is already explicitly on core 0.
+
+A comparison explicitly places that same weather worker on core 1, preserving
+its priority 4 and actual workload. Across all six measured phases, including
+both faces with the real warning, there are no watchdog reports and the maximum
+observed core-0 idle gap is 213 ms. One display-lock timeout remains during a test
+transition back to Analog. This strongly supports shared-core saturation, but
+does not close every display delay. The palette-only comparison does not cure
+the warnings. Temporarily disabling image smoothing likewise does not cure it.
+The pulse-off control confirms substantial redraw load, but the approved pulse
+and image quality are preserved.
+
+Recommended next bounded fix: make the existing weather worker's core-1 placement
+explicit, then verify audio overlap before retaining it. This is a changed
+task-creation call/core argument, without a new task, queue, module or persistence
+mechanism. Audio is also on core 1 at priority 4; quiet-board results do not verify
+alarm, preview or Sound Machine continuity during Radar preparation. This
+recommendation is not recorded as an approved implementation change.
+
+All temporary code in existing main.c, ui.c and clock_views.c is removed. All
+261 tracked files matched their pre-investigation hashes before this work-record
+update. Normal ELF/application/storage images exactly match their original
+hashes. The retained UI stack monitor is unchanged. The largest temporary
+application added 4,080 bytes and approximately 4 KiB static probe state, plus
+callback/timer allocations; lasting production code or RAM cost is zero.
+
+Saved NVS storage at 0x9000/0x6000 is byte-for-byte unchanged, SHA-256
+d118a9a9085327558b63f6e87898c853188a492ed5c366b50fa794b917970f8f.
+Private raw reads are deleted; no erase or restore was performed. Normal
+ESP-IDF 5.5.5 firmware builds (17,219,904 bytes; 18% free), and all 44 native
+checks pass in 16.51 seconds. The app-only normal flash verifies written data
+and startup identifies the original ELF. Native checks do not prove drawing
+timing; this investigation's actual board traces provide the timing evidence.
+
+Limits: actual HTTP/Radar replies vary between starts; no audio, ringing, Night,
+important-message pulse, physical touch accuracy or power-cut check is claimed.
+A hidden-artwork control was overwritten by ordinary visibility updates and is
+excluded. Some captures did not observe their final DONE marker and returned
+failure; all measured phase summaries and the successful palette completion are
+retained. Source removal and normal image restoration are independently verified.
+This does not close the earlier unattributed 2.9-second display-lock gap.
+
+Evidence remains local under .reviews/main/drawing-watchdog-2026-10-16/,
+including summary.md, raw serial/build/flash logs, image identities, timing
+results, offline symbols, settings equality and source/cleanup checks.
+The restored normal firmware's 150-second capture contains six watchdog warnings,
+no display-lock timeout, no stack fault/panic or unexpected restart, successful
+live weather and heartbeat reserves of 9,556 then 9,476 bytes; the runtime endpoint
+returns HTTP 200. The warning is therefore not merely instrumentation overhead.
+This is not a watchdog-clean final run; the tested placement remedy is not retained.
+A separate later change to mockups/alarm-design.html was detected and preserved;
+this investigation did not edit the mockup. No source path was added or renamed;
+no commit, push or debugger attachment occurred.
+
+### Newly set alarm reported as missed after restart — October 15, 2026
+
+The user reports a missed 07:00 alarm after setting it shortly before the Radar
+flash, although no alarm was actually missed. Investigation confirmed that
+enabling or editing an idle alarm skipped earlier occurrences only in RAM;
+restart recovery could then ring or report them as missed. Existing tests
+explicitly expected that behavior. The Radar startup capture reports missed date
+`20261015`, without proving when that stored notice was first created. Original
+diagnostic evidence: `.reviews/main/alarm-newly-set-restart-2026-10-15/`.
+
+The user authorized the correction, documentation, tests and flash. Objective:
+save the skipped past occurrence when an idle alarm is enabled or its schedule
+changes, reusing the existing handled-occurrence record. Preserve actual due
+alarm recovery, captured ringing/snooze, pending missed notices and ordinary
+save-failure limits. Existing notices are not automatically erased because
+their origin cannot be determined safely; normal Dismiss still clears them.
+
+Permitted existing source paths: `main/alarm.c`, `main/alarm.h` and
+`tests/test_alarm.c` under `targets/esp32-p4/`. Supporting updates: architecture,
+this record and test README. No new source, key, stored field, worker or generic
+save mechanism is needed. The parent owns production/docs/integration; a
+gpt-6.1-sol/high writer owns focused alarm tests and an independent
+gpt-6.1-sol/high reviewer checks correctness and necessity.
+
+Acceptance: idle enable/edit then restart does not create a retroactive ring or
+missed notice; subsequent genuinely due alarms still recover; exact-due alarms,
+deferred usable time, active ringing/snooze edits, pending notices, Dismiss and
+storage errors retain their rules. Run focused and full native checks, compile
+ESP-IDF 5.5.5, then app-only flash and passive startup verification. Evidence:
+`.reviews/main/alarm-arming-restart-fix-2026-10-15/`.
+
+Implemented with two net added lines in `alarm.c`, plus its header comment. The
+existing update save flag now includes idle arming; active ringing/snooze edits
+do not persist the skipped occurrence. The operating-record layout, namespace,
+key and single clock writer are unchanged. No per-tick writes or automatic
+save retries were added. Architecture and test guidance reflect the approved
+idle-persistence rule; appearance and mockup are unchanged.
+
+Parent verification: all 44 native checks pass in 17.84 seconds, including the
+new enable/edit restart cases, exact-due and later genuine recovery, unchanged
+pending notices, repeated captured-ring edits, restored snooze future/overdue
+deadlines and open/set/commit failures. The initial test-only timing assertion
+crossed a genuinely due edited time; the test was corrected to check quiet only
+before that time, then explicitly require recovery afterward. These checks use
+the actual alarm code with substitute storage and clock data; they do not
+establish a new physical power-cut result. Independent correctness/YAGNI/MECE
+review found no actionable issue. The existing owner, record and save path meet
+the current need without another storage mechanism or state owner.
+
+ESP-IDF 5.5.5 build passes: application size 17,217,920 bytes, 18% partition free,
+ELF SHA-256 `b1aed6f9c7cc4f80f3210e49efd4ed8868908c1ef75b00e1b1ea817efb375420`.
+All 255 protected tracked paths remain unchanged; no added or renamed source
+path was introduced.
+
+Authorized app-only flash passes: 17,217,920 bytes at `0x10000` in 84.6 seconds,
+with the written hash verified. Settings, recordings, bootloader and partition
+table were outside the write. A 60-second passive serial capture with one
+ordinary restart confirms the expected ELF identity, initialized display/touch,
+Visual Crossing HTTP 200 and live weather, with no logged ringing/missed
+transition, panic, overflow or display underrun. Minimum reported UI stack
+reserve is 3,416 bytes. No debugger was used. Capture/flash processes finished;
+the corrected normal application remains running.
+
+The bounded fix is implemented, documented, tested and flashed. Native tests
+establish the set/edit-restart and alarm/snooze recovery cases; this slice's
+board evidence establishes verified loading and startup, not another physical
+power-cut or audible-ringing test. Pending real notices retain normal Dismiss;
+the firmware does not erase them based on an assumed cause. No commit or push
+was performed.
+
+### Horizontal Radar heading and plain-language key — October 15, 2026
+
+The user approved the horizontal comparison and authorized official-mockup and
+firmware updates, tests and flashing. Objective: horizontal centered title/frame
+time, equal-width Light/Moderate/Heavy key sections with centered labels, and no
+shaded panels behind the legend/credits. Preserve current fonts, colors, 75-mile
+map, marker, Radar color thresholds, timing, states and navigation. Long titles
+retain the smaller-font fallback and use an ellipsis if still too wide for the
+round screen; this fit handling was disclosed before implementation.
+
+Permitted existing source paths: `targets/esp32-p4/main/ui/weather_views.c` and
+`targets/esp32-p4/tests/test_ui.c`. Supporting updates: the official mockup,
+architecture, this work record and test README. No new source path or runtime
+mechanism is planned. Parent owns mockup/docs/integration; a gpt-6.1-sol/high
+writer owns the renderer and affected tests.
+
+Acceptance: matching horizontal header placement, unchanged typography/Day/Night
+colors and frame-time formatting, equal key widths/centered readable labels,
+unshaded map behind bottom information, fit for long titles, and preserved
+current/old/unavailable states, image replacement, navigation and alarm
+preemption. Run native UI/full tests, check the official mockup scripts and six
+appearance/status combinations, independently inspect the changes, build with
+ESP-IDF 5.5.5 and flash the application while preserving NVS/recordings. Observe
+startup with passive serial; physical appearance remains a separate check.
+Software verification passes: all 44 native tests in 17.33 seconds, weather/
+location and 41 storm fixtures, 12 parsed mockup/wrapper scripts and all six
+Radar appearance/status render combinations. Native reference exports were
+inspected for Day/current and Night/old; these are not browser/board screenshots.
+The unchanged-map/marker/credit markup and non-Radar mockup-content checks pass.
+All 255 protected tracked paths retain their hashes; no source paths were added
+or renamed, and `git diff --check` passes.
+
+The renderer now uses standard horizontal LVGL labels, preserving their fonts
+and thin local letter darkening. Radar-specific arc state/drawing and both bottom
+panel objects are removed; retained Conditions drawing is preserved. Equal key
+sections use 143/144/143 pixels in the existing 430-pixel bar, with centered
+labels and the same palette gradients. No new file, task, queue, buffer, cache,
+storage or service owner was added. Application source decreases by 17 lines;
+line count is supporting evidence, not the basis for the necessity review.
+Independent gpt-6.1-sol/high review found no remaining actionable design or
+ownership issue. The first build caught a private LVGL text-width call, replaced
+with public `lv_text_get_size`; fresh native and firmware builds pass afterward.
+
+ESP-IDF 5.5.5 application build: 17,217,920 bytes, 18% partition free. The image
+identity and detailed evidence are local under
+`.reviews/main/radar-horizontal-firmware-2026-10-15/`.
+
+Application-only flash completed: 17,217,920 bytes written at 0x10000 in
+84.5 seconds, written hash verified. Saved settings, recordings, bootloader and
+partition table were outside that write. Passive 75-second startup capture
+matches the final ELF identity, confirms display/touch initialization, Visual
+Crossing HTTP 200 and five TLS certificate validations, with no recorded Radar
+failure, panic, overflow or display underrun. Lowest reported UI stack reserve
+is 3,244 bytes. No debugger was used.
+
+The user confirms the horizontal title/date, equal-width centered key, removal
+of shaded panels, readability and swipe-back behavior all look/work correctly.
+This closes the bounded layout revision. Broader concurrency/recovery/audio
+checks remain separate from this startup and appearance/navigation check.
 
 ### Objective and boundaries
 
@@ -427,13 +1332,15 @@ This is an approved policy change, not a new adjustable sensitivity setting.
 4. **Add the production page and finish its mockup states.** Reuse `ui/ui.c`,
    `ui/weather_views.c`, `ui/ui_private.h` and only needed public display inputs
    in `app_ui.h`. Replace the production Conditions page with Radar, keeping a
-   two-page weather row under the specification, reverse swipes and the row order
+   two-page U.S. weather row under the specification, reverse swipes and the row order
    retained for the current visit. Keep the existing Conditions renderer,
    required assets/build entries and useful tests in their current source
    locations. Remove Conditions from user navigation and other user-accessible
    routes; do not create inactive live display objects solely for code retention.
    Keep shared weather data,
    storm calculations for the remaining triggers and the clock's alert indicator.
+   For non-U.S., unresolved or missing-country locations, disable Radar and keep
+   Forecast as the sole weather route, including during a storm alert.
    Apply the approved pressure-alert removal in the existing calculation owner,
    not by hiding its output only in the UI. Do not add a Conditions enable
    setting, fallback route, alternate firmware mode or backup copy. Draw the
@@ -504,7 +1411,8 @@ inspection confirmed independent forecast timing/quota and the weather-row
 snapshot behavior. No product behavior was reduced to avoid those checks; the
 subsequent user-requested Conditions replacement is recorded below.
 No firmware source, mockup, tests, build or board state changed during this
-preparation. The sprint remains **UNSENT**.
+preparation. The sprint was held unsent at that checkpoint; current dispatch
+status is recorded at the top of this section.
 
 Scope revised October 15 after the user's instruction to replace Conditions on
 the working clock with Radar while retaining Conditions in the official mockup.
@@ -524,7 +1432,8 @@ Conditions implementation while removing its user-interface access. Retain its
 code, required assets and useful tests in place; this supersedes the earlier
 instruction to retire the renderer. Conditions remains available in the mockup.
 The specification, implementation slice and checks reflect this correction.
-The sprint remains unsent; this correction changes documentation only.
+That correction was recorded while the sprint was still unsent and changed
+documentation only; current dispatch status is recorded above.
 
 ## Radar and Sound Machine memory estimate — October 13, 2026
 
@@ -3726,7 +4635,433 @@ regenerated for this commit. Local `.reviews/`, scratch output and editor
 configuration remain uncommitted. No push, merge, tag or additional firmware
 load is included.
 
-## Current work — reconciled October 15, 2026
+### Local artifact cleanup — October 15, 2026
+
+At the user's request, removed 13 obsolete local files (211,463,673 bytes):
+four byte-identical review-input copies, five October 10 touchscreen-comparison
+firmware/symbol files, an incomplete screenshot, an empty log, a redundant
+brightness-check log and the root slicer-result scratch file. The temporary
+touchscreen fallback copies served the earlier pending hardware checkpoint;
+later corrected-firmware checks and the user's successful-operation report
+ended that purpose. Historical reports retain their original verification limits.
+
+Kept final reports and all distinct review diffs, matching copies of the four
+duplicate inputs, test/identity logs, approved visual/audio references, current
+notification and Radar evidence, and enclosure work. Verified 2,458 retained local
+files unchanged. The editor settings remain useful: they match the installed
+ESP-IDF/clangd and existing compilation database. No source, firmware, board,
+archive or Git history changed; no new build or board test was needed. Exact
+removed paths, hashes and reasons are in the
+[local cleanup manifest](../.reviews/main/local-artifact-cleanup-2026-10-15/manifest.json).
+
+## Combined audio, drawing and weather load — authorized October 16, 2026
+
+The user authorized measuring both cores with audio, forecast refreshes and full
+Radar processing before deciding where work should run. The original-placement
+comparison reproduces 12 watchdog reports and three display-lock timeouts. With
+the live storm pulse, Analog drawing and its heartbeat leave about 3% of core 0
+idle; the unpinned weather worker settles onto that core after floating-point
+work. Core 1 has substantial spare capacity. Moving the existing weather worker
+there removes the measured watchdog starvation, but alone does not close audio.
+
+A moving Radar response `realloc` takes 15.073 ms while the SDK heap lock masks
+interrupts. The matching audio callback gap is 16.065 ms with two sequence
+disagreements. The bounded correction reuses `radar_alloc`, copying outside the
+heap lock and preserving the old buffer on allocation failure. Separately, a
+complete SDK heap trace identifies 59,240 internal bytes in 41 live received
+network packet copies during Radar failure. This is a live backlog, not evidence
+of a leak. Lowering the existing ordinary-allocation preference from 2,048 to
+1,024 bytes lets typical packets prefer PSRAM. The 32 KiB internal reserve and
+explicit hardware memory requirements stay unchanged.
+
+The first combined candidate completes 660.173 seconds of Rain/Pink/Rain and
+Analog/Digital operation, including initial full Radar, the five-minute Radar
+refresh and the ordinary ten-minute forecast/Radar check. All 55,130,112 compared
+PCM bytes match, with no silent/short buffers, partial writes, observer overflows
+or watchdog warning. The two forecasts complete in 1.991 and 2.380 seconds.
+Two display-lock waits time out; drawing latency remains separate unfinished work.
+
+Independent review identifies the same interrupt-blocking growth risk in the
+existing PNG allocation hook: real 800×800 map inflation can resize multi-megabyte
+scanlines. A moving decoder allocation has not produced an observed dropout in
+this comparison, but the path is present in normal provider data. The hook now
+uses the SDK's allocated-size query and allocate/copy/free too, preserving its
+zero-size, cap and failure behavior without a registry. The final 360.714-second
+comparison completes full Radar map/tile preparation and its scheduled Radar
+check, both clock faces and Rain/Pink/Rain. The decoder moves 2,621,440 usable
+bytes to a 3,841,202-byte allocation in 83.308 ms while the exact completed audio
+sequence stays clean. All 28,764,160 compared bytes match; there are no silent or
+short buffers, partial writes, observer overflows or watchdog reports. The
+busiest sampled ten seconds uses about 62.1% of core 1 for weather, 8.9% for audio
+and leaves 26.7% idle. These averages are not a worst-case scheduling proof.
+Three display-lock timeouts occur at startup/automatic face changes, leaving
+that drawing delay open. Physical audio and frame output were not recorded.
+
+All test code is removed and the existing UI stack monitor is retained. Final
+parent verification passes 44 native checks in 16.41 seconds, the ESP-IDF 5.5.5
+normal build and independent source/SDK review. The generated SDK options differ
+only in the allocation threshold. The app is 17,220,032 bytes, 128 bytes larger,
+with 18% partition free. The retained change is 17 net runtime C lines, one
+existing configuration value and 35 test lines; no new source path, task, queue,
+registry or persistence mechanism is added. Both growth paths temporarily hold
+old/new buffers, and the memory preference increases PSRAM traffic.
+
+The complete 24,576-byte saved-data partition is identical before/after all
+scripted tests; it was neither erased nor restored. Private raw copies and
+task-owned comparison ELFs are removed. All 255 other tracked files, including
+README, official mockup, audio, UI shell, clock drawing and build logic, match the
+starting checkout. The final app-only flash is hash-verified and its boot identity
+matches the normal ELF. A 100-second passive capture confirms display/touch
+initialization, successful live Visual Crossing weather, no temporary test output
+and no captured watchdog, display-lock timeout, panic or Radar failure. The
+retained UI stack monitor reports a 9,428-byte minimum spare allocation in that
+short capture; this is not a worst-case guarantee or physical acoustic/frame test.
+See the [full accounting and local evidence](../.reviews/main/audio-weather-load-2026-10-16/summary.md).
+
+## Drawing delays and efficiency sweep — authorized October 16, 2026
+
+Status: the sweep, source corrections, normal-source checks and final
+twelve-minute combined board run are complete within the drawing limit recorded
+below. Saved settings are byte-for-byte unchanged. Normal firmware is restored
+with verified written-image and boot identity.
+
+The user required correction of repeated unchanged clock appearance work this
+iteration, a full application efficiency sweep, and rechecking weather core
+placement afterward. Approved appearance, pulse animation, settings and alarm
+recovery are preserved. Changes use the existing clock/weather/settings renderers,
+their private header, weather client and two existing native test files.
+
+Implemented: skip unchanged clock palettes and immutable image sources; apply
+Digital's final Day or Night layout directly; retain Forecast/Message/Radar
+palette changes only when their actual inputs change; avoid rewriting stable
+playback captions or recentering unchanged controls. Radar computes each source
+column once per tile and skips transparent blends after full source validation.
+Its sampling, palette, alpha arithmetic, publication and request timing remain
+unchanged. The task adds 63 net production lines across five existing files and
+1,608 bytes of static state: 1,600 bytes for Radar sampling scratch and eight
+bytes for applied-palette markers. Clock's added flag fits existing padding.
+Native regressions add 256 net lines across two existing files. No new source
+path, task, queue or storage mechanism is retained.
+
+The original-compiler core-0 run, with these source corrections, was stopped
+after repeated watchdog reports (11 observed). The corresponding core-1
+three-minute run has no watchdog, display-lock timeout or audio-buffer mismatch.
+The final twelve-minute core-1 run, including the last transparent-pixel
+correction and ordinary ten-minute weather refresh, has no watchdog, panic,
+restart or audio-buffer mismatch: all 61,790,208 completed PCM bytes match.
+Both forecasts completed successfully; the ordinary refresh caused no missed
+UI update. Keep the existing weather-core-1 placement. The core-0 disagreements
+during watchdog reporting do not independently establish audible dropouts.
+
+Three UI updates timed out shortly after forced whole-face changes in that
+stress run. Maximum LVGL handler/render times were 318/292 ms; each of the three
+missed updates followed a forced face change by 294–423 ms. This full-scene
+drawing limit remains; it is distinct from ordinary weather processing. The
+run does not establish that every screen transition meets the 250 ms deadline.
+
+The global performance compiler experiment is rejected and removed. Optimized
+inlining first overflowed the weather worker's stack; temporary function
+boundaries prevented that fault but left only 364 bytes spare on an ordinary
+request. The original SDK compiler setting restores over 1.5 KiB of measured
+headroom. Its experimental boundaries and time-picker formatting change are
+removed; task allocations and compiler defaults remain unchanged.
+
+All 44 native checks pass in independent parent verification after probe
+removal, and the normal ESP-IDF 5.5.5 build passes. Final real-artwork replay matches all
+674 baseline capture hashes across 104 scenes. With natural smaller dirty
+regions, 218 ordinary captures differ slightly at blended edges: at most 89 of
+640,000 pixels, RGB8 component differences at most 16/12/16, and no canonical
+full-image differences. This is a recorded rendering limit, not proof of every
+physical panel pixel. Both real Radar compositions match the original output
+exactly after the final shortcut: 5,120,000 bytes checked.
+
+Read-only UI, service/scheduling and audio/storage reviews support these bounded
+fixes. Audio buffer ownership, settings-save serialization, cached solar work,
+bounded RTC retries and current message limits do not justify new mechanisms.
+Scaled-image rendering remains substantial legitimate work. Tighter tick bounds,
+the unused-looking temperature margin and repeated alarm calendar calculation
+are unmeasured optional follow-ups, not established causes or approved changes.
+A scaled-image snapshot would add memory and a replacement lifetime; it is not
+part of this slice. The separate approved ringing-slide mockup work below is
+preserved and remains firmware-pending under its own scope.
+
+All temporary source probes are removed; the existing stack monitor remains.
+Private raw saved-data copies, task-owned comparison ELFs and temporary test
+builds are removed, and serial capture is closed. The final normal build is
+17,220,928 bytes with 18% of the application partition free. Its hash-verified
+flash boots the matching ELF, initializes display/touch and downloads live
+Visual Crossing weather. Passive capture continued for 75 seconds after weather
+success, with no captured watchdog, panic, display-lock timeout or probe output.
+The UI stack monitor reports 9,396 bytes minimum spare in that short capture;
+this is not a worst-case guarantee or a physical acoustic/frame measurement.
+The board remains running normal firmware. See the
+[full accounting and local evidence](../.reviews/main/drawing-delay-2026-10-16/summary.md).
+
+## Ringing slide design — approved October 16, 2026
+
+The user approved the separate slide preview and authorized updating the official
+mockup only. The selected Digital Clock ringing layout now uses the centered,
+ALL CAPS slide design with the existing Snooze control. Completion briefly shows
+DISMISSED before returning to the clock, retaining the existing one-time and
+recurring dismissal outcomes. The existing snoozed view and comparison layouts
+retain their controls. Product behavior is owned by the
+[UI specification](architecture.md#ui-and-visual-reference).
+
+Browser checks confirm Day/Night appearance, centered text, track taps leaving
+the alarm ringing, and the preserved Snooze/snoozed view. A short keyboard slide
+returns the handle; a completed keyboard slide shows DISMISSED and then returns
+to the clock with the recurring alarm retained. Pointer dragging could not be
+automated because the browser tool rejected fractional iframe coordinates;
+physical touch behavior is not established. All seven embedded inline scripts
+pass JavaScript syntax checks.
+
+Only the official mockup, architecture and this work record changed in this
+slice; tracked firmware files match their starting hashes. Firmware implementation
+is pending and was explicitly excluded. No firmware build, flash or board check
+was performed for this design-only update.
+
+## Targeted drawing measurements — authorized October 16, 2026
+
+The autonomous measurements are complete. The lighter first pass records full
+repaints of Analog Day/Night at 303.5/202.2 ms, Digital Day/Night at 99.2/130.6 ms,
+Forecast at 161.6 ms and Radar at 129.5 ms. These are scripted full invalidations,
+not a fixed delay on every physical swipe. The Analog Day weather picture costs
+103.6 ms, including 85.2 ms resizing. Digital Night's enlarged time layer costs
+64.5 ms. Temporary layer allocation is small rather than the principal delay.
+
+The final pass confirms a separate source of repeated work: all 60 Analog tick
+objects occupy 760×760 boxes, while drawing proceeds in 50-row strips. One full
+repaint prepares the ticks 960 times, or sixteen times each. Tick-only raster,
+setup and drawing events consume about 105.7 ms Day / 97.0 ms Night in the more
+intrusive final probe. That probe itself increases measured frame duration;
+these figures are not promised savings. Roughly 30–35 ms remain outside the
+named categories. Source review and measured counts support giving each tick a
+small box around its unchanged endpoints, then remeasuring before adding an
+image cache. This is a recommendation, not implemented or newly approved work.
+
+The three runs use existing `ui/ui.c`, `main.c` and component build logic for
+temporary counters. Outer raster calls are counted once; transform/blend and
+layer-allocation times are subsets. Drawing events identify generated text
+layers. Reports run outside the display lock with collection paused. One watchdog
+report occurs during the first run's lengthy between-phase output; subsequent
+yielding output runs have no watchdog, lock timeout or panic. None of the counter
+tables overflows. More detailed accounting and limits are in the local report.
+
+No settings save, audio command, alarm action or provider-state fabrication is
+introduced. All firmware, build logic, tests, assets and official mockup now
+match the captured starting hashes; only this work record changes. Workers,
+priorities, artwork, pulse and antialiasing are unchanged, and the existing UI
+stack monitor remains. The full 24,576-byte saved-data partition is identical
+before/after without an erase or restore. Normal-source ESP-IDF 5.5.5 compilation
+passes; its application binary and ELF match the prior normal checkpoint exactly.
+Native tests are not repeated because no source change is retained. The final
+application-only flash verifies its written hash and matching boot identity;
+display/touch initialize and live weather succeeds. A sixty-second passive wait
+after weather success captures no watchdog, panic, display-lock failure or probe
+output. The retained UI stack monitor reports 9,424 bytes minimum spare in this
+short check, not a worst-case guarantee. Private raw saved-data copies,
+comparison ELFs and redundant artifacts are removed, serial capture is closed,
+and the board remains running normal firmware. Retained source/state cost is
+zero; the smaller-tick recommendation is still unimplemented.
+
+See the [measurement report and local evidence](../.reviews/main/drawing-object-timing-2026-10-16/summary.md).
+
+## Compact Analog tick bounds — authorized October 16, 2026
+
+The user approved shrinking the invisible tick boxes while preserving exact
+appearance and saved settings. `clock_views.c` now places each tick at its
+endpoint minimum and stores local endpoints in a nonempty bounding rectangle.
+LVGL supplies the existing stroke/rounded-end margin. Absolute endpoints,
+styles, object order and non-clickable behavior are unchanged. The production
+change adds six net lines, with no cache, task, retained state or new source file.
+The official mockup remains unchanged because appearance is preserved.
+
+All 44 native checks pass, including an independent parent run on the cleaned
+source. A 43-line regression in the existing UI test checks all 60 endpoints,
+bounds, margins and Day/Night styles. Temporary real-art checks compare complete
+Day/Night framebuffers and matching partial hand/palette update sequences with
+the original boxes: zero differing pixels, with no masking. Existing partial
+hand-versus-full-redraw differences reproduce identically with both box sizes;
+they are not introduced by this change.
+
+The autonomous board comparison alternates original/compact/compact/original
+boxes, with twelve full redraws per size in each appearance and the same copied
+live weather/time input. Median results:
+
+| Appearance | Original boxes | Compact boxes | Reduction |
+|---|---:|---:|---:|
+| Day | 283.0 ms | 220.5 ms | 62.6 ms / 22.1% |
+| Night | 182.4 ms | 120.3 ms | 62.1 ms / 34.1% |
+
+Every full redraw prepares 76 ticks instead of 960. These lightweight timed,
+forced redraws run synchronously on the UI task under the display lock, including
+the normal flush callback. They do not establish physical transfer completion,
+every swipe's latency or worst-case behavior. Normal task placement, priorities,
+stacks, antialiasing, weather processing and audio remain unchanged. The paired
+run records no watchdog, panic or display-lock failure.
+
+Temporary firmware/native probes and linking changes are removed; the existing
+stack monitor remains. ESP-IDF 5.5.5 compilation passes. The full saved-data
+partition is byte-for-byte unchanged after both the paired run and the final
+normal-firmware startup, without erasing or restoring it. The clean application
+is flashed with verified written hash and matching boot identity. Display/touch
+initialize and live weather succeeds. A ninety-second passive capture includes
+more than sixty seconds after weather success, with no watchdog, panic,
+display-lock failure or probe output. The final read-only saved-data check
+restarts the same normal firmware; another forty-five-second capture confirms
+startup and weather again. Captures are closed, private saved-data copies and
+disposable comparison outputs are removed, and normal firmware remains running.
+The normal short observation reports 9,392 bytes minimum spare UI stack;
+this is not a worst-case guarantee. Physical touch/camera checks are not claimed.
+
+See the [local verification report](../.reviews/main/tick-bounds-2026-10-16/summary.md)
+for measurement samples, pixel evidence, restoration and saved-data checks.
+Weather-picture resizing remains outside this bounded change; no cache is added.
+
+## Alarm Repeat preset and Custom Days menus — authorized October 16, 2026
+
+The user approved implementing the revised official mockup after the completed
+tick-bound slice, including autonomous tests, flashing and preference restoration.
+Repeat now lists None, Every Day, Weekdays and Custom Days, deriving selection
+from the existing day mask. Custom Days preserves that selection and uses a
+centered Monday–Friday row above Saturday/Sunday. Its two row positions round
+295.5/408.5 to 296/409, preserving the 17px button gap and shifting the group's
+vertical center by half a pixel. Back/Done returns through Repeat to Alarm;
+Save, Cancel and the independent On/Off switch retain their existing ownership.
+Alarm summaries name the actual days using the retained compact rules.
+
+The production edit adds seventeen net lines in `settings.c` and one private
+view value, with the existing title array and back route updated. The view stays
+inside the Alarm editor range, so production `ui.c` needs no change. There is
+no new source path, preset setting, module, worker, queue or persistence.
+The Alarm Repeat value alone grows from 200 to 260px: actual font checks found
+that the supported “Sun, Mon, Wed” summary requires 213px. Its font, row and
+right edge are unchanged; all 128 summaries now fit with text/chevron clearance.
+
+All 44 native checks pass. The existing UI test grows by 101 net lines, checking
+all 128 masks in both appearances, layout/checks/captions, nested Back/Done and
+reopening, Save/Cancel/failure/retry, immediate-toggle isolation, next-alarm and
+one-time completion behavior, and restoration of the unsaved Custom Days page
+through both Settings-swipe and Alarm-shortcut resumption after ringing.
+The inherited tick regression remains intact. ESP-IDF 5.5.5 compilation passes.
+Independent read-only review finds no credible implementation or ownership issue.
+
+The autonomous board pass completes nineteen real-control steps in each
+appearance, including presets, Custom Days, nested Back/Done, reopening and
+Cancel. Alarm is saved Off before schedule edits. An ordinary Save applies
+Mon/Wed/Fri while Off; software restart reads back that exact selection. Existing
+Save and immediate-toggle operations then restore the original On, 07:00, None,
+Rising Tones, 75% volume and ten-minute snooze. Host NVS parsing confirms all
+32 configuration entries and all other logical stored entries, including alarm
+recovery records, match the baseline after restoration and again after normal
+firmware startup. No whole-NVS or operating-record restoration is performed.
+
+Temporary automation in existing `main.c`, `ui.c` and `settings.c` is removed.
+Normal compilation and the independent 44-check run pass. The final application
+is flashed with written-hash verification and matching boot identity, then
+observed for sixty seconds after successful live weather. Display/touch initialize;
+no watchdog, panic, display-lock failure or temporary probe output appears.
+After the final read-only saved-data check restarts the board, another completed
+forty-five-second capture confirms normal boot and live weather. Normal firmware
+remains running; captures are closed and private NVS copies, per-key digests and
+the disposable native build are removed. The short normal capture reports
+9,344 bytes minimum spare UI stack, not a worst-case guarantee. No physical
+touch, camera/panel-clipping or acoustic result is inferred from scripted events.
+
+The normal image grows by 288 bytes to 17,221,344 bytes, retaining 18% free in
+the application partition. Existing build lists, alarm/settings owners, the
+completed clock renderer and the approved official mockup match their sprint-start
+hashes. The source tree is unchanged. See the [local sprint evidence](../.reviews/main/alarm-repeat-menu-2026-10-16/summary.md).
+
+## Slide to Dismiss — authorized October 16, 2026
+
+Implementation, native checks, the three autonomous real-alarm cases and final
+clean-firmware verification are complete.
+
+The approved slide replaces only ringing Dismiss. Snooze and the snoozed
+screen's tap Dismiss retain their existing actions. The existing copied alarm
+command is submitted on qualifying release; its matching applied completion
+controls the brief confirmation, including an operating-record storage error.
+New ringing cancels stale input/confirmation, and existing occurrence guards,
+navigation, held editors and alarm owners remain.
+
+The retained changes are in `ui/clock_views.c`, `ui/ui.c` and their existing
+private header: 230 net production lines. They add five LVGL drawing objects,
+local gesture fields, ordinary reset/fade animations and one confirmation timer.
+The existing pending occurrence is reused. No source path, task, queue, settings
+key, storage mechanism or general gesture module is added. The existing 32px
+font is scaled to 29.625px for the reference's 29.6px caption; measured centered
+text fits in both appearances. Two LVGL lines draw the chevrons. The
+official mockup remains unchanged.
+
+The existing UI test grows by 304 net lines. All 44 native checks pass in the
+independent parent run and again after probe removal (11.67 seconds). Real
+LVGL press–move–release tests cover both appearances, track/outside-origin
+taps, short/reversed/lost/canceled drags, threshold/reset, held input across
+runtime/weather/appearance changes, pending/rejected/stale actions, confirmation
+and replacement lifetime, and applied dismissal despite a returned storage
+error. Previous recovery, Repeat, settings and navigation checks remain.
+Independent read-only correctness/YAGNI/MECE review finds no actionable issue.
+
+The temporary board harness uses the actual touch adapter's pointer path under
+the existing display lock, real settings controls, normal time/scheduling and
+the existing owner completions. Alarm is saved Off before schedule edits.
+Five-minute editor steps determine the reachable test slots; each is armed more
+than four minutes ahead. The completed cases on October 16 are:
+
+- 17:15 Day recurring: track tap, partial and reversed drags keep successful
+  audio writes active; a held drag survives three normal updates; full slide
+  dismisses, shows confirmation and leaves the recurring alarm enabled.
+- 17:20 Night recurring: canceled/short drags keep ringing; Snooze stops the
+  worker and retains a ten-minute future deadline/quiet countdown; the existing
+  snoozed tap Dismiss clears it without waiting ten minutes.
+- 17:25 Night one-time: full slide dismisses, confirms and saves Alarm Off.
+  Ordinary controls then restore the starting alarm and Night Shift choices.
+
+| Measured board action | Release to command | First observed owner transition | Release to audio close |
+|---|---:|---:|---:|
+| Day slide Dismiss | 0.372 ms | 176.5 ms | 186.4 ms |
+| Night Snooze | 2.469 ms | 281.0 ms | 289.5 ms |
+| Night snoozed tap Dismiss | 2.589 ms | 85.0 ms | Already stopped |
+| Night one-time slide Dismiss | 0.366 ms | 218.3 ms | 224.8 ms |
+
+The two confirmation timers last 2.200080 and 2.199672 seconds. These are
+instrumented observations, with owner copies sampled every 20ms; they do not
+establish worst-case timing, physical touch feel, panel pixels or acoustic
+silence. Worker close returns success in each playing case. A normal weather
+refresh succeeds during the pass. No panic, watchdog or display-lock failure
+is recorded. The codec library emits its existing not-enabled-channel setup
+notice before successful opens; this is not recorded as a new playback failure.
+
+Host readback after restoration confirms all 32 settings and all unrelated
+logical stored entries match the fresh baseline. Original alarm is Off, 07:00,
+Weekdays, Rising Tones, 75% and ten-minute snooze; Night Shift is Off. The
+legitimate test records differ: the 17:25 occurrence is handled/consumed, and
+snooze/missed records and deadline are empty. No old raw NVS image or recovery
+record is restored.
+
+All temporary input/measurement code is removed. Startup, audio and settings
+source match their exact sprint-start contents; the existing stack monitor stays.
+Normal ESP-IDF 5.5.5 compilation passes. The clean application is 17,224,000
+bytes, 2,656 bytes larger, retaining 18% partition space. Its ELF/image contain no
+probe symbols/messages. The final application-only flash has a verified written
+hash and matching boot identity. Display/touch initialize and live weather
+succeeds, followed by sixty seconds of passive observation without panic,
+watchdog, display-lock failure, unintended ringing or probe output. A final
+read-only NVS check confirms all restored values again and byte-for-byte equality
+with the post-test partition, preserving the consumed/handled test records.
+The same clean firmware is restarted after that read; a completed forty-five-second
+capture confirms its identity, display/touch and live weather again, with no
+test-alarm replay. These quiet restarts use the restored Off preference; they do
+not constitute a new physical power-cut or armed-recurring recovery test.
+The short normal captures reach 9,420 bytes minimum spare UI stack, not a
+worst-case guarantee. Private saved-data copies, per-key digests and the disposable
+native build are removed. Captures are closed and normal firmware remains running.
+
+See the [local sprint evidence](../.reviews/main/slide-to-dismiss-2026-10-16/summary.md)
+for logs, identities, measurements and verification limits.
+
+## Current work — reconciled October 16, 2026
 
 This is the current work list. Dated entries above retain the observations and
 limits at their own checkpoints; their old remaining-work statements do not
@@ -3737,6 +5072,46 @@ unattended board comparisons; other checkpoints retain their stated limits.
 The approved [routine footer removal](#routine-clock-footer-removal--october-14-2026)
 is included in the completed, flashed and autonomously checked
 [notification sprint](#sprint-approved-notification-changes--authorized-october-15-2026).
+The [Snooze caption and test-guide follow-up](#snooze-caption-and-repeat-test-guide-correction--authorized-october-16-2026)
+implements the two approved review corrections; its verification is recorded there.
+The [Repeat centering follow-up](#repeat-row-centering--authorized-october-16-2026)
+aligns both weekday rows with the other centered Repeat controls.
+The [autonomous menu stack measurement](#autonomous-menu-stack-measurement--authorized-october-16-2026)
+completed two passes through all menus and real scan completions, preserved NVS
+byte-for-byte, removed all test code and restored normal firmware. The old low
+stack reading was not reproduced. The subsequent
+[drawing-watchdog investigation](#drawing-watchdog-investigation--authorized-october-16-2026)
+reproduces core-0 starvation, including in restored normal firmware, and
+supports separating the existing weather and drawing tasks across cores.
+The subsequent [combined load investigation](#combined-audio-drawing-and-weather-load--authorized-october-16-2026)
+identifies interrupt-blocking Radar buffer growth and internal network-packet
+pressure as well as the drawing-core overload. Its three bounded corrections
+pass native/build checks and both automatic combined/decoder board runs. Normal
+firmware is restored with verified written/boot identity and successful live
+weather. Saved data is unchanged and temporary probes are removed. The approved
+[drawing-delay and efficiency sweep](#drawing-delays-and-efficiency-sweep--authorized-october-16-2026)
+now corrects that repeated appearance work and rechecks core placement. Its
+combined run and normal-firmware restoration are complete. Ordinary weather
+processing caused no missed UI update in the final run; the recorded full-face
+redraw limit remains. Use its current evidence and limits above rather than the
+earlier deferred drawing recommendation. The subsequent
+[targeted drawing measurements](#targeted-drawing-measurements--authorized-october-16-2026)
+confirm both weather-picture resizing and repeated Analog tick processing.
+The subsequently approved [compact tick bounds](#compact-analog-tick-bounds--authorized-october-16-2026)
+preserve compared pixels and reduce measured redraw work. Native/build checks,
+paired board measurements and final normal-firmware restoration are complete;
+saved data is unchanged and temporary diagnostics are removed. No image cache
+has been added.
+The approved [Repeat menu revision](#alarm-repeat-preset-and-custom-days-menus--authorized-october-16-2026)
+is implemented, tested and flashed. Autonomous menu/save/restart checks pass,
+all saved values are restored, temporary diagnostics are removed and normal
+firmware remains running.
+The approved [ringing slide](#slide-to-dismiss--authorized-october-16-2026)
+is implemented, tested and flashed. All three autonomous real-alarm cases pass;
+all saved preferences are restored, legitimate recovery records are retained,
+temporary diagnostics are removed and the clean firmware passes its startup
+and saved-data checks. Physical finger feel and acoustic results are not inferred
+from injected input or worker measurements.
 
 ### Approved work still unfinished
 
@@ -3793,17 +5168,18 @@ is included in the completed, flashed and autonomously checked
   The ADPCM comparison has not changed the approved MP3 format. Preserve the existing weather
   implementation work. Requirements belong in the
   [specification](architecture.md#sound-machine-playback).
-- **Radar:** RainViewer and the custom palette are selected under the
-  [radar specification](architecture.md#radar-source-and-palette). The refined
-  screen design is selected and integrated into the official mockup's Weather Radar
-  preview. Five-minute checks and fixed 50-mile coverage are approved. The
-  [prepared radar sprint](#prepared-weather-radar-sprint--october-15-2026) is held
-  unsent at the user's request. Its first step verifies the production background
-  and labeled 50-mile view. The sprint now replaces the device Conditions page
-  with Radar, retaining Conditions code/assets/tests and its mockup page while
-  removing access through the device UI. It also removes falling
-  pressure from storm-alert triggers while preserving shared weather data and
-  the remaining alert behavior. No live radar firmware exists yet.
+- **Radar:** the [full-screen 75-mile revision](#full-screen-radar-revision--approved-design-october-15-2026)
+  and [horizontal heading/plain-language key follow-up](#horizontal-radar-heading-and-plain-language-key--october-15-2026)
+  are implemented. The latest official reference and firmware use a horizontal
+  title/date, equal-width centered Light/Moderate/Heavy key and no bottom panels.
+  All 44 native checks, fixtures, independent review and firmware build pass;
+  prior actual-map checks cover unchanged image preparation. Application-only
+  flash and passive startup pass. The user confirms the latest appearance and
+  swipe-back behavior. The full-screen decoder-allocation defect is fixed and
+  covered by native tests enforcing the firmware bound. Broader resource/
+  concurrency, recovery, audio/alarm operation and unobserved physical states
+  remain outside this basic board check. Detailed product rules remain in the
+  [Radar specification](architecture.md#radar-source-and-palette).
 - **Immediate Alarm Settings On/Off:** development checks and firmware build pass
   in the October 13 slice above. It is included in the weather sprint's firmware
   loads, with its physical check still unreported. Its remaining checkpoint is the physical check

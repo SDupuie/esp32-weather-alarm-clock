@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "weather_icon_names.h"
@@ -134,6 +135,7 @@ typedef struct {
   bool weather_available;
   bool weather_notice;
   bool night;
+  bool night_applied;
   lv_obj_t *unavailable_view;
   lv_obj_t *unavailable_stage;
   lv_obj_t *unavailable_title;
@@ -193,6 +195,16 @@ typedef struct {
   lv_obj_t *alarm_snooze_duration;
   lv_obj_t *alarm_dismiss;
   lv_obj_t *alarm_dismiss_title;
+  lv_obj_t *alarm_slide;
+  lv_obj_t *alarm_slide_label;
+  lv_obj_t *alarm_slide_handle;
+  lv_obj_t *alarm_slide_chevrons[2];
+  bool alarm_slide_available;
+  bool alarm_slide_tracking;
+  lv_indev_t *alarm_slide_indev;
+  int32_t alarm_slide_start_x;
+  int32_t alarm_slide_start_offset;
+  lv_opa_t alarm_slide_label_target;
   lv_obj_t *alarm_footer;
   lv_obj_t *alarm_snoozed_title;
   lv_obj_t *alarm_countdown;
@@ -337,14 +349,19 @@ static void build_analog_dial_objects(lv_obj_t *parent)
     analog_polar_point(i * 6.0, ANALOG_TICK_OUTER_RADIUS, &outer_x, &outer_y);
     analog_polar_point(i * 6.0, ANALOG_TICK_OUTER_RADIUS - tick_length, &inner_x, &inner_y);
 
-    s_clock.analog_tick_points[i][0].x = outer_x;
-    s_clock.analog_tick_points[i][0].y = outer_y;
-    s_clock.analog_tick_points[i][1].x = inner_x;
-    s_clock.analog_tick_points[i][1].y = inner_y;
+    /* Small bounds let LVGL skip this tick in unrelated drawing strips.
+     * The line widget supplies the stroke/rounded-end drawing margin. */
+    int32_t left = LV_MIN(outer_x, inner_x);
+    int32_t top = LV_MIN(outer_y, inner_y);
+    s_clock.analog_tick_points[i][0].x = outer_x - left;
+    s_clock.analog_tick_points[i][0].y = outer_y - top;
+    s_clock.analog_tick_points[i][1].x = inner_x - left;
+    s_clock.analog_tick_points[i][1].y = inner_y - top;
 
     s_clock.analog_tick_lines[i] = lv_line_create(parent);
-    lv_obj_set_size(s_clock.analog_tick_lines[i], ANALOG_FACE_SIZE, ANALOG_FACE_SIZE);
-    lv_obj_align(s_clock.analog_tick_lines[i], LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_size(s_clock.analog_tick_lines[i], abs(outer_x - inner_x) + 1,
+      abs(outer_y - inner_y) + 1);
+    lv_obj_set_pos(s_clock.analog_tick_lines[i], left, top);
     lv_obj_set_style_line_rounded(s_clock.analog_tick_lines[i], true, 0);
     lv_line_set_points_mutable(s_clock.analog_tick_lines[i], s_clock.analog_tick_points[i], 2);
   }
@@ -395,7 +412,9 @@ static void layout_digital_time_group(bool show_meridiem)
     return;
   }
 
-  lv_obj_set_style_transform_scale(s_clock.digital_time_label, LV_SCALE_NONE, 0);
+  if (lv_obj_get_style_transform_scale_x_safe(s_clock.digital_time_label, 0) != LV_SCALE_NONE
+      || lv_obj_get_style_transform_scale_y_safe(s_clock.digital_time_label, 0) != LV_SCALE_NONE)
+    lv_obj_set_style_transform_scale(s_clock.digital_time_label, LV_SCALE_NONE, 0);
   lv_obj_update_layout(s_clock.digital_time_label);
   lv_obj_update_layout(s_clock.digital_meridiem_label);
 
@@ -465,9 +484,13 @@ static void layout_digital_night_time(const device_config_t *config, bool show_m
     max_size = low;
   }
   int32_t scale = (int32_t)(floor(max_size) * 256.0 / 144.0);
-  lv_obj_set_style_transform_pivot_x(s_clock.digital_time_label, 0, 0);
-  lv_obj_set_style_transform_pivot_y(s_clock.digital_time_label, 0, 0);
-  lv_obj_set_style_transform_scale(s_clock.digital_time_label, scale, 0);
+  if (lv_obj_get_style_transform_pivot_x(s_clock.digital_time_label, 0) != 0)
+    lv_obj_set_style_transform_pivot_x(s_clock.digital_time_label, 0, 0);
+  if (lv_obj_get_style_transform_pivot_y(s_clock.digital_time_label, 0) != 0)
+    lv_obj_set_style_transform_pivot_y(s_clock.digital_time_label, 0, 0);
+  if (lv_obj_get_style_transform_scale_x_safe(s_clock.digital_time_label, 0) != scale
+      || lv_obj_get_style_transform_scale_y_safe(s_clock.digital_time_label, 0) != scale)
+    lv_obj_set_style_transform_scale(s_clock.digital_time_label, scale, 0);
   lv_obj_update_layout(s_clock.digital_time_label);
   lv_obj_update_layout(s_clock.digital_meridiem_label);
   int32_t width = scale_dimension(lv_obj_get_width(s_clock.digital_time_label), scale);
@@ -1067,7 +1090,7 @@ static void update_day_labels(const struct tm *local_time)
   wac_ui_set_label_text(s_clock.digital_date_label, digital_date);
 }
 
-static void update_digital_clock(const device_config_t *config, const struct tm *local_time)
+static void update_digital_clock(const device_config_t *config, const struct tm *local_time, bool night)
 {
   if (config == NULL || local_time == NULL) {
     return;
@@ -1098,7 +1121,8 @@ static void update_digital_clock(const device_config_t *config, const struct tm 
   }
 
   wac_ui_set_label_text(s_clock.digital_time_label, time_text);
-  layout_digital_time_group(show_meridiem);
+  if (night) layout_digital_night_time(config, show_meridiem);
+  else layout_digital_time_group(show_meridiem);
 }
 
 static void apply_weather_indicator_state(lv_obj_t *indicator, bool alert, bool night)
@@ -1181,6 +1205,11 @@ void wac_clock_set_visible(bool analog, bool digital, bool usable)
 
 void wac_clock_apply_night(bool active)
 {
+  if (s_clock.night_applied && s_clock.night == active) {
+    apply_clock_weather_visibility();
+    return;
+  }
+  s_clock.night_applied = true;
   s_clock.night = active;
   if (s_clock.unavailable_stage) {
     lv_image_set_src(s_clock.unavailable_stage, active ? &round_stage_night : &round_stage_day);
@@ -1205,8 +1234,7 @@ void wac_clock_update_time(const device_config_t *config, const struct tm *local
 {
   if (local_time) {
     update_day_labels(local_time);
-    update_digital_clock(config, local_time);
-    if (night) layout_digital_night_time(config, !wac_ui_strings_equal_ignore_case(config->time_format, "24"));
+    update_digital_clock(config, local_time, night);
     update_analog_clock(local_time);
   }
   lv_obj_t *hands[] = {s_clock.second_hand, s_clock.analog_hour_asset, s_clock.analog_minute_asset};
@@ -1230,12 +1258,12 @@ void wac_clock_update_weather(const app_weather_snapshot_t *weather)
   format_high_low(high_low, sizeof(high_low), weather->high, weather->low);
   wac_ui_set_label_text(s_clock.analog_high_low_label, high_low);
   if (s_clock.analog_weather_icon != NULL) {
-    lv_image_set_src(s_clock.analog_weather_icon, weather_icon_image_for_name(weather->icon_name));
+    wac_ui_set_image_asset(s_clock.analog_weather_icon, weather_icon_image_for_name(weather->icon_name));
   }
 
   wac_ui_set_label_text(s_clock.digital_temp_label, temps);
   if (s_clock.digital_current_icon != NULL) {
-    lv_image_set_src(s_clock.digital_current_icon, weather_icon_image_for_name(weather->icon_name));
+    wac_ui_set_image_asset(s_clock.digital_current_icon, weather_icon_image_for_name(weather->icon_name));
   }
   wac_ui_set_label_text(s_clock.digital_summary_label, weather->summary);
   wac_ui_set_label_text(s_clock.digital_high_low_label, high_low);
@@ -1248,7 +1276,7 @@ void wac_clock_update_weather(const app_weather_snapshot_t *weather)
     wac_ui_set_label_text(s_clock.digital_forecast_day_labels[i], forecast_day);
     wac_ui_set_label_text(s_clock.digital_forecast_temp_labels[i], day_temp);
     if (s_clock.digital_forecast_icons[i] != NULL) {
-      lv_image_set_src(
+      wac_ui_set_image_asset(
         s_clock.digital_forecast_icons[i],
         weather_icon_image_for_name(weather->forecast[i].icon_name)
       );
@@ -1424,8 +1452,96 @@ static void format_alarm_time(char *text, size_t size, const device_config_t *co
   }
 }
 
+/* Keep the gesture local to its handle. PRESS_LOCK supplies pointer capture,
+ * while navigation explicitly cancels it before a different occurrence appears. */
+#define ALARM_SLIDE_TRAVEL 436
+
+static void alarm_slide_position(void *handle, int32_t offset)
+{
+  lv_obj_set_x(handle, 8 + offset);
+}
+
+static void alarm_slide_opacity(void *label, int32_t opacity)
+{
+  lv_obj_set_style_opa(label, opacity, 0);
+}
+
+static void alarm_slide_fade(lv_opa_t opacity)
+{
+  if (s_clock.alarm_slide_label_target == opacity) return;
+  s_clock.alarm_slide_label_target = opacity;
+  lv_anim_delete(s_clock.alarm_slide_label, alarm_slide_opacity);
+  lv_anim_t animation;
+  lv_anim_init(&animation);
+  lv_anim_set_var(&animation, s_clock.alarm_slide_label);
+  lv_anim_set_exec_cb(&animation, alarm_slide_opacity);
+  lv_anim_set_values(&animation, lv_obj_get_style_opa(s_clock.alarm_slide_label, 0), opacity);
+  lv_anim_set_time(&animation, 120);
+  lv_anim_start(&animation);
+}
+
+void wac_clock_cancel_alarm_slide(bool animate)
+{
+  s_clock.alarm_slide_tracking = false;
+  s_clock.alarm_slide_indev = NULL;
+  if (!s_clock.alarm_slide_handle) return;
+  lv_anim_delete(s_clock.alarm_slide_handle, alarm_slide_position);
+  int32_t offset = lv_obj_get_x(s_clock.alarm_slide_handle) - 8;
+  if (animate && offset > 0) {
+    lv_anim_t animation;
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, s_clock.alarm_slide_handle);
+    lv_anim_set_exec_cb(&animation, alarm_slide_position);
+    lv_anim_set_values(&animation, offset, 0);
+    lv_anim_set_time(&animation, 220);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
+    lv_anim_start(&animation);
+    alarm_slide_fade(LV_OPA_COVER);
+  } else {
+    alarm_slide_position(s_clock.alarm_slide_handle, 0);
+    lv_anim_delete(s_clock.alarm_slide_label, alarm_slide_opacity);
+    s_clock.alarm_slide_label_target = LV_OPA_COVER;
+    alarm_slide_opacity(s_clock.alarm_slide_label, LV_OPA_COVER);
+  }
+}
+
+static void alarm_slide_event_cb(lv_event_t *event)
+{
+  lv_event_code_t code = lv_event_get_code(event);
+  lv_indev_t *indev = lv_event_get_indev(event);
+  if (code == LV_EVENT_PRESS_LOST || code == LV_EVENT_INDEV_RESET) {
+    wac_clock_cancel_alarm_slide(true);
+    return;
+  }
+  if (!indev || !s_clock.alarm_slide_available) return;
+  lv_point_t point;
+  lv_indev_get_point(indev, &point);
+  if (code == LV_EVENT_PRESSED) {
+    lv_anim_delete(s_clock.alarm_slide_handle, alarm_slide_position);
+    s_clock.alarm_slide_tracking = true;
+    s_clock.alarm_slide_indev = indev;
+    s_clock.alarm_slide_start_x = point.x;
+    s_clock.alarm_slide_start_offset = lv_obj_get_x(s_clock.alarm_slide_handle) - 8;
+  } else if (s_clock.alarm_slide_tracking && indev == s_clock.alarm_slide_indev
+      && (code == LV_EVENT_PRESSING || code == LV_EVENT_RELEASED)) {
+    int32_t offset = LV_CLAMP(0, s_clock.alarm_slide_start_offset
+      + point.x - s_clock.alarm_slide_start_x, ALARM_SLIDE_TRAVEL);
+    alarm_slide_position(s_clock.alarm_slide_handle, offset);
+    alarm_slide_fade(LV_MAX(0, LV_OPA_COVER
+      - offset * LV_OPA_COVER * 18 / (ALARM_SLIDE_TRAVEL * 10)));
+    if (code == LV_EVENT_RELEASED) {
+      s_clock.alarm_slide_tracking = false;
+      s_clock.alarm_slide_indev = NULL;
+      if (offset * 100 >= ALARM_SLIDE_TRAVEL * 94) {
+        /* READY is private to this control; ordinary clicks have no action. */
+        lv_obj_send_event(s_clock.alarm_slide, LV_EVENT_READY, NULL);
+      } else wac_clock_cancel_alarm_slide(true);
+    }
+  }
+}
+
 void wac_clock_build_alarm(lv_obj_t *parent, lv_event_cb_t action_cb,
-  lv_event_cb_t badge_cb, lv_event_cb_t open_alarm_cb)
+  lv_event_cb_t badge_cb, lv_event_cb_t open_alarm_cb, lv_event_cb_t slide_cb)
 {
   s_clock.alarm_view = lv_obj_create(parent);
   wac_ui_clear_container_chrome(s_clock.alarm_view);
@@ -1473,6 +1589,54 @@ void wac_clock_build_alarm(lv_obj_t *parent, lv_event_cb_t action_cb,
   s_clock.alarm_dismiss_title = create_alarm_label(s_clock.alarm_dismiss,
     &lv_font_montserrat_36, "DISMISS", 0, 0, LV_SIZE_CONTENT);
   lv_obj_center(s_clock.alarm_dismiss_title);
+  s_clock.alarm_slide = lv_obj_create(s_clock.alarm_view);
+  wac_ui_clear_container_chrome(s_clock.alarm_slide);
+  lv_obj_remove_flag(s_clock.alarm_slide, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_pos(s_clock.alarm_slide, 130, 548);
+  lv_obj_set_size(s_clock.alarm_slide, 540, 104);
+  lv_obj_set_style_radius(s_clock.alarm_slide, 56, 0);
+  lv_obj_set_style_bg_opa(s_clock.alarm_slide, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(s_clock.alarm_slide, 1, 0);
+  /* The reference border is inset decoration, without a content inset. */
+  lv_obj_set_style_pad_all(s_clock.alarm_slide, -1, 0);
+  /* Scale the existing 32px font to 29.625px around the caption's center. */
+  s_clock.alarm_slide_label = create_alarm_label(s_clock.alarm_slide,
+    &lv_font_montserrat_32, "SLIDE TO DISMISS", 0, 0, 540);
+  lv_obj_center(s_clock.alarm_slide_label);
+  lv_obj_set_style_transform_scale(s_clock.alarm_slide_label, 237, 0);
+  lv_obj_set_style_transform_pivot_x(s_clock.alarm_slide_label, 270, 0);
+  lv_obj_set_style_transform_pivot_y(s_clock.alarm_slide_label,
+    lv_font_montserrat_32.line_height / 2, 0);
+  s_clock.alarm_slide_label_target = LV_OPA_COVER;
+  s_clock.alarm_slide_handle = lv_obj_create(s_clock.alarm_slide);
+  wac_ui_clear_container_chrome(s_clock.alarm_slide_handle);
+  lv_obj_remove_flag(s_clock.alarm_slide_handle, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(s_clock.alarm_slide_handle, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
+  lv_obj_set_pos(s_clock.alarm_slide_handle, 8, 8);
+  lv_obj_set_size(s_clock.alarm_slide_handle, 88, 88);
+  lv_obj_set_style_radius(s_clock.alarm_slide_handle, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(s_clock.alarm_slide_handle, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(s_clock.alarm_slide_handle, 1, 0);
+  lv_obj_set_style_pad_all(s_clock.alarm_slide_handle, -1, 0);
+  lv_obj_add_event_cb(s_clock.alarm_slide_handle, alarm_slide_event_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_add_event_cb(s_clock.alarm_slide_handle, alarm_slide_event_cb, LV_EVENT_PRESSING, NULL);
+  lv_obj_add_event_cb(s_clock.alarm_slide_handle, alarm_slide_event_cb, LV_EVENT_RELEASED, NULL);
+  lv_obj_add_event_cb(s_clock.alarm_slide_handle, alarm_slide_event_cb, LV_EVENT_PRESS_LOST, NULL);
+  lv_obj_add_event_cb(s_clock.alarm_slide_handle, alarm_slide_event_cb, LV_EVENT_INDEV_RESET, NULL);
+  lv_obj_add_event_cb(s_clock.alarm_slide, slide_cb, LV_EVENT_READY, NULL);
+  /* Lucide chevrons-right, in its centered 36px box. Existing single-chevron
+   * artwork has different proportions; two LVGL lines retain the approved shape. */
+  static const lv_point_precise_t chevrons[2][3] = {
+    {{9, 11}, {17, 18}, {9, 26}},
+    {{20, 11}, {27, 18}, {20, 26}}
+  };
+  for (unsigned i = 0; i < 2; ++i) {
+    s_clock.alarm_slide_chevrons[i] = lv_line_create(s_clock.alarm_slide_handle);
+    lv_line_set_points(s_clock.alarm_slide_chevrons[i], chevrons[i], 3);
+    lv_obj_set_pos(s_clock.alarm_slide_chevrons[i], 26, 26);
+    lv_obj_set_style_line_width(s_clock.alarm_slide_chevrons[i], 3, 0);
+    lv_obj_set_style_line_rounded(s_clock.alarm_slide_chevrons[i], true, 0);
+  }
   s_clock.alarm_footer = create_alarm_label(s_clock.alarm_view,
     &wac_font_settings_28, "", 200, 679, 400);
   s_clock.alarm_snoozed_title = create_alarm_label(s_clock.alarm_view,
@@ -1517,13 +1681,22 @@ void wac_clock_update_alarm(const device_config_t *config,
   if (!s_clock.alarm_view || !config || !clock || !alarm) return;
   bool ringing = surface == WAC_CLOCK_ALARM_RINGING;
   bool snoozed = surface == WAC_CLOCK_ALARM_SNOOZED;
+  bool dismissed = surface == WAC_CLOCK_ALARM_DISMISSED;
   bool home = surface == WAC_CLOCK_ALARM_HOME;
   bool missed = alarm->missed.valid;
   lv_color_t primary = night ? wac_ui_color_night_primary() : wac_ui_color_text_primary();
   lv_color_t muted = night ? wac_ui_color_night_muted() : wac_ui_color_text_muted();
   lv_color_t accent = lv_color_hex(night ? 0xe1b6b6 : 0x93d1ff);
-  set_alarm_visible(s_clock.alarm_view, ringing || snoozed);
-  set_alarm_visible(s_clock.alarm_snooze, ringing);
+  bool slide_available = ringing && !pending;
+  if (!slide_available && s_clock.alarm_slide_available) wac_clock_cancel_alarm_slide(false);
+  s_clock.alarm_slide_available = slide_available;
+  if (slide_available) lv_obj_remove_state(s_clock.alarm_slide_handle, LV_STATE_DISABLED);
+  else lv_obj_add_state(s_clock.alarm_slide_handle, LV_STATE_DISABLED);
+  set_alarm_visible(s_clock.alarm_view, ringing || snoozed || dismissed);
+  set_alarm_visible(s_clock.alarm_snooze, ringing || dismissed);
+  set_alarm_visible(s_clock.alarm_dismiss, snoozed);
+  set_alarm_visible(s_clock.alarm_slide, ringing || dismissed);
+  set_alarm_visible(s_clock.alarm_slide_handle, !dismissed);
   set_alarm_visible(s_clock.alarm_snoozed_title, snoozed);
   set_alarm_visible(s_clock.alarm_countdown, snoozed);
   set_alarm_visible(s_clock.alarm_deadline, snoozed);
@@ -1533,11 +1706,25 @@ void wac_clock_update_alarm(const device_config_t *config,
   lv_obj_t *buttons[] = {s_clock.alarm_snooze, s_clock.alarm_dismiss,
     s_clock.alarm_badge, s_clock.unavailable_alarm_button};
   for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i) {
-    if (pending) lv_obj_add_state(buttons[i], LV_STATE_DISABLED);
+    if (pending || dismissed) lv_obj_add_state(buttons[i], LV_STATE_DISABLED);
     else lv_obj_remove_state(buttons[i], LV_STATE_DISABLED);
   }
   style_alarm_button(s_clock.alarm_snooze, night, true);
   style_alarm_button(s_clock.alarm_dismiss, night, false);
+  style_alarm_button(s_clock.alarm_slide, night, false);
+  lv_obj_set_style_bg_color(s_clock.alarm_slide_handle,
+    lv_color_hex(night ? 0x643437 : 0x304d70), 0);
+  lv_obj_set_style_border_color(s_clock.alarm_slide_handle,
+    lv_color_hex(night ? 0x633737 : 0x253a57), 0);
+  for (unsigned i = 0; i < 2; ++i)
+    lv_obj_set_style_line_color(s_clock.alarm_slide_chevrons[i], primary, 0);
+  wac_ui_set_label_text(s_clock.alarm_slide_label, dismissed ? "DISMISSED" : "SLIDE TO DISMISS");
+  lv_obj_set_style_text_color(s_clock.alarm_slide_label, dismissed ? primary : muted, 0);
+  if (dismissed) {
+    lv_anim_delete(s_clock.alarm_slide_label, alarm_slide_opacity);
+    s_clock.alarm_slide_label_target = LV_OPA_COVER;
+    alarm_slide_opacity(s_clock.alarm_slide_label, LV_OPA_COVER);
+  }
   style_alarm_button(s_clock.unavailable_alarm_button, night, false);
   lv_obj_set_style_text_color(s_clock.unavailable_alarm_button_text, primary, 0);
   lv_obj_set_style_text_color(s_clock.unavailable_alarm_caption, muted, 0);
@@ -1546,10 +1733,10 @@ void wac_clock_update_alarm(const device_config_t *config,
   lv_obj_set_pos(s_clock.unavailable_alarm_button, 230, missed ? 546 : 574);
   lv_obj_set_height(s_clock.unavailable_alarm_button, missed ? 72 : 104);
 
-  if (ringing || snoozed) {
+  if (ringing || snoozed || dismissed) {
     lv_obj_move_foreground(s_clock.alarm_view);
     lv_obj_set_style_bg_color(s_clock.alarm_view, lv_color_hex(night ? 0x18090c : 0x07101c), 0);
-    lv_image_set_src(s_clock.alarm_stage, night ? &digital_stage_night : &digital_stage_day);
+    wac_ui_set_image_asset(s_clock.alarm_stage, night ? &digital_stage_night : &digital_stage_day);
     lv_obj_t *primary_labels[] = {s_clock.alarm_time, s_clock.alarm_countdown,
       s_clock.alarm_snooze_title, s_clock.alarm_snooze_duration, s_clock.alarm_dismiss_title};
     for (size_t i = 0; i < sizeof(primary_labels) / sizeof(primary_labels[0]); ++i)
@@ -1605,7 +1792,8 @@ void wac_clock_update_alarm(const device_config_t *config,
     wac_ui_set_label_text(s_clock.alarm_deadline, again);
     lv_obj_set_pos(s_clock.alarm_footer, snoozed ? 150 : 200, 679);
     lv_obj_set_width(s_clock.alarm_footer, snoozed ? 500 : 400);
-    wac_ui_set_label_text(s_clock.alarm_footer, snoozed ? "Repeating alarm stays on" : "Alarm ringing");
+    wac_ui_set_label_text(s_clock.alarm_footer, snoozed ? "Alarm snoozed"
+      : dismissed ? "Alarm dismissed" : "Alarm ringing");
   }
 
   if (home) {
@@ -1666,7 +1854,7 @@ void wac_clock_update_alarm(const device_config_t *config,
     lv_obj_set_width(s_clock.alarm_badge_text, text_size.x > text_width ? text_width : LV_SIZE_CONTENT);
     lv_obj_set_style_text_color(s_clock.alarm_badge_text, accent, 0);
     bool small = missed || analog_row;
-    lv_image_set_src(s_clock.alarm_badge_icon, config->alarm_enabled || missed
+    wac_ui_set_image_asset(s_clock.alarm_badge_icon, config->alarm_enabled || missed
       ? (small ? &wac_icon_alarm_clock_small : &wac_icon_alarm_clock)
       : (small ? &wac_icon_alarm_clock_off_small : &wac_icon_alarm_clock_off));
     lv_obj_t *icons[] = {s_clock.alarm_badge_icon, s_clock.alarm_badge_close};
@@ -1701,7 +1889,7 @@ void wac_clock_update_machine(bool home, bool analog, bool usable, bool playing,
   if (home) lv_obj_remove_flag(s_clock.machine_indicator, LV_OBJ_FLAG_HIDDEN);
   else lv_obj_add_flag(s_clock.machine_indicator, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_pos(s_clock.machine_indicator, 224, !usable ? 56 : analog ? 152 : 92);
-  lv_image_set_src(s_clock.machine_icon, playing ? &wac_icon_volume_2 : &wac_icon_volume_off);
+  wac_ui_set_image_asset(s_clock.machine_icon, playing ? &wac_icon_volume_2 : &wac_icon_volume_off);
   lv_obj_set_style_image_recolor(s_clock.machine_icon, night ? wac_ui_color_night_muted() : wac_ui_color_text_muted(), 0);
   lv_obj_set_style_image_recolor_opa(s_clock.machine_icon, LV_OPA_COVER, 0);
 }

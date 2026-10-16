@@ -19,15 +19,15 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 - Large, centered digital time in Night Shift and a common unavailable-time screen for either clock face.
 - Current temperature, today's high and low, and weather icons that change between day and night.
 - A forecast for the next five days, with icons chosen to represent the daytime weather.
-- A conditions screen with wind, gusts, pressure, rain or snow, and a short weather outlook.
-- An edge indicator for approaching storm conditions, with quick access to the conditions screen.
+- A current radar map for U.S. weather locations, centered on the saved location with a full-screen map covering a 75-mile diameter.
+- An edge indicator for approaching storm conditions, with quick access to Radar.
 - Weather from Open-Meteo without a key, or Visual Crossing with your API key.
 - Time synchronized over Wi-Fi.
 - DS3231 backup-clock support for startup while network synchronization proceeds, with lost-time and connection notices.
 - A red Night Shift appearance with Off, Always On, Fixed Schedule or locally calculated Sunset to Sunrise preferences, remembered startup fallback, and separate Day/Night brightness with gradual transitions.
 - Household messages sent from a phone or computer on the same network, with optional sharing among multiple ESP32-P4 clocks.
 - Touchscreen settings for Wi-Fi, location, display, messaging and saved alarm/night preferences.
-- One recurring alarm with selected repeat days, Snooze, Dismiss, missed-alarm notices and restart recovery.
+- One alarm with one-time or selected repeat days, Snooze, Dismiss, missed-alarm notices and restart recovery.
 - Classic Beep, Classic Bell, and Rising Tones, with a five-second sound preview and gradually increasing alarm volume.
 - Sound Machine with nine repeating recordings, White/Pink/Brown Noise, independent volume and a sleep timer.
 - Automatic startup when the board receives power.
@@ -128,8 +128,8 @@ Your selected analog or digital face is the home screen.
 
 | From | Gesture or control | What happens |
 | --- | --- | --- |
-| Clock | Swipe left | Open Forecast, then Conditions with another left swipe. |
-| Forecast or Conditions | Swipe right | Step back toward the clock. |
+| Clock | Swipe left | Open Forecast, then Radar with another left swipe for U.S. locations. |
+| Forecast or Radar | Swipe right | Step back toward the clock. |
 | Clock | Swipe right | Open Messages. |
 | Messages | Swipe left | Return to the clock. |
 | Clock | Swipe down | Open settings. |
@@ -140,9 +140,18 @@ Your selected analog or digital face is the home screen.
 
 ### Weather and storm conditions
 
-The conditions screen combines measurements with a short outlook, such as “Calm and dry” or “Thunderstorms likely by 4 PM.” Storm conditions include strong wind or gusts, thunderstorms, heavy rain or snow, and a sharp pressure drop.
+Radar shows the latest RainViewer frame over a USGS map, with nearby town names,
+a marker at your saved weather location, the frame's local time and an echo-strength
+legend. It checks for a newer frame every five minutes. An unsuccessful update
+keeps the previous image and marks it “Old”; before any image arrives it shows
+“Radar unavailable.” This first version supports locations resolved in the
+United States. Radar is hidden for other locations; Forecast remains available.
+The fixed map has no zoom, panning or animation controls.
 
-During an alert, a pulsing edge indicator appears on the clock. It is amber during the day and red in Night Shift. Swiping left opens **Conditions first**, then Forecast.
+Storm conditions include strong wind or gusts, thunderstorms and heavy rain or
+snow. Falling pressure alone does not trigger an alert.
+
+During an alert, a pulsing edge indicator appears on the clock. It is amber during the day and red in Night Shift. Swiping left opens **Radar first**, then Forecast for U.S. locations, or Forecast alone elsewhere.
 
 Weather normally refreshes every ten minutes. If an update fails, the clock keeps the last available weather while retrying. That retained weather may be out of date.
 
@@ -217,12 +226,13 @@ Room Name, Device ID and House Messages are under **Device Setup → Messaging**
 | Units | **Imperial** or **Metric** weather measurements. |
 | Brightness | Day/Night levels under **Settings → Display Settings → Brightness**. |
 | Night Shift | Mode, fixed schedule, and solar offsets with calculated start/end times. |
-| Alarm | Time, repeat days, sound, volume, snooze and On/Off. The editor previews the next alarm for unsaved time/day edits. |
+| Alarm | Time, Repeat None for one-time or selected weekdays, sound, volume, snooze and On/Off. The editor previews the next alarm for unsaved time/day edits. |
 | Sound Machine | Sound, independent volume, sleep timer and Play/Stop. |
 
 Display Settings has its own **Cancel** and **Save**. Save applies the clock face, time format, leading zero and Day/Night brightness without restarting, then returns to Settings. Cancel or Back discards those edits.
 
-Conditions descriptions also use the saved time format, including while showing weather retained after a failed update.
+Radar frame timestamps also use the saved time format, including while showing
+an image retained after a failed update.
 
 Device Setup and Wi-Fi share a draft for **Save & Restart**. The **Weather** entry opens the Weather editor for location, provider, units and API key, which save independently and restart after success. Its Back or Cancel returns to Device Setup with any other device edits retained; Weather Save applies only the weather choices. Alarm **Save** applies settings without restarting. The **Alarm On/Off** switch in Alarm Settings saves immediately; **Cancel** does not undo a successful switch change. Other alarm edits still require **Save**. Nested **Done** keeps edits in the parent draft; **Cancel** discards unsaved edits. See the [architecture](docs/architecture.md#editing-and-saving-user-settings) for save rules and accepted partial-save behavior.
 
@@ -243,6 +253,20 @@ Tap a text field to open the keyboard. The active input stays visible above it; 
 Alarm Time and Fixed Schedule minute arrows move in five-minute steps and change the hour when minutes wrap. Opening an editor leaves the saved time unchanged. Volume and brightness sliders have a thin bar and a large circular handle.
 
 Preview Sound plays the selected draft sound at the draft volume without saving either choice. Stop Preview, leaving the sound picker or a ringing alarm stops the preview. Sunrise/Sunset shows calculated event times when the clock has usable time and a saved location.
+
+While the alarm rings, tap **SNOOZE**, or drag the left handle of **SLIDE TO
+DISMISS** to the right end and release. Tapping the track or releasing a short
+drag keeps it ringing. Dismissal shows **DISMISSED** briefly before returning
+to the clock. The snoozed screen keeps its tap **DISMISS** button.
+
+For a one-time alarm, choose **Repeat → None**, set the time and Save. With Alarm
+On, it rings at the next occurrence of that time, today or tomorrow. Snooze works normally;
+Dismiss turns the alarm Off. Turn it On again to reuse the time for another
+one-time alarm. Restart recovery keeps the original scheduled date.
+
+Repeat also offers **Every Day**, **Weekdays** and **Custom Days**. Custom Days
+lets you select individual weekdays. Use Done or Back to return through Repeat
+to Alarm, then Save to apply the selection. Cancel on Alarm discards it.
 
 ### Sound Machine
 

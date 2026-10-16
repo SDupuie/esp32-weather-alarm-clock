@@ -26,8 +26,13 @@ esp_err_t wac_alarm_init(void);
  * lock. Off cancels captured ringing/snooze even without usable time; otherwise
  * a loaded snooze is evaluated only when clock->usable is true. Runtime Off->On
  * and enabled hour/minute/repeat-day edits skip past occurrences once time is
- * usable; already-On startup uses ordinary recovery. Runtime arming is not
- * persisted and leaves captured ringing/snooze intact. */
+ * usable. Idle arming saves that skipped occurrence through the handled record;
+ * edits during captured ringing/snooze remain RAM-only. Already-On startup uses
+ * ordinary recovery, with captured ringing/snooze left intact. */
+/* Repeat None retains one dated target across restart. Dismiss, a missed target
+ * or an expired snooze consumes it and conditionally saves Alarm Off through
+ * device_config. A failed save is reported without tick retries; a retained
+ * consumed target permits one completion attempt on the next startup. */
 esp_err_t wac_alarm_update(const device_config_t *config, const wac_time_snapshot_t *clock);
 esp_err_t wac_alarm_snooze(const device_config_t *config, const wac_time_snapshot_t *clock);
 esp_err_t wac_alarm_dismiss(void);

@@ -14,6 +14,7 @@
 #include "esp_timer.h"
 #include "lvgl.h"
 #include "message_service.h"
+#include "location_scoring.h"
 
 #define SWIPE_THRESHOLD_PX 70
 #define SWIPE_AXIS_RATIO_X10 15
@@ -23,7 +24,7 @@ typedef enum {
   APP_VIEW_ANALOG = 0,
   APP_VIEW_DIGITAL,
   APP_VIEW_FORECAST,
-  APP_VIEW_CONDITIONS,
+  APP_VIEW_RADAR,
   APP_VIEW_MESSAGE
 } app_view_mode_t;
 
@@ -39,6 +40,7 @@ typedef struct {
    * home so an alert starting or clearing mid-visit doesn't reshuffle the
    * row; the new order applies from the next swipe out of home. */
   app_view_mode_t weather_row[2];
+  unsigned weather_row_count;
   bool weather_alert_active;
   lv_point_t gesture_start;
   bool gesture_tracking;
@@ -55,6 +57,7 @@ typedef struct {
   bool message_held;
   bool has_important_messages;
   app_weather_snapshot_t weather;
+  app_radar_snapshot_t radar;
   device_config_t config_snapshot;
   int last_displayed_minute_key;
   int64_t last_minute_advance_ms;
@@ -66,6 +69,8 @@ typedef struct {
   app_alarm_action_t pending_alarm_action;
   wac_alarm_occurrence_t pending_alarm_occurrence;
   bool alarm_action_return_allowed;
+  bool alarm_slide_pending;
+  lv_timer_t *alarm_confirmation_timer;
 } app_ui_state_t;
 
 static app_ui_state_t s_ui;
@@ -241,9 +246,14 @@ static bool settings_visible(void)
 
 static bool alarm_ringing(void) { return s_ui.alarm.phase == WAC_ALARM_RINGING; }
 
+static bool alarm_preempting(void)
+{
+  return alarm_ringing() || s_ui.alarm_confirmation_timer || s_ui.alarm_slide_pending;
+}
+
 static bool alarm_page(void)
 {
-  return alarm_ringing() || (s_ui.snoozed_view
+  return alarm_preempting() || (s_ui.snoozed_view
     && s_ui.alarm.phase == WAC_ALARM_SNOOZED && !settings_visible());
 }
 
@@ -265,7 +275,7 @@ void wac_ui_settings_navigate(wac_settings_view_t view)
   s_ui.settings_view = view;
   update_backup_notice();
   wac_settings_render(view);
-  wac_settings_set_visible(!s_ui.settings_suspended && !alarm_ringing());
+  wac_settings_set_visible(!s_ui.settings_suspended && !alarm_preempting());
   update_alarm_surface();
 }
 
@@ -291,7 +301,7 @@ void wac_ui_settings_close(void)
 
 static void open_settings(void)
 {
-  if (alarm_ringing()) return;
+  if (alarm_preempting()) return;
   if (settings_visible()) return;
   s_ui.snoozed_view = false;
   if (s_ui.settings_suspended && s_ui.settings_view != WAC_SETTINGS_NONE) {
@@ -366,24 +376,46 @@ static void set_view_mode(app_view_mode_t next_view)
     wac_clock_update_status("", false, false);
 
   wac_weather_set_visible(next_view == APP_VIEW_FORECAST,
-    next_view == APP_VIEW_CONDITIONS, next_view == APP_VIEW_MESSAGE);
+    next_view == APP_VIEW_RADAR, next_view == APP_VIEW_MESSAGE);
 
   apply_view_night_state(s_ui.night_overlay_active);
   update_weather_status();
   update_alarm_surface();
 }
 
-/* During a storm alert, conditions jumps ahead of the forecast so one swipe
+static bool radar_enabled(void)
+{
+  return s_ui.config_snapshot.location_ready
+    && location_scoring_label_has_country(s_ui.config_snapshot.location, "US");
+}
+
+/* Country eligibility overrides a held visit. A removed surface must release
+ * its external pixel reference before main acknowledges the publication. */
+static void update_radar_eligibility(void)
+{
+  bool enabled = radar_enabled();
+  wac_weather_set_radar_enabled(s_ui.stage, enabled);
+  if (!enabled) {
+    s_ui.weather_row[0] = APP_VIEW_FORECAST;
+    s_ui.weather_row_count = 1;
+    if (s_ui.current_view == APP_VIEW_RADAR) s_ui.current_view = APP_VIEW_FORECAST;
+    s_ui.radar = (app_radar_snapshot_t){0};
+  }
+}
+
+/* During a storm alert, Radar jumps ahead of the forecast so one swipe
  * from home lands on it; the forecast is still one more swipe away. */
 static void snapshot_weather_row(void)
 {
-  s_ui.weather_row[0] = s_ui.weather_alert_active ? APP_VIEW_CONDITIONS : APP_VIEW_FORECAST;
-  s_ui.weather_row[1] = s_ui.weather_alert_active ? APP_VIEW_FORECAST : APP_VIEW_CONDITIONS;
+  bool radar = radar_enabled();
+  s_ui.weather_row_count = radar ? 2 : 1;
+  s_ui.weather_row[0] = radar && s_ui.weather_alert_active ? APP_VIEW_RADAR : APP_VIEW_FORECAST;
+  s_ui.weather_row[1] = s_ui.weather_alert_active ? APP_VIEW_FORECAST : APP_VIEW_RADAR;
 }
 
 static int weather_row_index(app_view_mode_t view)
 {
-  for (int i = 0; i < 2; ++i) {
+  for (unsigned i = 0; i < s_ui.weather_row_count; ++i) {
     if (s_ui.weather_row[i] == view) {
       return i;
     }
@@ -395,12 +427,12 @@ static int weather_row_index(app_view_mode_t view)
  * only the configured face is home, and every screen is a fixed neighbour
  * of home that returns with the opposite swipe:
  *   right -> messages
- *   left  -> forecast -> conditions (conditions first during an alert)
+ *   left  -> forecast -> Radar (Radar first during an alert)
  *   down  -> Settings (anywhere on the face)
  * Swipe up from home is reserved for a future view below home. */
 static void handle_swipe(int delta_x, int delta_y)
 {
-  if (alarm_ringing() || settings_visible() || (s_ui.backup_notice_open && !alarm_page())) {
+  if (alarm_preempting() || settings_visible() || (s_ui.backup_notice_open && !alarm_page())) {
     return;
   }
 
@@ -421,8 +453,8 @@ static void handle_swipe(int delta_x, int delta_y)
 
     int row_index = weather_row_index(s_ui.current_view);
     if (row_index >= 0) {
-      if (delta_x < 0 && row_index == 0) {
-        set_view_mode(s_ui.weather_row[1]);
+      if (delta_x < 0 && (unsigned)(row_index + 1) < s_ui.weather_row_count) {
+        set_view_mode(s_ui.weather_row[row_index + 1]);
       } else if (delta_x > 0) {
         set_view_mode(row_index == 0 ? s_ui.last_home_view : s_ui.weather_row[0]);
       }
@@ -444,7 +476,7 @@ static void handle_swipe(int delta_x, int delta_y)
 
 static void gesture_layer_event_cb(lv_event_t *event)
 {
-  if (alarm_ringing() || settings_visible() || (s_ui.backup_notice_open && !alarm_page())) {
+  if (alarm_preempting() || settings_visible() || (s_ui.backup_notice_open && !alarm_page())) {
     s_ui.gesture_tracking = false;
     return;
   }
@@ -550,7 +582,7 @@ void app_ui_set_clock_warning_dismiss_handler(esp_err_t (*handler)(wac_time_warn
 static void machine_open_event_cb(lv_event_t *event)
 {
   (void)event;
-  if (alarm_ringing() || s_ui.backup_notice_open) return;
+  if (alarm_preempting() || s_ui.backup_notice_open) return;
   bool returning_to_draft = s_ui.settings_suspended;
   open_settings();
   if (settings_visible()) wac_settings_start_machine(!returning_to_draft);
@@ -589,7 +621,7 @@ void app_ui_complete_message_acknowledgment(esp_err_t result)
   if (!s_ui.message_ack_pending) return;
   s_ui.message_ack_pending = false;
   bool still_here = s_ui.message_ack_return_allowed
-    && s_ui.current_view == APP_VIEW_MESSAGE && !settings_visible() && !alarm_ringing();
+    && s_ui.current_view == APP_VIEW_MESSAGE && !settings_visible() && !alarm_preempting();
   s_ui.message_ack_return_allowed = false;
   if (result != ESP_OK) {
     ESP_LOGW(TAG, "Message dismissal failed: %s", esp_err_to_name(result));
@@ -623,7 +655,7 @@ static void update_weather_status(void)
   wac_weather_surface_t surface = WAC_WEATHER_SURFACE_HOME;
   if (alarm_page()) surface = WAC_WEATHER_SURFACE_UNAVAILABLE_HOME;
   else if (s_ui.current_view == APP_VIEW_FORECAST) surface = WAC_WEATHER_SURFACE_FORECAST;
-  else if (s_ui.current_view == APP_VIEW_CONDITIONS) surface = WAC_WEATHER_SURFACE_CONDITIONS;
+  else if (s_ui.current_view == APP_VIEW_RADAR) surface = WAC_WEATHER_SURFACE_RADAR;
   else if (s_ui.current_view == APP_VIEW_MESSAGE) surface = WAC_WEATHER_SURFACE_MESSAGE;
   else if (!s_ui.clock_usable) surface = WAC_WEATHER_SURFACE_UNAVAILABLE_HOME;
   char notice[64] = "";
@@ -648,21 +680,27 @@ static void update_alarm_surface(void)
 {
   bool home = s_ui.current_view == APP_VIEW_ANALOG || s_ui.current_view == APP_VIEW_DIGITAL;
   bool page = alarm_page();
-  wac_clock_alarm_surface_t surface = alarm_ringing() ? WAC_CLOCK_ALARM_RINGING
+  wac_clock_alarm_surface_t surface = s_ui.alarm_confirmation_timer ? WAC_CLOCK_ALARM_DISMISSED
+    : alarm_ringing() || s_ui.alarm_slide_pending ? WAC_CLOCK_ALARM_RINGING
     : settings_visible() ? WAC_CLOCK_ALARM_HIDDEN
     : page ? WAC_CLOCK_ALARM_SNOOZED
     : home ? WAC_CLOCK_ALARM_HOME : WAC_CLOCK_ALARM_HIDDEN;
   wac_clock_set_visible(!page && s_ui.current_view == APP_VIEW_ANALOG,
     !page && s_ui.current_view == APP_VIEW_DIGITAL, s_ui.clock_usable);
   wac_weather_set_visible(!page && s_ui.current_view == APP_VIEW_FORECAST,
-    !page && s_ui.current_view == APP_VIEW_CONDITIONS,
+    !page && s_ui.current_view == APP_VIEW_RADAR,
     !page && s_ui.current_view == APP_VIEW_MESSAGE);
   bool blocked = s_ui.backup_notice_open || (s_ui.clock.usable
     && (clock_is_stale() || s_ui.clock.source == WAC_TIME_SOURCE_RTC));
-  wac_clock_update_alarm(&s_ui.config_snapshot, &s_ui.clock, &s_ui.alarm, surface,
+  /* The owner clears current when it dismisses. The held presentation keeps
+   * only the already captured occurrence, never another alarm state. */
+  wac_alarm_snapshot_t presentation = s_ui.alarm;
+  if (s_ui.alarm_confirmation_timer || s_ui.alarm_slide_pending)
+    presentation.current = s_ui.pending_alarm_occurrence;
+  wac_clock_update_alarm(&s_ui.config_snapshot, &s_ui.clock, &presentation, surface,
     s_ui.current_view == APP_VIEW_ANALOG, s_ui.night_overlay_active, blocked,
     s_ui.alarm_action_pending);
-  wac_settings_set_visible(settings_visible() && !alarm_ringing());
+  wac_settings_set_visible(settings_visible() && !page);
   update_night_overlay_visibility();
   update_clock_status(&s_ui.clock);
   update_weather_status();
@@ -674,6 +712,7 @@ static void update_alarm_surface(void)
 void wac_ui_apply_display(const device_config_t *config)
 {
   s_ui.config_snapshot = *config;
+  update_radar_eligibility();
   app_view_mode_t home = wac_ui_strings_equal_ignore_case(config->default_clock_face, "analog")
     ? APP_VIEW_ANALOG : APP_VIEW_DIGITAL;
   s_ui.last_home_view = home;
@@ -684,6 +723,7 @@ void wac_ui_apply_display(const device_config_t *config)
   wac_clock_update_time(config, usable ? &local_time : NULL, s_ui.night_overlay_active);
   wac_weather_update(&s_ui.weather, usable ? &local_time : NULL,
     wac_ui_strings_equal_ignore_case(config->time_format, "24"));
+  wac_weather_update_radar(&s_ui.radar, config, s_ui.night_overlay_active);
   update_alarm_surface();
 }
 
@@ -721,10 +761,38 @@ static void alarm_action_event_cb(lv_event_t *event)
   submit_alarm_action((app_alarm_action_t)(uintptr_t)lv_event_get_user_data(event));
 }
 
+static void alarm_slide_event_cb(lv_event_t *event)
+{
+  (void)event;
+  if (!alarm_ringing() || s_ui.alarm_action_pending || s_ui.alarm_confirmation_timer) return;
+  submit_alarm_action(APP_ALARM_DISMISS);
+  s_ui.alarm_slide_pending = s_ui.alarm_action_pending
+    && s_ui.pending_alarm_action == APP_ALARM_DISMISS;
+  if (!s_ui.alarm_slide_pending) wac_clock_cancel_alarm_slide(true);
+}
+
+static void cancel_alarm_confirmation(void)
+{
+  if (s_ui.alarm_confirmation_timer) {
+    lv_timer_delete(s_ui.alarm_confirmation_timer);
+    s_ui.alarm_confirmation_timer = NULL;
+  }
+  s_ui.alarm_slide_pending = false;
+}
+
+static void alarm_confirmation_expired(lv_timer_t *timer)
+{
+  if (timer != s_ui.alarm_confirmation_timer) return;
+  s_ui.alarm_confirmation_timer = NULL;
+  /* A replacement/resumed ring cancels this timer before it can navigate. */
+  if (s_ui.alarm.phase == WAC_ALARM_IDLE) set_view_mode(s_ui.last_home_view);
+  update_alarm_surface();
+}
+
 static void open_alarm_event_cb(lv_event_t *event)
 {
   (void)event;
-  if (alarm_ringing() || (s_ui.backup_notice_open && !alarm_page())) return;
+  if (alarm_preempting() || (s_ui.backup_notice_open && !alarm_page())) return;
   s_ui.snoozed_view = false;
   bool held_alarm = s_ui.settings_suspended && s_ui.settings_view >= WAC_SETTINGS_ALARM
     && s_ui.settings_view <= WAC_SETTINGS_SNOOZE;
@@ -744,7 +812,7 @@ static void open_alarm_event_cb(lv_event_t *event)
 
 static void alarm_badge_event_cb(lv_event_t *event)
 {
-  if (alarm_ringing() || settings_visible() || s_ui.backup_notice_open) return;
+  if (alarm_preempting() || settings_visible() || s_ui.backup_notice_open) return;
   if (s_ui.alarm.missed.valid) submit_alarm_action(APP_ALARM_DISMISS_MISSED);
   else if (s_ui.alarm.phase == WAC_ALARM_SNOOZED) {
     set_view_mode(s_ui.last_home_view);
@@ -762,6 +830,8 @@ void app_ui_complete_alarm_action(app_alarm_action_t action,
   s_ui.alarm_action_pending = false;
   bool return_allowed = s_ui.alarm_action_return_allowed;
   s_ui.alarm_action_return_allowed = false;
+  bool slide = s_ui.alarm_slide_pending;
+  s_ui.alarm_slide_pending = false;
   /* The owner publishes its live transition before this completion. Storage
    * failure does not undo that transition; rejected stale commands do not move
    * the user away from their current screen or from a newer alarm. */
@@ -772,14 +842,23 @@ void app_ui_complete_alarm_action(app_alarm_action_t action,
     ESP_LOGW(TAG, "Alarm action failed: %s", esp_err_to_name(result));
   }
   if (return_allowed && (snoozed || dismissed)) {
-    set_view_mode(s_ui.last_home_view);
-    s_ui.snoozed_view = snoozed;
+    /* A failed action establishes dismissal only when the live owner reports
+     * that same storage failure. A rejected stale command may also find Idle. */
+    if (slide && dismissed && (result == ESP_OK || result == s_ui.alarm.storage_error)) {
+      s_ui.alarm_confirmation_timer = lv_timer_create(alarm_confirmation_expired, 2200, NULL);
+      if (s_ui.alarm_confirmation_timer) lv_timer_set_repeat_count(s_ui.alarm_confirmation_timer, 1);
+      else set_view_mode(s_ui.last_home_view);
+    } else {
+      set_view_mode(s_ui.last_home_view);
+      s_ui.snoozed_view = snoozed;
+    }
   }
   update_alarm_surface();
 }
 
 static void build_app_shell(const device_config_t *config)
 {
+  cancel_alarm_confirmation();
   lv_obj_t *screen = lv_screen_active();
   wac_settings_close();
   lv_obj_clean(screen);
@@ -805,7 +884,7 @@ static void build_app_shell(const device_config_t *config)
   yield_ui_bootstrap();
   wac_weather_build_forecast(s_ui.stage);
   yield_ui_bootstrap();
-  wac_weather_build_conditions(s_ui.stage);
+  wac_weather_set_radar_enabled(s_ui.stage, radar_enabled());
   yield_ui_bootstrap();
   wac_weather_build_message(s_ui.stage);
   yield_ui_bootstrap();
@@ -816,7 +895,8 @@ static void build_app_shell(const device_config_t *config)
   build_night_overlay(s_ui.stage);
   wac_clock_build_machine(s_ui.stage, machine_open_event_cb);
   wac_clock_build_backup(s_ui.stage, backup_open_event_cb, backup_dismiss_event_cb);
-  wac_clock_build_alarm(s_ui.stage, alarm_action_event_cb, alarm_badge_event_cb, open_alarm_event_cb);
+  wac_clock_build_alarm(s_ui.stage, alarm_action_event_cb, alarm_badge_event_cb, open_alarm_event_cb,
+    alarm_slide_event_cb);
 
   if (wac_ui_strings_equal_ignore_case(config->default_clock_face, "analog")) {
     s_ui.last_home_view = APP_VIEW_ANALOG;
@@ -855,10 +935,16 @@ esp_err_t app_ui_update_runtime(
   bool new_ring = runtime->alarm.phase == WAC_ALARM_RINGING
     && (s_ui.alarm.phase != WAC_ALARM_RINGING
       || !same_occurrence(&s_ui.alarm.current, &runtime->alarm.current));
+  bool left_ring = s_ui.alarm.phase == WAC_ALARM_RINGING
+    && runtime->alarm.phase != WAC_ALARM_RINGING;
+  if (new_ring || left_ring) wac_clock_cancel_alarm_slide(false);
+  if (new_ring || (s_ui.alarm_confirmation_timer && runtime->alarm.phase != WAC_ALARM_IDLE))
+    cancel_alarm_confirmation();
   s_ui.clock = runtime->clock;
   s_ui.alarm = runtime->alarm;
   s_ui.audio = runtime->audio;
   s_ui.config_snapshot = *config;
+  update_radar_eligibility();
   if (new_ring) {
     s_ui.settings_suspended = s_ui.settings_view != WAC_SETTINGS_NONE;
     s_ui.gesture_tracking = false;
@@ -902,9 +988,15 @@ esp_err_t app_ui_update_runtime(
     wac_weather_update(&s_ui.weather, NULL,
       wac_ui_strings_equal_ignore_case(config->time_format, "24"));
   }
+  /* Generation zero is a failed short snapshot copy, except at startup. Keep
+   * the last publication until its owner supplies a real replacement. */
+  if (radar_enabled() && (runtime->radar.generation != 0 || s_ui.radar.generation == 0))
+    s_ui.radar = runtime->radar;
+  wac_weather_update_radar(&s_ui.radar, config, runtime->night_active);
   refresh_message_ui_state(&runtime->message, runtime->unread_message_count, runtime->has_important_message);
   s_ui.night_overlay_active = runtime->night_active;
   wac_settings_apply_night(runtime->night_active);
+  wac_settings_update_alarm(config, &runtime->alarm);
   wac_settings_update_clock(&runtime->clock);
   wac_settings_update_solar(&runtime->solar);
   wac_settings_update_audio(&runtime->audio);
@@ -919,6 +1011,7 @@ esp_err_t app_ui_update_runtime(
 
 void app_ui_show_storage_error(esp_err_t error)
 {
+  cancel_alarm_confirmation();
   lv_obj_t *screen = lv_screen_active();
   lv_obj_clean(screen);
   lv_obj_set_style_bg_color(screen, wac_ui_color_bg(), 0);

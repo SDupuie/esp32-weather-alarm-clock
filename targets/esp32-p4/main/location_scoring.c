@@ -244,6 +244,20 @@ void location_scoring_format_search_name(
     parts->state_name[0] != '\0' ? "," : "", parts->state_name);
 }
 
+bool location_scoring_label_has_country(const char *label, const char *country_code)
+{
+  if (!label || !country_code || strlen(country_code) != 2) return false;
+  const char *country = strrchr(label, ',');
+  if (!country) return false;
+  ++country;
+  while (isspace((unsigned char)*country)) ++country;
+  size_t length = strlen(country);
+  while (length && isspace((unsigned char)country[length - 1])) --length;
+  return length == 2
+    && toupper((unsigned char)country[0]) == toupper((unsigned char)country_code[0])
+    && toupper((unsigned char)country[1]) == toupper((unsigned char)country_code[1]);
+}
+
 void location_scoring_format_label(
   const char *name,
   const char *admin1,

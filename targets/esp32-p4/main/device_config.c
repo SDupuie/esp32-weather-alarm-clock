@@ -152,7 +152,7 @@ static esp_err_t validate_settings(const device_config_t *config, bool allow_par
       || config->day_brightness < DEVICE_CONFIG_MIN_BRIGHTNESS || config->day_brightness > 100
       || config->night_brightness < DEVICE_CONFIG_MIN_BRIGHTNESS || config->night_brightness > 100
       || config->alarm_hour > 23 || config->alarm_minute > 59
-      || config->alarm_repeat_days == 0 || (config->alarm_repeat_days & ~0x7f) != 0
+      || (config->alarm_repeat_days & ~0x7f) != 0
       || (unsigned) config->alarm_sound > DEVICE_CONFIG_ALARM_RISING_TONES
       || config->alarm_volume > 100
       || (unsigned) config->sound_machine_sound > DEVICE_CONFIG_SOUND_MACHINE_BROWN_NOISE
@@ -596,5 +596,21 @@ esp_err_t device_config_set_alarm_enabled(bool enabled)
   if (err != ESP_OK) { return err; }
   device_config_t after = before;
   after.alarm_enabled = enabled;
+  return finish_save(&after, SAVE_ALARM_ENABLED);
+}
+
+esp_err_t device_config_complete_one_time(uint8_t hour, uint8_t minute)
+{
+  device_config_t before;
+  esp_err_t err = begin_save(&before);
+  if (err != ESP_OK) { return err; }
+  /* A captured alarm must not turn off a newer recurring or changed schedule. */
+  if (!before.alarm_enabled || before.alarm_repeat_days
+      || before.alarm_hour != hour || before.alarm_minute != minute) {
+    xSemaphoreGive(s_save_lock);
+    return ESP_OK;
+  }
+  device_config_t after = before;
+  after.alarm_enabled = false;
   return finish_save(&after, SAVE_ALARM_ENABLED);
 }

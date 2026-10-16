@@ -100,3 +100,8 @@ endforeach()
 spiffs_create_partition_image(storage
   "${CMAKE_CURRENT_LIST_DIR}/../../../shared/assets/sounds/clock"
   FLASH_IN_PROJECT)
+
+# Use the bundled decoder with finite PSRAM allocations supplied by the client.
+# No managed-component source is patched.
+idf_component_get_property(radar_lvgl_lib lvgl__lvgl COMPONENT_LIB)
+target_compile_definitions(${radar_lvgl_lib} PRIVATE LODEPNG_NO_COMPILE_ALLOCATORS)

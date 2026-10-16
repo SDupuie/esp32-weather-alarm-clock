@@ -103,7 +103,7 @@ One `main` component holds the application, grouped by function. UI files use `m
 - `main/ui/clock_views.c`
   Private clock, unavailable-time, status and backup-notice drawing objects; `ui.c` retains navigation and notice actions
 - `main/ui/weather_views.c`
-  Private Forecast, Conditions, message and weather-status drawing objects; `ui.c` retains navigation, display snapshots and message-dismissal decisions
+  Private Forecast, Radar, message and weather-status drawing objects; retained Conditions renderer without a device route. `ui.c` retains navigation, display snapshots and message-dismissal decisions
 - `main/connectivity.*`
   WiFi station connect, scanning, and time sync
 - `main/device_config.*`
@@ -127,7 +127,7 @@ One `main` component holds the application, grouped by function. UI files use `m
 - `main/web/messages.html`
   The composer page served by `message_service.c`, embedded into the firmware image
 - `main/weather_client.*`
-  Open-Meteo forecast fetch
+  Open-Meteo/Visual Crossing forecasts and serialized RainViewer/USGS Radar preparation, using the bundled LVGL PNG decoder and RAM image buffers
 - `main/bsp_shims.h`
   Small forward declarations for BSP backlight helpers documented upstream
 - `tests/`

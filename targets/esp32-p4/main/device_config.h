@@ -73,7 +73,7 @@ typedef struct {
   bool alarm_enabled;
   uint8_t alarm_hour;
   uint8_t alarm_minute;
-  /* Bit 0 is Sunday, bit 6 is Saturday. */
+  /* Bit 0 is Sunday, bit 6 is Saturday; zero means one time. */
   uint8_t alarm_repeat_days;
   device_config_alarm_sound_t alarm_sound;
   uint8_t alarm_volume;
@@ -117,3 +117,6 @@ esp_err_t device_config_save_alarm(const device_config_t *baseline, const device
 /* Immediate preference controls use their own group. Playback is not stored. */
 esp_err_t device_config_save_sound_machine(const device_config_t *baseline, const device_config_t *draft);
 esp_err_t device_config_set_alarm_enabled(bool enabled);
+/* Clock-owner completion: save only Off if the applied one-time schedule still
+ * matches. A replacement schedule is left untouched; failures follow Save rules. */
+esp_err_t device_config_complete_one_time(uint8_t hour, uint8_t minute);

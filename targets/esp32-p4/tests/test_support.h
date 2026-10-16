@@ -232,6 +232,7 @@ esp_err_t esp_netif_sntp_init(const esp_sntp_config_t *);
 
 /* HTTP substitutions are implemented only by the weather service check. */
 enum { HTTP_TRANSPORT_OVER_SSL };
+enum { HTTP_METHOD_GET };
 typedef void *esp_http_client_handle_t;
 typedef enum { HTTP_EVENT_ON_DATA, HTTP_EVENT_ON_HEADER } esp_http_client_event_id_t;
 typedef struct {
@@ -245,6 +246,8 @@ typedef struct {
 typedef struct {
   const char *url;
   const char *host, *path, *query;
+  const char *user_agent;
+  int method;
   int transport_type;
   bool disable_auto_redirect;
   esp_err_t (*event_handler)(esp_http_client_event_t *);

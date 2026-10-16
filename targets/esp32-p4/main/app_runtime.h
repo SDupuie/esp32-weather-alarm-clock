@@ -16,6 +16,19 @@
 #define APP_MESSAGE_TEXT_LEN 181
 #define APP_MESSAGE_SENDER_LEN 41
 #define APP_MESSAGE_META_LEN 80
+#define APP_RADAR_WIDTH 800
+#define APP_RADAR_HEIGHT 800
+
+typedef struct {
+  bool valid;
+  bool stale;
+  time_t frame_time; /* RainViewer's frame time, never the check/download time. */
+  uint32_t generation;
+  double latitude, longitude;
+  /* Immutable BGRA pixels owned by weather_client. Reuse waits for the UI's
+   * displayed-generation acknowledgement; snapshots never own or free them. */
+  const uint8_t *pixels;
+} app_radar_snapshot_t;
 
 typedef struct {
   char date[11]; /* Provider calendar date: YYYY-MM-DD, or empty if absent. */
@@ -64,5 +77,6 @@ typedef struct {
   uint32_t unread_message_count;
   bool has_important_message;
   app_weather_snapshot_t weather;
+  app_radar_snapshot_t radar;
   app_message_snapshot_t message;
 } app_runtime_state_t;

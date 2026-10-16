@@ -112,6 +112,8 @@ static struct {
    * keeps a last drag/choice intact when the shared editor is reset or closed. */
   struct { device_config_sound_machine_sound_t sound; uint8_t volume, timer; } machine_desired;
   wac_audio_snapshot_t audio;
+  wac_alarm_snapshot_t alarm;
+  bool alarm_snapshot_valid;
   esp_err_t preview_submission_error;
   struct { lv_obj_t *block, *input, *summary, *arrow, *clear; int y; } fields[6];
   lv_obj_t *active_input;
@@ -143,7 +145,7 @@ enum {
   ACTION_UNITS, ACTION_SHARING, ACTION_SCAN, ACTION_MANUAL, ACTION_PROVIDER,
   ACTION_PREVIEW, ACTION_CLEAR_KEY, ACTION_MACHINE_PLAY, ACTION_MACHINE_RETRY,
   ACTION_HOUR_UP, ACTION_HOUR_DOWN, ACTION_MINUTE_UP, ACTION_MINUTE_DOWN,
-  ACTION_AM, ACTION_PM, ACTION_WEEKDAYS, ACTION_EVERY_DAY,
+  ACTION_AM, ACTION_PM, ACTION_WEEKDAYS, ACTION_EVERY_DAY, ACTION_REPEAT_NONE,
   ACTION_OFFSET_BEFORE, ACTION_OFFSET_AT, ACTION_OFFSET_AFTER,
   ACTION_OFFSET_MINUS, ACTION_OFFSET_PLUS,
   ACTION_DAY_BASE = 200, ACTION_SOUND_BASE = 220,
@@ -377,7 +379,7 @@ static void value_entry(const char *title, const char *value, int action, int y,
   lv_obj_t *caption = label(obj, title, 0, 0, 240, &lv_font_montserrat_28);
   lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_LEFT, 0);
   lv_obj_align(caption, LV_ALIGN_LEFT_MID, 0, 0);
-  lv_obj_t *text = label(obj, value, 0, 0, 200, &wac_font_settings_28);
+  lv_obj_t *text = label(obj, value, 0, 0, action == WAC_SETTINGS_REPEAT ? 260 : 200, &wac_font_settings_28);
   lv_obj_add_style(text, &s_palette[STYLE_ACCENT], 0);
   lv_obj_set_style_text_align(text, LV_TEXT_ALIGN_RIGHT, 0);
   lv_obj_align(text, LV_ALIGN_RIGHT_MID, -40, 0);
@@ -447,9 +449,13 @@ static void refresh_machine(void)
 {
   if (!s_settings.machine_button) return;
   bool busy = s_settings.audio.machine_active || s_settings.audio.machine_pending;
-  lv_label_set_text(lv_obj_get_child(s_settings.machine_button, 0), busy ? "Stop" : "Play");
-  lv_image_set_src(lv_obj_get_child(s_settings.machine_button, 1), busy ? &wac_icon_square : &wac_icon_play);
-  center_icon_text(s_settings.machine_button, true);
+  lv_obj_t *title = lv_obj_get_child(s_settings.machine_button, 0);
+  const char *caption = busy ? "Stop" : "Play";
+  bool layout_changed = strcmp(lv_label_get_text(title), caption) != 0;
+  wac_ui_set_label_text(title, caption);
+  layout_changed |= wac_ui_set_image_asset(lv_obj_get_child(s_settings.machine_button, 1),
+    busy ? &wac_icon_square : &wac_icon_play);
+  if (layout_changed) center_icon_text(s_settings.machine_button, true);
   if (!s_settings.audio.ready && !busy) lv_obj_add_state(s_settings.machine_button, LV_STATE_DISABLED);
   else lv_obj_remove_state(s_settings.machine_button, LV_STATE_DISABLED);
   char text[80];
@@ -460,7 +466,7 @@ static void refresh_machine(void)
   else if (!s_settings.audio.machine_active) snprintf(text, sizeof(text), "Stopped");
   else if (s_settings.audio.machine_continuous) snprintf(text, sizeof(text), "Playing · Continuous");
   else snprintf(text, sizeof(text), "Playing · %u min left", (unsigned)((s_settings.audio.machine_remaining_seconds + 59) / 60));
-  lv_label_set_text(s_settings.machine_status, text);
+  wac_ui_set_label_text(s_settings.machine_status, text);
 }
 static void copy_machine_preferences(device_config_t *to, const device_config_t *from)
 {
@@ -491,16 +497,21 @@ static void refresh_audio(void)
   lv_obj_t *title = lv_obj_get_child(obj, 0);
   lv_obj_t *speaker = lv_obj_get_child(obj, 1);
   lv_obj_t *square = lv_obj_get_child(obj, 2);
-  lv_label_set_text(title, active ? "Stop Preview" : "Preview Sound");
+  const char *caption = active ? "Stop Preview" : "Preview Sound";
+  bool layout_changed = strcmp(lv_label_get_text(title), caption) != 0
+    || lv_obj_get_style_align(square, 0) != LV_ALIGN_LEFT_MID;
+  wac_ui_set_label_text(title, caption);
   lv_obj_add_flag(active ? speaker : square, LV_OBJ_FLAG_HIDDEN);
   lv_obj_remove_flag(active ? square : speaker, LV_OBJ_FLAG_HIDDEN);
   if (!s_settings.audio.ready && !active) lv_obj_add_state(obj, LV_STATE_DISABLED);
   else lv_obj_remove_state(obj, LV_STATE_DISABLED);
-  lv_obj_update_layout(obj);
-  int left = (lv_obj_get_content_width(obj) - lv_obj_get_width(title) - 46) / 2;
-  lv_obj_align(title, LV_ALIGN_LEFT_MID, left + 46, 0);
-  lv_obj_align(speaker, LV_ALIGN_LEFT_MID, left, 0);
-  lv_obj_align(square, LV_ALIGN_LEFT_MID, left, 0);
+  if (layout_changed) {
+    lv_obj_update_layout(obj);
+    int left = (lv_obj_get_content_width(obj) - lv_obj_get_width(title) - 46) / 2;
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, left + 46, 0);
+    lv_obj_align(speaker, LV_ALIGN_LEFT_MID, left, 0);
+    lv_obj_align(square, LV_ALIGN_LEFT_MID, left, 0);
+  }
   char text[64];
   if (s_settings.preview_submission_error != ESP_OK)
     snprintf(text, sizeof(text), "Preview could not start.");
@@ -509,7 +520,7 @@ static void refresh_audio(void)
   else if (s_settings.audio.error != ESP_OK)
     snprintf(text, sizeof(text), "Audio preview failed. Try again.");
   else snprintf(text, sizeof(text), "Volume · %u%%", s_settings.draft.alarm_volume);
-  lv_label_set_text(s_settings.preview_caption, text);
+  wac_ui_set_label_text(s_settings.preview_caption, text);
 }
 
 void wac_settings_update_audio(const wac_audio_snapshot_t *audio)
@@ -549,7 +560,6 @@ static void format_alarm_preview(char *text, size_t size)
 {
   const device_config_t *draft = &s_settings.draft;
   if (!draft->alarm_enabled) { snprintf(text, size, "Alarm off"); return; }
-  if (!draft->alarm_repeat_days) { snprintf(text, size, "Choose at least one day."); return; }
   struct tm now;
   if (!s_settings.clock_usable || !localtime_r(&s_settings.clock_utc, &now)) {
     snprintf(text, size, "Waiting for time sync");
@@ -557,6 +567,17 @@ static void format_alarm_preview(char *text, size_t size)
   }
   wac_alarm_schedule_t schedule;
   wac_alarm_schedule_calculate(draft, s_settings.clock_utc, &schedule);
+  /* The saved one-time target belongs to the alarm owner. Recalculating it
+   * after midnight or its due time would show a different occurrence. */
+  if (!draft->alarm_repeat_days && s_settings.alarm_snapshot_valid
+      && s_settings.applied.alarm_enabled && !s_settings.applied.alarm_repeat_days
+      && draft->alarm_hour == s_settings.applied.alarm_hour
+      && draft->alarm_minute == s_settings.applied.alarm_minute) {
+    schedule.next = s_settings.alarm.next.valid ? s_settings.alarm.next
+      : s_settings.alarm.phase != WAC_ALARM_IDLE ? s_settings.alarm.current
+      : (wac_alarm_occurrence_t){0};
+    if (!schedule.next.valid) { snprintf(text, size, "No upcoming alarm"); return; }
+  }
   if (!schedule.next.valid) { snprintf(text, size, "Waiting for time sync"); return; }
   struct tm tomorrow = now;
   tomorrow.tm_mday++;
@@ -589,7 +610,6 @@ static void refresh_notice(void)
     format_alarm_preview(alarm_preview, sizeof(alarm_preview));
     text = s_settings.saving && !s_settings.saving_machine ? "Saving settings..."
       : s_settings.notice_kind == NOTICE_SAVE_ERROR ? "Could not save. Try again."
-      : s_settings.notice[0] && !s_settings.draft.alarm_repeat_days ? "Choose at least one day."
       : alarm_preview;
   } else if (!s_settings.field_error && view == WAC_SETTINGS_WEATHER) {
     switch (s_settings.notice_kind) {
@@ -626,6 +646,28 @@ static void refresh_notice(void)
       : strstr(text, "…") ? &wac_font_settings_26 : &lv_font_montserrat_22, 0);
   }
   lv_label_set_text(s_settings.status, text);
+}
+
+void wac_settings_update_alarm(const device_config_t *config, const wac_alarm_snapshot_t *alarm)
+{
+  if (!config || !alarm) return;
+  s_settings.alarm = *alarm;
+  s_settings.alarm_snapshot_valid = true;
+  bool enabled_changed = s_settings.draft.alarm_enabled != config->alarm_enabled;
+  s_settings.applied = *config;
+  s_settings.baseline.alarm_enabled = config->alarm_enabled;
+  s_settings.draft.alarm_enabled = config->alarm_enabled;
+  /* Auto-Off can arrive while any nested editor is open. Change only the
+   * immediate switch, retaining all other draft fields and active controls. */
+  if (enabled_changed && s_settings.toggle_button) {
+    lv_obj_t *value = lv_obj_get_child(s_settings.toggle_button, 1);
+    lv_label_set_text(value, config->alarm_enabled ? "On" : "Off");
+    lv_obj_t *track = lv_obj_get_child(s_settings.toggle_button, 2);
+    lv_obj_remove_style(track, &s_palette[STYLE_TRACK], 0);
+    lv_obj_remove_style(track, &s_palette[STYLE_TRACK_ON], 0);
+    lv_obj_add_style(track, &s_palette[config->alarm_enabled ? STYLE_TRACK_ON : STYLE_TRACK], 0);
+    lv_obj_set_pos(lv_obj_get_child(track, 0), config->alarm_enabled ? 49 : 5, 5);
+  }
 }
 
 void wac_settings_update_clock(const wac_time_snapshot_t *clock)
@@ -1229,9 +1271,6 @@ static void submit_save(save_kind_t kind)
     focus_validation(WAC_SETTINGS_CREDENTIALS, FIELD_SSID, "Enter a network name before saving.");
     return;
   }
-  if (kind == SAVE_ALARM && !s_settings.draft.alarm_repeat_days) {
-    show_notice("Choose at least one Repeat day before saving."); return;
-  }
   if (kind == SAVE_DEVICE && (!has_text(s_settings.draft.room_name) || !has_text(s_settings.draft.device_id))) {
     bool room_missing = !has_text(s_settings.draft.room_name);
     focus_validation(WAC_SETTINGS_DEVICE, room_missing ? FIELD_ROOM : FIELD_ID,
@@ -1331,6 +1370,7 @@ void wac_settings_begin(lv_obj_t *parent, const device_config_t *config)
   s_settings.machine_scroll = 0;
   s_settings.machine_return = WAC_SETTINGS_ENTRY;
   s_settings.applied = *config;
+  s_settings.alarm_snapshot_valid = false;
   if (!s_settings.saving_machine && !s_settings.machine_save_failed) {
     s_settings.machine_desired.sound = config->sound_machine_sound;
     s_settings.machine_desired.volume = config->sound_machine_volume;
@@ -1403,7 +1443,7 @@ static void repeat_summary(char *text, size_t size, uint8_t days, bool compact)
   if (days == 0x7f) snprintf(text, size, "Every Day");
   else if (days == 0x3e) snprintf(text, size, "Mon–Fri");
   else if (days == 0x41) snprintf(text, size, "Sat–Sun");
-  else if (!days) snprintf(text, size, "Choose days");
+  else if (!days) snprintf(text, size, "None");
   else {
     static const char *names[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     unsigned count = 0;
@@ -1457,6 +1497,7 @@ static void back(void)
     case WAC_SETTINGS_CREDENTIALS: navigate(WAC_SETTINGS_WIFI); break;
     case WAC_SETTINGS_ALARM_TIME: case WAC_SETTINGS_REPEAT: case WAC_SETTINGS_SOUND:
       navigate(WAC_SETTINGS_ALARM); break;
+    case WAC_SETTINGS_REPEAT_CUSTOM: navigate(WAC_SETTINGS_REPEAT); break;
     case WAC_SETTINGS_SOUND_PICKER: case WAC_SETTINGS_SNOOZE:
       navigate(WAC_SETTINGS_SOUND); break;
     case WAC_SETTINGS_NIGHT_START: case WAC_SETTINGS_NIGHT_END:
@@ -1517,8 +1558,6 @@ static void action_event(lv_event_t *event)
     if (action == WAC_SETTINGS_WIFI) scan_networks();
     return;
   }
-  if (action == ACTION_DONE && wac_ui_settings_view() == WAC_SETTINGS_REPEAT
-      && !s_settings.draft.alarm_repeat_days) return;
   if (action == ACTION_BACK || action == ACTION_DONE || action == ACTION_CANCEL) { back(); return; }
   if (action == ACTION_SAVE) {
     submit_save(wac_ui_settings_view() == WAC_SETTINGS_WEATHER ? SAVE_WEATHER : wac_ui_settings_view() == WAC_SETTINGS_ALARM ? SAVE_ALARM : wac_ui_settings_view() == WAC_SETTINGS_DISPLAY ? SAVE_DISPLAY : SAVE_DEVICE);
@@ -1544,6 +1583,7 @@ static void action_event(lv_event_t *event)
   }
   device_config_t *draft = &s_settings.draft;
   if (action >= ACTION_HOUR_UP && action <= ACTION_PM) change_time(action);
+  else if (action == ACTION_REPEAT_NONE) draft->alarm_repeat_days = 0;
   else if (action == ACTION_WEEKDAYS) draft->alarm_repeat_days = 0x3e;
   else if (action == ACTION_EVERY_DAY) draft->alarm_repeat_days = 0x7f;
   else if (action >= ACTION_OFFSET_BEFORE && action <= ACTION_OFFSET_PLUS) {
@@ -1712,7 +1752,7 @@ void wac_settings_render(wac_settings_view_t view)
   s_settings.backdrop = lv_image_create(s_settings.root);
   lv_image_set_src(s_settings.backdrop, s_night ? &round_stage_night : &round_stage_day);
   lv_obj_remove_flag(s_settings.backdrop, LV_OBJ_FLAG_CLICKABLE);
-  const char *titles[] = {"", "Settings", "Device Setup", "Display", "Messaging", "Weather", "Wi-Fi", "Network Details", "Alarm", "Alarm Time", "Repeat", "Sound & Snooze", "Alarm Sound", "Snooze", "Night Shift", "Night Shift Mode", "Fixed Schedule", "Night Starts", "Night Ends", "Sunrise/Sunset", "Sunset Offset", "Sunrise Offset", "Brightness", "Sound Machine", "Sound", "Sleep Timer"};
+  const char *titles[] = {"", "Settings", "Device Setup", "Display", "Messaging", "Weather", "Wi-Fi", "Network Details", "Alarm", "Alarm Time", "Repeat", "Custom Days", "Sound & Snooze", "Alarm Sound", "Snooze", "Night Shift", "Night Shift Mode", "Fixed Schedule", "Night Starts", "Night Ends", "Sunrise/Sunset", "Sunset Offset", "Sunrise Offset", "Brightness", "Sound Machine", "Sound", "Sleep Timer"};
   s_settings.heading = label(s_settings.body, titles[view], 245, 128, 320, &lv_font_montserrat_36);
   lv_obj_set_style_text_letter_space(s_settings.heading, 1, 0);
   s_settings.back_button = button_box(ACTION_BACK, 145, 104, 88, 88, false);
@@ -1940,10 +1980,33 @@ void wac_settings_render(wac_settings_view_t view)
       return;
     case WAC_SETTINGS_ALARM_TIME: time_picker(d->alarm_hour, d->alarm_minute, d); return;
     case WAC_SETTINGS_REPEAT: {
-      lv_obj_t *caption = label(s_settings.body, "Choose alarm days", 150, 198, 500, &lv_font_montserrat_32);
+      static const char *presets[] = {"None", "Every Day", "Weekdays", "Custom Days"};
+      static const int actions[] = {ACTION_REPEAT_NONE, ACTION_EVERY_DAY, ACTION_WEEKDAYS, WAC_SETTINGS_REPEAT_CUSTOM};
+      static const uint8_t masks[] = {0, 0x7f, 0x3e};
+      for (unsigned i = 0; i < 4; ++i) {
+        bool selected = i < 3 ? d->alarm_repeat_days == masks[i]
+          : d->alarm_repeat_days && d->alarm_repeat_days != 0x7f && d->alarm_repeat_days != 0x3e;
+        lv_obj_t *obj = entry_box(presets[i], NULL, actions[i], 212 + i * 108, selected);
+        if (i == 3) {
+          chevron(obj, false);
+          lv_obj_add_style(lv_obj_get_child(obj, -1), &s_palette[STYLE_ACCENT], 0);
+        }
+        if (selected)
+          lv_obj_align(image_icon(obj, &wac_icon_check, STYLE_ACCENT), LV_ALIGN_RIGHT_MID, i == 3 ? -40 : 0, 0);
+      }
+      if (d->alarm_repeat_days) repeat_summary(text, sizeof(text), d->alarm_repeat_days, true);
+      else snprintf(text, sizeof(text), "Rings once");
+      lv_obj_t *caption = label(s_settings.body, text, 155, 646, 490, &wac_font_settings_28);
+      lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
+      button("Done", ACTION_DONE, 270, 682, 260, 88, true);
+      return;
+    }
+    case WAC_SETTINGS_REPEAT_CUSTOM: {
+      lv_obj_t *caption = label(s_settings.body, "Choose alarm days", 150, 174, 500, &wac_font_settings_28);
       lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
       static const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-      static const int layout[][3] = {{1,136,267},{2,263,267},{3,390,267},{4,517,267},{5,200,380},{6,327,380},{0,454,380}};
+      /* Round both mockup half-pixel rows up; their gap stays unchanged. */
+      static const int layout[][3] = {{1,86,296},{2,214,296},{3,342,296},{4,470,296},{5,598,296},{6,278,409},{0,406,409}};
       for (size_t i = 0; i < sizeof(layout) / sizeof(layout[0]); ++i) {
         int day = layout[i][0];
         bool selected = d->alarm_repeat_days & (1 << day);
@@ -1955,14 +2018,11 @@ void wac_settings_render(wac_settings_view_t view)
           lv_obj_align(lv_obj_get_child(obj, -1), LV_ALIGN_CENTER, 0, 17);
         }
       }
-      button("Weekdays", ACTION_WEEKDAYS, 164, 501, 224, 96, false);
-      button("Every Day", ACTION_EVERY_DAY, 412, 501, 224, 96, false);
       if (d->alarm_repeat_days) repeat_summary(text, sizeof(text), d->alarm_repeat_days, false);
-      else snprintf(text, sizeof(text), "Choose at least one day");
-      caption = label(s_settings.body, text, 155, 617, 490, &wac_font_settings_28);
-      if (d->alarm_repeat_days) lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
-      lv_obj_t *done = button("Done", ACTION_DONE, 270, 682, 260, 88, true);
-      if (!d->alarm_repeat_days) lv_obj_add_state(done, LV_STATE_DISABLED);
+      else snprintf(text, sizeof(text), "Rings once");
+      caption = label(s_settings.body, text, 155, 542, 490, &wac_font_settings_28);
+      lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
+      button("Done", ACTION_DONE, 270, 682, 260, 88, true);
       return;
     }
     case WAC_SETTINGS_SOUND: {

@@ -18,6 +18,13 @@
 #include "forecast_representative.h"
 #include "storm_conditions.h"
 #include "weather_icon_names.h"
+#include "location_scoring.h"
+#include "lvgl.h"
+#include "src/libs/lodepng/lodepng.h"
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#include "src/draw/lv_draw_buf_private.h"
+#endif
 
 static const char *TAG = "rwd_weather";
 #define WEATHER_HTTP_TIMEOUT_MS 10000
@@ -37,8 +44,9 @@ static unsigned request_count;
 
 typedef struct {
   char *data;
-  size_t length, capacity;
+  size_t length, capacity, maximum;
   esp_err_t error;
+  bool external; /* Radar response bytes use PSRAM; forecast allocation is unchanged. */
   char retry_after[96], reset[96], date[96];
 } http_response_t;
 
@@ -120,6 +128,15 @@ int64_t weather_client_next_allowed_us(const device_config_t *config)
   return deadline;
 }
 
+static void *radar_alloc(size_t size)
+{
+#ifdef ESP_PLATFORM
+  return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+  return malloc(size);
+#endif
+}
+
 static esp_err_t http_event(esp_http_client_event_t *event)
 {
   http_response_t *response = event->user_data;
@@ -140,12 +157,22 @@ static esp_err_t http_event(esp_http_client_event_t *event)
   if (event->event_id != HTTP_EVENT_ON_DATA || event->data_len <= 0) return ESP_OK;
   if (response->error != ESP_OK) return response->error;
   size_t length = response->length + (size_t) event->data_len;
-  if (length > WEATHER_RESPONSE_MAX) return response->error = ESP_ERR_INVALID_SIZE;
+  size_t maximum=response->maximum ? response->maximum : WEATHER_RESPONSE_MAX;
+  if (length > maximum) return response->error = ESP_ERR_INVALID_SIZE;
   if (length + 1 > response->capacity) {
     size_t capacity = response->capacity ? response->capacity : 4096;
     while (capacity < length + 1) capacity *= 2;
-    if (capacity > WEATHER_RESPONSE_MAX + 1) capacity = WEATHER_RESPONSE_MAX + 1;
-    char *data = realloc(response->data, capacity);
+    if (capacity > maximum + 1) capacity = maximum + 1;
+    char *data;
+    if (response->external) {
+      /* IDF realloc copies while its heap lock masks interrupts. Keep large
+       * Radar-response copies outside that lock so audio can keep running. */
+      data = radar_alloc(capacity);
+      if (data) {
+        if (response->length) memcpy(data, response->data, response->length);
+        free(response->data);
+      }
+    } else data = realloc(response->data, capacity);
     if (!data) return response->error = ESP_ERR_NO_MEM;
     response->data = data; response->capacity = capacity;
   }
@@ -524,4 +551,455 @@ esp_err_t weather_client_fetch(const device_config_t *config,app_weather_snapsho
     vc?"Visual Crossing":"Open-Meteo",request_count,status,(unsigned)response.length,query_cost,err);
   free(response.data);
   xSemaphoreGive(request_gate); return err;
+}
+
+/* The weather worker owns this bounded pipeline and all mutable image memory.
+ * A single grayscale basemap cache preserves the dark reference's terrain/roads
+ * without retaining another full RGBA map. Final slots are immutable until the
+ * display acknowledges their publication. There is no persistent tile cache. */
+#define RADAR_PIXELS ((size_t)APP_RADAR_WIDTH * APP_RADAR_HEIGHT)
+#define RADAR_GROUND_M 120700.8
+#define RADAR_ZOOM 7
+#define RADAR_WORLD_PIXELS 32768.0
+#define RADAR_WORLD_METERS 40075016.68557849
+#define RADAR_BASE_RESPONSE_MAX (3 * 1024 * 1024)
+/* LodePNG reserves another 260 bytes while inflating, then grows its
+ * exact-size scanline allocation by half. Valid 800px RGBA needs about
+ * 3.84 MB of scratch even though its decoded pixels occupy 2.56 MB. */
+#define RADAR_PNG_ALLOC_MAX (4 * 1024 * 1024)
+#define RADAR_PATH_LEN 192
+#define RADAR_PI 3.14159265358979323846
+
+typedef struct {
+  double left, top, step; /* Native RainViewer zoom-7 world pixels. */
+  int first_x, last_x, first_y, last_y;
+} radar_geometry_t;
+
+typedef enum { RADAR_IDLE, RADAR_METADATA, RADAR_BASE,
+               RADAR_WAIT_SLOT, RADAR_ECHO } radar_phase_t;
+static struct {
+  bool images_initialized, location_set, base_ready;
+  double latitude, longitude;
+  uint8_t *base, *image[2];
+  unsigned slot;
+  int tile_x, tile_y;
+  radar_geometry_t geometry;
+  int16_t source_x[APP_RADAR_WIDTH];
+  radar_phase_t phase;
+  time_t candidate_time;
+  char path[RADAR_PATH_LEN];
+  app_radar_snapshot_t published;
+} radar;
+
+#ifdef ESP_PLATFORM
+/* LodePNG's finite intermediate allocations must not consume the internal heap.
+ * Header dimensions are checked independently before decoding any PNG chunks. */
+void *lodepng_malloc(size_t size)
+{
+  return size <= RADAR_PNG_ALLOC_MAX ? radar_alloc(size) : NULL;
+}
+void *lodepng_realloc(void *ptr, size_t size)
+{
+  if (size > RADAR_PNG_ALLOC_MAX) return NULL;
+  if (!size) { free(ptr); return NULL; }
+  /* PNG inflation can grow multi-megabyte buffers. Copy outside the heap lock. */
+  void *data = radar_alloc(size);
+  if (data) {
+    if (ptr) {
+      size_t previous = heap_caps_get_allocated_size(ptr);
+      memcpy(data, ptr, previous < size ? previous : size);
+    }
+    free(ptr);
+  }
+  return data;
+}
+void lodepng_free(void *ptr) { heap_caps_free(ptr); }
+static void *radar_draw_malloc(size_t size, lv_color_format_t color_format)
+{
+  (void)color_format;
+  return size <= RADAR_PNG_ALLOC_MAX ? radar_alloc(size) : NULL;
+}
+#endif
+
+esp_err_t weather_client_init_images(void)
+{
+  if (radar.images_initialized) return ESP_OK;
+#ifdef ESP_PLATFORM
+  lv_draw_buf_handlers_t *handlers = lv_draw_buf_get_image_handlers();
+  handlers->buf_malloc_cb = radar_draw_malloc;
+  handlers->buf_free_cb = lodepng_free;
+#endif
+  radar.images_initialized = true;
+  return ESP_OK;
+}
+
+static bool radar_coordinate(const char *text, double limit, double *out)
+{
+  if (!text || !text[0]) return false;
+  char *end;
+  double value = strtod(text, &end);
+  if (*end || !isfinite(value) || fabs(value) > limit) return false;
+  *out = value;
+  return true;
+}
+static double radar_world_y(double latitude, double world)
+{
+  double radians = latitude * RADAR_PI / 180;
+  return (1.0 - asinh(tan(radians)) / RADAR_PI) * world / 2;
+}
+/* The complete 800px square shares the circular screen's 75-ground-mile
+ * diameter. USGS exports directly at final resolution with the same transform. */
+static bool radar_geometry(double latitude, double longitude, radar_geometry_t *out)
+{
+  double cosine=cos(latitude*RADAR_PI/180);
+  double step=(RADAR_GROUND_M/APP_RADAR_HEIGHT)/(156543.033928*cosine/128);
+  double left=(longitude+180)/360*RADAR_WORLD_PIXELS-APP_RADAR_WIDTH*step/2;
+  double top=radar_world_y(latitude,RADAR_WORLD_PIXELS)-APP_RADAR_HEIGHT*step/2;
+  if (top<0 || top+APP_RADAR_HEIGHT*step>RADAR_WORLD_PIXELS) return false;
+  *out=(radar_geometry_t){.left=left,.top=top,.step=step,
+    .first_x=(int)floor(left/256),
+    .last_x=(int)floor((left+(APP_RADAR_WIDTH-0.5)*step)/256),
+    .first_y=(int)floor(top/256),
+    .last_y=(int)floor((top+(APP_RADAR_HEIGHT-0.5)*step)/256)};
+  return true;
+}
+static int radar_wrapped_x(int x)
+{
+  return (x%128+128)%128;
+}
+static esp_err_t radar_request(const char *url, bool background,
+                               http_response_t *response)
+{
+  *response=(http_response_t){.external=true,
+    .maximum=background ? RADAR_BASE_RESPONSE_MAX : WEATHER_RESPONSE_MAX};
+  esp_http_client_config_t config={.url=url,.event_handler=http_event,
+    .user_data=response,.timeout_ms=background ? 30000 : WEATHER_HTTP_TIMEOUT_MS,
+    .buffer_size=2048,.crt_bundle_attach=esp_crt_bundle_attach,
+    .disable_auto_redirect=true,.user_agent="ESP32-P4-Weather-Alarm-Clock/1.0"};
+  xSemaphoreTake(request_gate,portMAX_DELAY);
+  esp_http_client_handle_t client=esp_http_client_init(&config);
+  esp_err_t err=client ? esp_http_client_perform(client) : ESP_FAIL;
+  if (client) {
+    int status=esp_http_client_get_status_code(client);
+    if (status<200 || status>=300) err=ESP_FAIL;
+    esp_http_client_cleanup(client);
+  }
+  xSemaphoreGive(request_gate);
+  return response->error!=ESP_OK ? response->error : err;
+}
+static esp_err_t radar_decode_png(const http_response_t *response, bool background, lv_draw_buf_t **out)
+{
+  *out = NULL;
+  LodePNGState state;
+  lodepng_state_init(&state);
+  unsigned width=0, height=0;
+  unsigned error = lodepng_inspect(&width, &height, &state,
+    (const unsigned char *)response->data, response->length);
+  unsigned expected_width=background ? APP_RADAR_WIDTH : 256;
+  unsigned expected_height=background ? APP_RADAR_HEIGHT : 256;
+  if (!error && (width!=expected_width || height!=expected_height || state.info_png.color.bitdepth>8)) error=93;
+  state.decoder.read_text_chunks = 0;
+  state.decoder.remember_unknown_chunks = 0;
+  state.decoder.max_text_size = 1024;
+  state.decoder.max_icc_size = 4096;
+  /* Include a bounded allowance for Adam7 filter rows as well as RGBA bytes. */
+  state.decoder.zlibsettings.max_output_size=(size_t)expected_width*expected_height*4+expected_height*4;
+  unsigned char *decoded = NULL;
+  if (!error) error = lodepng_decode(&decoded, &width, &height, &state,
+    (const unsigned char *)response->data, response->length);
+  lodepng_state_cleanup(&state);
+  if (error) {
+    if (decoded) lv_draw_buf_destroy((lv_draw_buf_t *)decoded);
+    return ESP_ERR_INVALID_RESPONSE;
+  }
+  /* This bundled LodePNG returns a draw buffer containing unconverted RGBA,
+   * unlike its upstream malloc-returning API and unlike LVGL's PNG frontend. */
+  *out = (lv_draw_buf_t *)decoded;
+  return *out ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+/* RainViewer's published Universal Blue rain table, rows -32..95 only.
+ * The following snow rows are intentionally excluded (snow coloring is off).
+ * Packed RGBA values retain source alpha; repeated colors use the first/lower
+ * represented strength in their band, rather than inventing exact dBZ. */
+static const uint32_t radar_source_rgba[128] = {
+  0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
+  0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
+  0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x63615914u, 0x66635A19u,
+  0x69665C1Eu, 0x6C685D24u, 0x6F6B5F29u, 0x726E612Eu, 0x75706234u, 0x78736439u, 0x7C75653Eu, 0x7F786744u,
+  0x827B6949u, 0x857D6A4Eu, 0x88806C54u, 0x8B826D59u, 0x8E856F5Eu, 0x92887164u, 0x9E93756Eu, 0xAA9E7978u,
+  0xB6A97E82u, 0xC2B4828Cu, 0xCEC08796u, 0xD2C48BA0u, 0xD6C88FAAu, 0xDACC93B4u, 0xDED097BEu, 0x88DDEEFFu,
+  0x6CD1EBFFu, 0x51C5E8FFu, 0x36BAE5FFu, 0x1BAEE2FFu, 0x00A3E0FFu, 0x009AD5FFu, 0x0091CAFFu, 0x0088BFFFu,
+  0x007FB4FFu, 0x0077AAFFu, 0x0070A3FFu, 0x00699CFFu, 0x006295FFu, 0x005B8EFFu, 0x005588FFu, 0x005180FFu,
+  0x004E78FFu, 0x004A70FFu, 0x004768FFu, 0xFFEE00FFu, 0xFFE000FFu, 0xFFD200FFu, 0xFFC500FFu, 0xFFB700FFu,
+  0xFFAA00FFu, 0xFF9F00FFu, 0xFF9500FFu, 0xFF8B00FFu, 0xFF8100FFu, 0xFF4400FFu, 0xF23600FFu, 0xE62800FFu,
+  0xD91B00FFu, 0xCD0D00FFu, 0xC10000FFu, 0xA80000FFu, 0x8F0000FFu, 0x760000FFu, 0x5D0000FFu, 0xFFAAFFFFu,
+  0xFF9FFFFFu, 0xFF95FFFFu, 0xFF8BFFFFu, 0xFF81FFFFu, 0xFF77FFFFu, 0xFF6CFFFFu, 0xFF62FFFFu, 0xFF58FFFFu,
+  0xFF4EFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+  0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu,
+  0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu,
+  0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu, 0x00FF00FFu,
+};
+static void radar_color(int dbz, uint8_t rgb[3])
+{
+  static const struct { int dbz; uint8_t rgb[3]; } stops[] = {
+    {-10,{195,230,189}}, {5,{153,217,141}}, {15,{82,194,79}},
+    {25,{22,152,48}}, {34,{5,107,30}}, {35,{255,232,0}},
+    {40,{255,194,0}}, {44,{255,153,0}}, {45,{240,49,36}},
+    {55,{188,12,25}}, {75,{115,0,17}}, {95,{85,0,12}}
+  };
+  unsigned i=0;
+  while (i+1 < sizeof(stops)/sizeof(stops[0]) && dbz > stops[i+1].dbz) ++i;
+  if (dbz <= stops[0].dbz) { memcpy(rgb, stops[0].rgb, 3); return; }
+  if (i+1 == sizeof(stops)/sizeof(stops[0])) { memcpy(rgb, stops[i].rgb, 3); return; }
+  int range=stops[i+1].dbz-stops[i].dbz, delta=dbz-stops[i].dbz;
+  for (int channel=0; channel<3; ++channel)
+    rgb[channel]=(uint8_t)rounded(stops[i].rgb[channel] +
+      (stops[i+1].rgb[channel]-stops[i].rgb[channel]) * (double)delta/range);
+}
+static bool radar_map_pixel(uint8_t rgba[4])
+{
+  if (!rgba[3]) return true; /* A transparent valid tile means no echoes. */
+  uint32_t source=((uint32_t)rgba[0]<<24)|((uint32_t)rgba[1]<<16)|((uint32_t)rgba[2]<<8)|rgba[3];
+  for (unsigned i=0; i<128; ++i) if (radar_source_rgba[i] == source) {
+    radar_color((int)i-32, rgba);
+    return true;
+  }
+  return false; /* A changed/unknown provider palette must not imply strength. */
+}
+static esp_err_t radar_background(void)
+{
+  const radar_geometry_t *geometry=&radar.geometry;
+  double left=(geometry->left/RADAR_WORLD_PIXELS-0.5)*RADAR_WORLD_METERS;
+  double right=((geometry->left+APP_RADAR_WIDTH*geometry->step)/RADAR_WORLD_PIXELS-0.5)*RADAR_WORLD_METERS;
+  double top=(0.5-geometry->top/RADAR_WORLD_PIXELS)*RADAR_WORLD_METERS;
+  double bottom=(0.5-(geometry->top+APP_RADAR_HEIGHT*geometry->step)/RADAR_WORLD_PIXELS)*RADAR_WORLD_METERS;
+  char url[640];
+  snprintf(url,sizeof(url),"https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/export?bbox=%.3f,%.3f,%.3f,%.3f&bboxSR=3857&imageSR=3857&size=%d,%d&format=png32&transparent=false&dpi=96&f=image",left,bottom,right,top,APP_RADAR_WIDTH,APP_RADAR_HEIGHT);
+  http_response_t response;
+  esp_err_t err=radar_request(url,true,&response);
+  lv_draw_buf_t *image=NULL;
+  if (err==ESP_OK) err=radar_decode_png(&response,true,&image);
+  free(response.data);
+  if (err!=ESP_OK) return err;
+  for (unsigned y=0; y<APP_RADAR_HEIGHT && err==ESP_OK; ++y)
+    for (unsigned x=0; x<APP_RADAR_WIDTH; ++x) {
+      const uint8_t *rgba=image->data+y*image->header.stride+x*4;
+      if (rgba[3]!=255) { err=ESP_ERR_INVALID_RESPONSE; break; }
+      unsigned luminance=(54u*rgba[0]+183u*rgba[1]+19u*rgba[2])>>8;
+      radar.base[(size_t)y*APP_RADAR_WIDTH+x]=(uint8_t)luminance;
+    }
+  lv_draw_buf_destroy(image);
+  return err;
+}
+static esp_err_t radar_tile(void)
+{
+  const radar_geometry_t *geometry=&radar.geometry;
+  char url[384];
+  snprintf(url,sizeof(url),"https://tilecache.rainviewer.com%s/256/7/%d/%d/2/0_0.png",radar.path,radar_wrapped_x(radar.tile_x),radar.tile_y);
+  http_response_t response;
+  esp_err_t err=radar_request(url,false,&response);
+  lv_draw_buf_t *tile=NULL;
+  if (err==ESP_OK) err=radar_decode_png(&response,false,&tile);
+  free(response.data);
+  if (err!=ESP_OK) return err;
+  /* Recolor original unsmoothed pixels before any output sampling. */
+  for (unsigned y=0; y<256 && err==ESP_OK; ++y)
+    for (unsigned x=0; x<256; ++x)
+      if (!radar_map_pixel(tile->data+y*tile->header.stride+x*4)) {
+        err=ESP_ERR_INVALID_RESPONSE;
+        break;
+      }
+  if (err==ESP_OK) {
+    /* The horizontal sample is identical on every row of this tile. */
+    for (int x=0; x<APP_RADAR_WIDTH; ++x) {
+      int source_x=(int)floor(geometry->left+(x+0.5)*geometry->step)-radar.tile_x*256;
+      radar.source_x[x]=source_x<0 || source_x>=256 ? -1 : (int16_t)source_x;
+    }
+    for (int y=0; y<APP_RADAR_HEIGHT; ++y) {
+      int source_y=(int)floor(geometry->top+(y+0.5)*geometry->step)-radar.tile_y*256;
+      if (source_y<0 || source_y>=256) continue;
+      for (int x=0; x<APP_RADAR_WIDTH; ++x) {
+        int source_x=radar.source_x[x];
+        if (source_x<0) continue;
+        const uint8_t *rgba=tile->data+source_y*tile->header.stride+source_x*4;
+        if (rgba[3]==0) continue;
+        uint8_t *bgra=radar.image[radar.slot]+((size_t)y*APP_RADAR_WIDTH+x)*4;
+        for (unsigned c=0; c<3; ++c)
+          bgra[c]=(uint8_t)((rgba[2-c]*rgba[3]+bgra[c]*(255-rgba[3])+127)/255);
+      }
+    }
+  }
+  lv_draw_buf_destroy(tile);
+  return err;
+}
+static void radar_first_tile(const radar_geometry_t *geometry)
+{
+  radar.tile_x=geometry->first_x;
+  radar.tile_y=geometry->first_y;
+}
+static bool radar_next_tile(const radar_geometry_t *geometry)
+{
+  if (++radar.tile_x>geometry->last_x) {
+    radar.tile_x=geometry->first_x;
+    ++radar.tile_y;
+  }
+  return radar.tile_y<=geometry->last_y;
+}
+static bool radar_metadata(bool *unchanged)
+{
+  http_response_t response;
+  esp_err_t err=radar_request("https://api.rainviewer.com/public/weather-maps.json",false,&response);
+  cJSON *root=err==ESP_OK ? cJSON_Parse(response.data) : NULL;
+  const char *host=string(field(root,"host"));
+  const cJSON *frames=field(field(root,"radar"),"past"), *latest=NULL;
+  double latest_time=0;
+  if (host && strcmp(host,"https://tilecache.rainviewer.com")==0 && cJSON_IsArray(frames)) {
+    for (int i=0; i<cJSON_GetArraySize(frames); ++i) {
+      const cJSON *frame=at(frames,i);
+      double when=number(field(frame,"time"));
+      const char *path=string(field(frame,"path"));
+      bool safe=path && path[0]=='/' && strlen(path)<sizeof(radar.path) && !strstr(path,"..");
+      for (const char *p=path; safe && *p; ++p)
+        if (!isalnum((unsigned char)*p) && !strchr("/-_.",*p)) safe=false;
+      if (safe && when>latest_time && when<=INT64_C(4102444800) && floor(when)==when) {
+        latest=frame;
+        latest_time=when;
+      }
+    }
+  }
+  bool ok=latest!=NULL;
+  /* An older/cached provider list cannot confirm the displayed frame. */
+  if (radar.published.valid && latest_time<radar.published.frame_time) ok=false;
+  *unchanged=ok && radar.published.valid && latest_time==radar.published.frame_time;
+  if (ok && !*unchanged) {
+    radar.candidate_time=(time_t)latest_time;
+    snprintf(radar.path,sizeof(radar.path),"%s",string(field(latest,"path")));
+  }
+  cJSON_Delete(root);
+  free(response.data);
+  return ok;
+}
+static void radar_prepare_image(void)
+{
+  uint8_t *pixels=radar.image[radar.slot];
+  for (int y=0; y<APP_RADAR_HEIGHT; ++y) for (int x=0; x<APP_RADAR_WIDTH; ++x) {
+    size_t pixel=(size_t)y*APP_RADAR_WIDTH+x;
+    uint8_t *bgra=pixels+pixel*4;
+    unsigned luminance=radar.base[pixel];
+    /* Match the approved brighter blue-gray map. Keep only source luminance
+     * in the retained background; the two final images own their BGRA colors. */
+    bgra[0]=(uint8_t)((18870-63*luminance+50)/100);
+    bgra[1]=(uint8_t)((17340-60*luminance+50)/100);
+    bgra[2]=(uint8_t)((15810-56*luminance+50)/100);
+    bgra[3]=255;
+  }
+}
+static bool radar_publish(app_radar_snapshot_t *out)
+{
+  if (++radar.published.generation==0) ++radar.published.generation;
+  *out=radar.published;
+  return true;
+}
+static bool radar_failure(app_radar_snapshot_t *out, const char *stage)
+{
+  ESP_LOGW(TAG,"Radar %s failed; retaining the last same-location image",stage);
+  radar.phase=RADAR_IDLE;
+  radar.published.stale=true;
+  return radar_publish(out);
+}
+bool weather_client_radar_step(const device_config_t *config, weather_radar_step_t action,
+                               uint32_t displayed_generation,
+                               app_radar_snapshot_t *out, bool *active)
+{
+  if (!active) return false;
+  *active=false;
+  if (!config || !out || !request_gate || !radar.images_initialized) return false;
+  double latitude=0, longitude=0;
+  bool location=config->location_ready && location_scoring_label_has_country(config->location,"US") &&
+    radar_coordinate(config->latitude,85.05112878,&latitude) &&
+    radar_coordinate(config->longitude,180,&longitude);
+  bool changed=location!=radar.location_set ||
+    (location && (latitude!=radar.latitude || longitude!=radar.longitude));
+  if (changed) {
+    radar.location_set=location;
+    radar.latitude=latitude; radar.longitude=longitude;
+    radar.base_ready=false;
+    uint32_t generation=radar.published.generation;
+    radar.published=(app_radar_snapshot_t){.generation=generation,
+      .latitude=latitude,.longitude=longitude};
+    radar.phase=location && action!=WEATHER_RADAR_OFFLINE ? RADAR_METADATA : RADAR_IDLE;
+    *active=radar.phase!=RADAR_IDLE;
+    /* Publish invalidation before touching an old displayed/pending slot. */
+    return radar_publish(out);
+  }
+  if (!location) return false;
+  if (action==WEATHER_RADAR_OFFLINE) {
+    radar.phase=RADAR_IDLE;
+    if (radar.published.stale) return false;
+    radar.published.stale=true;
+    return radar_publish(out);
+  }
+  if (radar.phase==RADAR_IDLE) {
+    if (action!=WEATHER_RADAR_CHECK) return false;
+    radar.phase=RADAR_METADATA;
+  }
+  *active=true;
+  if (radar.phase==RADAR_METADATA) {
+    bool unchanged=false;
+    if (!radar_metadata(&unchanged)) {
+      *active=false;
+      return radar_failure(out,"metadata");
+    }
+    if (unchanged) {
+      radar.phase=RADAR_IDLE;
+      *active=false;
+      if (!radar.published.stale) return false;
+      radar.published.stale=false;
+      return radar_publish(out);
+    }
+    if (!radar_geometry(latitude,longitude,&radar.geometry)) {
+      *active=false;
+      return radar_failure(out,"coverage");
+    }
+    radar.phase=radar.base_ready ? RADAR_WAIT_SLOT : RADAR_BASE;
+    return false;
+  }
+  if (radar.phase==RADAR_BASE) {
+    if (!radar.base) radar.base=radar_alloc(RADAR_PIXELS);
+    if (!radar.base || radar_background()!=ESP_OK) {
+      *active=false;
+      return radar_failure(out,"background image");
+    }
+    radar.base_ready=true;
+    radar.phase=RADAR_WAIT_SLOT;
+    return false;
+  }
+  if (radar.phase==RADAR_WAIT_SLOT) {
+    if (displayed_generation!=radar.published.generation) return false;
+    radar.slot=radar.published.pixels==radar.image[0] ? 1 : 0;
+    if (!radar.image[radar.slot]) radar.image[radar.slot]=radar_alloc(RADAR_PIXELS*4);
+    if (!radar.image[radar.slot]) {
+      *active=false;
+      return radar_failure(out,"image allocation");
+    }
+    radar_prepare_image();
+    radar_first_tile(&radar.geometry);
+    radar.phase=RADAR_ECHO;
+    return false;
+  }
+  if (radar_tile()!=ESP_OK) {
+    *active=false;
+    return radar_failure(out,"echo tile");
+  }
+  if (radar_next_tile(&radar.geometry)) return false;
+  radar.published.valid=true;
+  radar.published.stale=false;
+  radar.published.frame_time=radar.candidate_time;
+  radar.published.latitude=latitude;
+  radar.published.longitude=longitude;
+  radar.published.pixels=radar.image[radar.slot];
+  radar.phase=RADAR_IDLE;
+  *active=false;
+  return radar_publish(out);
 }

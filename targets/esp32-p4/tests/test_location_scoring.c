@@ -59,6 +59,20 @@ int main(int argc, char **argv)
   }
 
   int failures = 0;
+  const struct { const char *label; bool us; } countries[] = {
+    {"Leander, Texas, US", true}, {"Denver, Colorado, us ", true},
+    {"Washington, US", true}, {"Honolulu, Hawaii, \tUS\n", true},
+    {"Paris, Ile-de-France, FR", false}, {"Toronto, Ontario, CA", false},
+    {"Leander, Texas", false}, {"Leander, Texas, USA", false},
+    {"Leander, Texas, U", false}, {"Leander, US, ", false},
+    {"US", false}, {"", false}, {NULL, false},
+  };
+  for (size_t i = 0; i < sizeof(countries) / sizeof(countries[0]); ++i) {
+    if (location_scoring_label_has_country(countries[i].label, "US") != countries[i].us) {
+      fprintf(stderr, "FAIL resolved country: %s\n", countries[i].label ? countries[i].label : "(null)");
+      ++failures;
+    }
+  }
   const struct { const char *query; const char *search; const char *country; } searches[] = {
     {"Cincinnati,OH,US", "Cincinnati,Ohio", "US"},
     {"Paris,FR", "Paris,FR", ""},

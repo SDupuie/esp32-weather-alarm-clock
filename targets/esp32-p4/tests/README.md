@@ -96,20 +96,34 @@ usable-time gating, catch-up endpoints, future/overdue snooze, repeated snooze
 and restart during resumed ringing, saved dismissal, backward suppression and
 one pending missed notice. Returned read/write/commit failures and blocked writes
 check error reporting and immediate copied in-memory action state without
-settings rewrites or tick-based storage retries. These are controlled test
-examples, not physical power-cut evidence. Off checks exercise cancellation of
-ringing and snooze, including a restored snooze without usable time, preserved
+tick-based storage retries. Recurring operating transitions do not rewrite
+settings; one-time completion has its approved enabled-only Off save. These are
+controlled test examples, not physical power-cut evidence. Off checks exercise
+cancellation of ringing and snooze, including a restored snooze without usable time, preserved
 configuration/missed notice, failed cancellation saves, restart suppression and
 copied canceled state while a save is blocked. Runtime-enable checks cover late
 and within-window enabling without a retroactive ring/notice, before-due and
 exact-due enabling, deferred usable time, backward suppression, preserved pending
-notices and no arming storage writes. Runtime schedule-edit checks cover hour,
-minute and repeat-day changes separately and together, future/recently-past
-occurrences, before/exact due time, deferred usable time, preserved captured
+notices and a single operating-record save for idle arming. Runtime schedule-edit
+checks cover hour, minute and repeat-day changes separately and together,
+future/recently-past occurrences, before/exact due time, deferred usable time, preserved captured
 ringing/snooze and missed notices, and unchanged/sound/volume/snooze-only updates.
 They reconstruct the reported false Saturday notice without claiming a new
-board observation. Separate already-On startup/restart cases retain the approved
-catch-up behavior after an edit.
+board observation. Restart checks keep skipped past occurrences quiet after idle
+enable/edits, while a later genuinely due alarm retains catch-up/missed behavior.
+Failed arming saves preserve live suppression with the accepted older-record
+restart limitation. Edits during captured ringing/snooze leave their saved
+recovery intact, including repeated changes and future/overdue snooze deadlines.
+These checks use ordinary substitute storage, not physical power-cut evidence.
+One-time checks cover first use and exact-due today/tomorrow selection, fixed-date
+restart recovery through midnight and DST, ringing/snooze/expiry/Dismiss and
+rearming, edits between recurring/None schedules, retained missed notices,
+target/read/write/commit failures, consumed-target suppression after failed Off
+and no tick retries. Existing 56-byte snooze/dismissal records remain unchanged;
+the optional 16-byte target uses the same alarm namespace. Settings checks run
+the real conditional completion operation: only the matching applied None
+schedule saves Off, with one enabled write, replacement schedules left alone,
+unchanged preferences, normal failure publication and configuration reload.
 The clock-task connection is compiled by the firmware build and reviewed from
 source. Speaker output and physical alarm operation remain board checks; this
 suite does not establish them.
@@ -196,8 +210,8 @@ Day/Night geometry and icon/text alignment, completion/error/readiness updates
 in place, selection/navigation/close/hide cancellation, and draft preservation
 through ringing. A stale heartbeat does not prevent cancellation; a ring-masked
 inactive flag still causes a definite Stop on hide. Preview never saves settings
-or performs codec operations under the display lock. Audio failures use the
-existing ringing footer after action/storage errors.
+or performs codec operations under the display lock. Audio failures retain
+the approved logging behavior without an on-screen diagnostic caption.
 
 The native task substitute checks valid allocation arguments; it does not allocate or measure an ESP32-P4 task stack. Hardware stack results belong in the [work record](../../../docs/work.md).
 
@@ -280,6 +294,38 @@ The separate representative calculation check verifies the selected pictures.
 The transport itself is substituted in these worker checks; the connectivity
 checks above exercise actual synchronization startup/completion. Live HTTP,
 certificate validation and network-time traffic remain unverified.
+
+Radar checks in the same target use the bundled LVGL LodePNG decoder with
+constructed PNG/HTTP inputs. They check dimensions and response bounds, palette
+mapping before composition, 75-mile coverage at different latitudes, source
+alignment, opaque map edges, the approved brighter map colors, unchanged frames,
+failed retries, offline stale marking and
+safe image replacement after display acknowledgment. Worker checks verify the
+independent five-minute checks and 100ms preparation turns without changing
+forecast/time retry or quota deadlines. Pending publications survive a failed
+short copy. Native allocation uses a 16MiB LVGL heap and enforces the same
+4MiB decoder-allocation cap as firmware; firmware routes large decoder/image
+allocations to PSRAM. These checks do not measure board memory,
+decode latency, stack use or live HTTPS behavior.
+
+`test_weather_service --radar-only` runs the focused constructed checks.
+`test_weather_service --radar-saved-data <capture-folder>` separately processes
+the retained Leander/Colorado 800×800 USGS and required RainViewer tiles and
+writes raw BGRA images and codec-memory JSON reports beside them. It makes no live
+requests. Capture filenames are listed in `check_saved_radar_data` in the test.
+Actual provider samples and data-only previews are review evidence, not finished
+screen or physical-board verification.
+
+UI checks cover Forecast/Radar navigation, stable storm ordering, Day/Night,
+full-screen map and horizontal header fit, equal-width Light/Moderate/Heavy key
+sections with centered labels, an unshaded footer, and no added town-label objects,
+frame time and old/unavailable states, image-source retirement and alarm
+preemption. Non-U.S., missing-country and unfinished locations create no Radar
+objects or route; their storm destination is Forecast. Country changes remove
+even a hidden Radar image, and U.S. re-enablement restores navigation. A private
+test fixture still exercises the retained Conditions renderer, which has no
+production route. Native pixels and pointer events do not establish display
+quality, physical gestures or concurrent board performance.
 
 The settings-control target compiles production `main/ui/settings.c` with real LVGL
 objects and events. It checks nested Done/Cancel, shared Wi-Fi drafts, deferred
@@ -398,7 +444,12 @@ formats. They retain arbitrary saved minutes when opening/canceling and check
 five-minute wrapping from a saved 59 without rounding. Done remains
 draft-only; the existing Alarm Save checks verify applied values and unrelated
 room/brightness preferences.
-Repeat checks cover shortcuts, full day captions and zero-day Done blocking.
+Repeat checks cover all 128 weekday masks, preset selection and summaries,
+the nested Custom Days editor, both appearance palettes, centered day rows and
+full day captions. Back/Done retain the shared draft, including None; Save,
+Cancel, failure/retry, immediate-toggle isolation and ringing preemption retain
+their existing behavior. Custom Days row positions round the reference's two
+half-pixel values up, preserving the gap with a half-pixel vertical center offset.
 Night checks cover mode descriptions/selections, fixed-schedule boundary notes,
 offset direction/steps/limits and brightness label updates in place. Cancel and
 nested drafts cause no writes or backlight preview; production saves verify the
@@ -480,6 +531,11 @@ object checks do not establish the quality of the scaled raster font or physical
 rendering. The unavailable screen includes the saved-alarm caption and the
 Alarm Settings shortcut, checked with actual pointer input.
 
+Analog tick checks cover all 60 original absolute endpoints, compact nonempty
+bounds, line widths, rounded ends, drawing margins and Day/Night styles. They
+also retain the non-clickable line objects. Real-art pixel comparisons and board
+redraw measurements for this change are recorded in the [work record](../../../docs/work.md).
+
 Notification checks cover initial waiting and failed retries on all four
 weather surfaces; retained age boundaries and missing, future or untrusted
 timestamps on the clock faces and Conditions; fixed Forecast stale wording
@@ -490,8 +546,16 @@ truthful. Playback failure tests retain stopped/error/explicit-retry behavior;
 the native logging substitute checks format arguments without capturing output.
 
 Alarm presentation checks compare Ringing and Snoozed objects against the
-approved Day/Night geometry, colors and typography, with real pointer presses
-on Snooze, Dismiss, missed notices and Alarm Settings. Captured schedule dates
+approved Day/Night geometry, colors and typography, with real pointer input
+on Snooze, the ringing slide, snoozed Dismiss, missed notices and Alarm Settings.
+The ringing control uses press–move–release tests: track/outside-origin taps,
+short/reversed/canceled/lost drags, the completion threshold, pending duplicates,
+rejected submissions, stale completions, and ordinary updates during a held drag.
+Both appearances check caption bounds and centering, reset animation, applied
+dismissal despite a storage error, and the brief confirmation's expiry or
+replacement by a new alarm. These checks preserve the existing storage and
+navigation assertions; dragging and confirmation add no settings writes.
+Captured schedule dates
 and times, countdown/deadline formatting, midnight, 12/24-hour and unavailable
 time, next/off/missed rows, warning priority and generated countdown glyphs are
 checked. Queue-full retry, duplicate blocking, mismatched completion, returned
@@ -507,7 +571,12 @@ Fifteen explicit dated cases check before/equal/after, repeat days, midnight/yea
 boundaries, 12/24-hour formatting and the intended date/minute through spring/fall
 changes. Actual controls check draft time/day edits, Cancel without writes, Off,
 unavailable/usable RTC time, in-place heartbeat refresh without rebuilding an
-editor, and Save/progress/error priority. Alarm text keeps its existing unpadded
+editor, and Save/progress/error priority. None checks exercise all-days-cleared
+and shortcut selection, enabled Done/Save, reload/Cancel, Today/Tomorrow/exact
+due, fixed owner target through midnight, captured snooze preview, consumed
+no-next state and automatic Off without losing or reapplying other draft edits.
+Day/Night checks use actual LVGL fonts, single-line shortcut labels and round
+screen geometry. Alarm text keeps its existing unpadded
 12-hour formatter independently of the normal-clock Leading Zero choice.
 
 Normal clock alarm-notice checks include the reported `Tomorrow · 7:00 AM`
