@@ -8,6 +8,14 @@ usage and overlapping requests; they do not model ESP-IDF task-priority
 inheritance or scheduling. Board timing evidence belongs in the
 [work record](../../../docs/work.md).
 
+Use the [current work list](../../../docs/work.md#current-work--reconciled-october-16-2026)
+for completed board checks and remaining work. In particular, the
+[attached RTC checks](../../../docs/work.md#attached-rtc-unattended-checks--authorized-october-16-2026)
+use the real module through powered restarts and bounded offline operation.
+They do not establish battery retention after removing all main power, genuine
+RTC faults, physical touch or acoustic continuity. Native checks below describe
+their own coverage, independently of those board observations.
+
 ## Weather and location
 
 Activate ESP-IDF 5.5.5 as described in the [target guide](../README.md#prepare-the-environment-no-board-needed), then run from the repository root:
@@ -250,8 +258,10 @@ steps after a delay and retries from the last successful level when the BSP
 reports failure. Readers are checked while storage or backlight work is pending.
 Invalid schedules and returned failures are controlled test examples. The clock
 task/startup integration is reviewed from source and compiled by the firmware
-build; these native checks do not execute the full startup or task. Physical
-solar transitions, brightness/fades and the populated Settings page remain unverified.
+build; these native checks do not execute the full startup or task. They do not
+establish physical solar transitions, brightness/fades or the populated Settings
+page on the panel. Completed board observations and remaining checks are in the
+[work record](../../../docs/work.md).
 
 Connectivity checks compile production `main/connectivity.c` with native network,
 Wi-Fi driver and task substitutes. They exercise initialization shared by connecting
@@ -284,16 +294,19 @@ Both providers are exercised using retained real response data and explicitly
 constructed current/error/rare-condition supplements. Checks cover selected
 units, raw fractional amounts, observation timestamps, provider local times
 across DST, repeated-hour identity, missing optional fields, required daily
-values and bounded responses. Request checks cover encoded dummy keys,
+values and bounded responses. Request checks cover encoded dummy keys, including
+a maximum-length key whose characters all require URL encoding,
 serialized admission, key-specific daily-quota pauses, generic rate errors,
 retry/reset waits and hourly failed-check recovery. No real credential or quota
 exhaustion is needed. To check a separately captured, sanitized full Visual
-Crossing response with the same decoder, pass its path to `test_weather_service`
+Crossing response with the same decoder, pass its path to `/tmp/esp32-p4-native-tests/test_weather_service`
 or set `WAC_WEATHER_LIVE_RESPONSE`; this reads a file and makes no live request.
 The separate representative calculation check verifies the selected pictures.
 The transport itself is substituted in these worker checks; the connectivity
-checks above exercise actual synchronization startup/completion. Live HTTP,
-certificate validation and network-time traffic remain unverified.
+checks above exercise production synchronization startup/completion with network
+substitutes. These checks do not establish live HTTP, certificate validation or
+network-time traffic; board observations are recorded in the
+[work record](../../../docs/work.md).
 
 Radar checks in the same target use the bundled LVGL LodePNG decoder with
 constructed PNG/HTTP inputs. They check dimensions and response bounds, palette
@@ -302,14 +315,17 @@ alignment, opaque map edges, the approved brighter map colors, unchanged frames,
 failed retries, offline stale marking and
 safe image replacement after display acknowledgment. Worker checks verify the
 independent five-minute checks and 100ms preparation turns without changing
-forecast/time retry or quota deadlines. Pending publications survive a failed
+forecast/time retry or quota deadlines. Binary download-growth checks preserve
+all received bytes, including zero bytes, and retain the earlier buffer after
+allocation failure or an oversized response. Pending publications survive a failed
 short copy. Native allocation uses a 16MiB LVGL heap and enforces the same
 4MiB decoder-allocation cap as firmware; firmware routes large decoder/image
 allocations to PSRAM. These checks do not measure board memory,
 decode latency, stack use or live HTTPS behavior.
 
-`test_weather_service --radar-only` runs the focused constructed checks.
-`test_weather_service --radar-saved-data <capture-folder>` separately processes
+After the native build above, `/tmp/esp32-p4-native-tests/test_weather_service --radar-only`
+runs the focused constructed checks.
+`/tmp/esp32-p4-native-tests/test_weather_service --radar-saved-data <capture-folder>` separately processes
 the retained Leander/Colorado 800×800 USGS and required RainViewer tiles and
 writes raw BGRA images and codec-memory JSON reports beside them. It makes no live
 requests. Capture filenames are listed in `check_saved_radar_data` in the test.
@@ -455,8 +471,8 @@ offset direction/steps/limits and brightness label updates in place. Cancel and
 nested drafts cause no writes or backlight preview; production saves verify the
 actual Alarm and Night values. Generated numeric-font line boxes/baselines and
 glyph offsets are checked against the reference font metrics; 32px icon sources,
-boxes and tint are checked in both appearances. Physical rendering remains
-unverified; the mockup’s browser-native slider track is not a fixed raster asset.
+boxes and tint are checked in both appearances. These native checks do not
+establish physical rendering; the mockup’s browser-native slider track is not a fixed raster asset.
 
 Alarm/Sound/Snooze/Solar menu checks compare actual rows, switches, footers,
 descriptions, selected checks and icon/text spacing with both reference palettes.

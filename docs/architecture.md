@@ -464,6 +464,10 @@ Implementation and verification records belong in [work.md](work.md).
 Visual Crossing provider-credit placement is deferred at the
 user's direction; no placement or private-use exception is established by that
 deferral.
+Provider/source acknowledgments and license links are maintained in the
+[README](../README.md#weather-location-and-map-sources). Documentation credits
+do not resolve the separate on-device placement decision recorded in
+[work.md](work.md#deferred-or-unapproved-work).
 
 #### Visual Crossing quota recovery
 
@@ -810,25 +814,30 @@ UI screen assignments follow the [approved visual reference](#ui-and-visual-refe
 | `location_lookup.c/.h` | Geocoding requests and lookup results. `device_config` owns saved location values. |
 | `location_scoring.c/.h` | Query parsing, candidate ranking, resolved-label formatting and country-token checks; no saved location state. |
 | `timezone_table.c/.h` | Timezone mapping data used for validation and conversion. `clock_time` applies the selected mapping to the system clock's local-time rules. |
-| `weather_icon_names.c/.h` | Condition-to-icon mapping and rendering resources, including generated image assets; no weather state or refresh decisions. |
+| `weather_icon_names.c/.h` | Provider condition facts, picture selection, icon names and current-condition captions; no live weather state or refresh decisions. |
+| `assets/weather_icons.c/.h` and generated image assets | Lookup from selected icon names to LVGL images and the image data. Condition classification belongs to `weather_icon_names`; these resources make no weather decisions. |
 | `message_service.c/.h` | Message records, acknowledgments, shared-client cache, hub role/discovery, message network operations and browser delivery. UI owns device navigation. |
 | `main/web/messages.html` | House Messages browser rendering and controls, outside the device LVGL views. `message_service` serves the page and owns message records and operations. |
 | `clock_time.c/.h` | Time source/trust, system timezone application, RTC synchronization and in-memory RTC warning. Uses the system clock; connectivity supplies actual network synchronization completion. |
 | `ds3231.c/.h` | RTC register access through the board's existing I2C bus. RTC trust/correction decisions belong to `clock_time`; board facilities own the bus. |
-| `alarm.c/.h` | Live alarm state, snooze, dismissal, missed notice and their operating-record storage. Occurrence calculations belong to `alarm_schedule`. |
-| `alarm_schedule.c/.h` | Recurring-occurrence and DST calculations; no live alarm state, storage or execution task. |
+| `alarm.c/.h` | Live alarm state, dated one-time target/completion, snooze, dismissal, missed notice and their operating-record storage. Occurrence calculations belong to `alarm_schedule`. |
+| `alarm_schedule.c/.h` | Recurring and next one-time occurrence calculations, including DST; no live alarm state, storage or execution task. |
 | `audio.c/.h` | Sound definitions, speaker/codec access, MP3 and generated-noise playback, Sound Machine timer/fade and status, volume progression, preview lifetime and ringing/preview/Sound Machine priority. Alarm owns whether ringing is required. |
 | `night.c/.h` | Effective appearance, its remembered value and backlight transitions. Owns the private adjacent-day solar cache and publishes raw events for Settings. Saved preferences belong to `device_config`; solar calculations belong to `solar_times`. |
 | `solar_times.c/.h` | Solar-event calculations and unavailable-event results. `night` decides their effect on appearance. |
-| `ui/ui.c` | UI lifetime, active view and navigation, including return destinations, gestures and first-use entry; overlays, alarm preemption, input routing and presentation selection. Touch actions go to the correct feature owner; feature decisions remain with those owners. |
+| `ui/ui.c` | UI lifetime, active view and navigation, including return destinations, gestures and first-use entry; overlays, alarm preemption, input routing and presentation selection. Also holds the small drawing helpers shared by the renderers. Touch actions go to the correct feature owner; feature decisions remain with those owners. |
 | `ui/clock_views.c` | Rendering and object handles for analog/digital faces, unavailable time, ringing/snoozed clock surfaces, next alarm, missed alarm, clock status and backup-clock indicator/notice. Active-view and navigation state belong to `ui.c`. |
 | `ui/weather_views.c` | Rendering and private object handles for Forecast, Radar replacing Conditions, and storm treatment; retained Conditions rendering code without an active user route; messages and empty/important styling; weather status and warnings. Conditions also remains available in the mockup under the radar decision above. Consumes supplied snapshots and presentation inputs without retaining another weather/message model or active-view state. Navigation, retained display snapshots, displayed-message identity and dismissal completion decisions belong to `ui.c`; message operations belong to `message_service`. Clock-edge objects remain with `clock_views.c`. |
-| `ui/settings.c` | Rendering and controls for Settings entry; Device Setup; Display settings and Messaging; Weather; Wi-Fi list, credentials and progress; Alarm, Time, Repeat, Sound and Snooze editors; Night Shift mode, fixed/solar schedule, offsets and brightness. Owns drafts, nested editing, immediate Sound Machine controls, validation/save/lookup presentation and submission of user changes. Applied settings belong to `device_config`. |
-| `ui/controls.c` | Shared LVGL rows/buttons, styling, time input and keyboard helpers; no saved settings, active-view state, feature decisions/state or navigation authority. |
+| `ui/settings.c` | Rendering and controls for Settings entry; Device Setup; Display settings and Messaging; Weather; Wi-Fi list, credentials and progress; Alarm, Time, Repeat/Custom Days, Sound and Snooze editors; Sound Machine and its selectors; Night Shift mode, fixed/solar schedule, offsets and brightness. Owns drafts, nested editing, immediate Sound Machine controls, validation/save/lookup presentation and submission of user changes, with its row/button, time-input and keyboard helpers kept in this file. Applied settings belong to `device_config`. |
 
 A copied value is a snapshot for a consumer, not another authority. Runtime fields about time and appearance come from their owners. Screens do not calculate alarm eligibility, infer RTC health, or drive the backlight. Feature-owner headers declare their own data; `app_runtime.h` holds data used for display, including values required by the approved weather age/stale presentation. Intermediate forecast calculations stay with `weather_client`; the display consumes the selected icon. The weather snapshot retains both time-format versions of the visible Conditions captions, produced from the same downloaded data by the existing calculation. The view selects the applied format; it does not retain another weather model or recalculate weather decisions. There is no general `wac_types.h` container. DS3231 access reuses the board bus and existing driver facilities without creating a second bus or an application fork of downloaded drivers.
 
 Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. Clock object handles remain private to `clock_views.c`; its private interface receives display inputs and callbacks from `ui.c` without exporting the shell's state or retaining another service/configuration model. Forecast, Radar, retained Conditions, message and weather-status object handles remain private to `weather_views.c`; the shell supplies current drawing inputs and visibility, without directly manipulating those objects. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
+
+`ui/controls.c` remains an optional approved path, not an implemented owner or a
+required extraction. Keep the existing helpers with their current UI owners
+unless sharing them in that file provides a concrete current benefit; any such
+helpers must have no settings, feature-state or navigation authority.
 
 Repeated UI updates leave unchanged static image sources, palettes and playback
 labels alone. Compare immutable assets with the source already held by LVGL;
@@ -896,7 +905,8 @@ remain internal. Keep these choices in `sdkconfig.defaults`, without a custom
 allocator or driver fork. They preserve save behavior and weather validation
 and retries; physical verification and its limits belong in the work record.
 
-Retain the existing network/message workers, LVGL task, and UI heartbeat. Add two long-lived tasks:
+Retain the existing network/message workers, LVGL task, UI heartbeat,
+clock-control task and single audio worker:
 
 - A clock-control task, started by `main.c`, runs time maintenance, alarm evaluation, and Night Shift updates by ordinary calls to their owners. It never waits for the display lock, network requests, or audio streaming. Evaluate due alarms before other optional work. RTC calls use finite timeouts; brightness fades advance in steps, not a sleep loop.
 - The existing audio worker owns all playback. Ringing takes priority over alarm previews; both stop Sound Machine under its [operating rules](#sound-machine-playback). Stop/snooze remains responsive during playback. The current alarm implementation uses a 6 KB stack; measure decoder stack use and adjust this same worker allocation only for a demonstrated need.
@@ -1063,16 +1073,16 @@ targets/esp32-p4/
     location_lookup.c / .h              Geocoding requests and lookup results
     location_scoring.c / .h             Location query parsing, ranking and resolved labels
     timezone_table.c / .h               Timezone mapping data
-    weather_icon_names.c / .h           Weather code to icon-name mapping
+    weather_icon_names.c / .h           Provider facts, picture/icon selection and captions
     message_service.c / .h              Message records, hub and browser operations
     web/
       messages.html                     House Messages browser rendering and controls
     CMakeLists.txt                      Direct firmware source list
     clock_time.c / .h                   Time trust, timezone and RTC synchronization
     ds3231.c / .h                       DS3231 register access on the board I2C bus
-    alarm.c / .h                        Alarm, snooze and missed notices; NVS records
-    alarm_schedule.c / .h               Recurring alarm and DST calculations
-    audio.c / .h                        Alarm/preview sounds, volume and playback
+    alarm.c / .h                        Alarm, one-time target, snooze and missed notices; NVS records
+    alarm_schedule.c / .h               Recurring/one-time occurrence and DST calculations
+    audio.c / .h                        Alarm/preview and Sound Machine playback, timer and volume
     night.c / .h                        Day/Night appearance, fallback and backlight
     solar_times.c / .h                  Sunrise/sunset and unavailable-event calculations
     ui/
@@ -1081,8 +1091,9 @@ targets/esp32-p4/
       clock_views.c                     Clock, ringing and clock-status rendering
       weather_views.c                   Weather, message and indicator rendering
       settings.c                        Settings editors, drafts and save/lookup feedback
-      controls.c                        Shared LVGL controls and input helpers
+      controls.c                        Optional shared LVGL helpers; not currently needed
     assets/
+      weather_icons.c / .h              Existing icon-name to LVGL-image lookup
       wac_icons.c / .h                  Generated only for needed added icons
       wac_fonts.c / .h                  Generated only for needed added glyphs
   tests/
@@ -1093,9 +1104,13 @@ targets/esp32-p4/
     test_time.c                         Time trust, timezone and RTC correction checks
     test_connectivity.c                 Wi-Fi/scan concurrency and network-time completion checks
     test_weather_service.c              Weather decoding and independent download/time retry checks
+    test_forecast_representative.c      Daily-picture calculation and fixture checks
+    test_storm_conditions.c             Conditions/storm calculation and fixture checks
+    test_location_scoring.c             Qualified location query and ranking checks
+    test_message_ack.py                 Message acknowledgment and shared-store handoff checks
     test_alarm.c                        Alarm/snooze, dismissal and restart-recovery checks
     test_alarm_schedule.c               Recurring occurrences and DST boundary checks
-    test_audio.c                        Sound preview and ringing-priority checks
+    test_audio.c                        Alarm/preview priority and Sound Machine playback checks
     test_night.c                        Day/Night, fallback and brightness checks
     test_solar_times.c                  Solar-event and unavailable-event checks
     test_ui.c                           Navigation, draft and alarm-preemption checks

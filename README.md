@@ -15,7 +15,7 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 
 ## Features
 
-- Analog and digital clock faces, with 12-hour or 24-hour time and an optional leading zero.
+- Analog and digital clock faces, with 12-hour or 24-hour time and an optional leading zero in 12-hour mode.
 - Large, centered digital time in Night Shift and a common unavailable-time screen for either clock face.
 - Current temperature, today's high and low, and weather icons that change between day and night.
 - A forecast for the next five days, with icons chosen to represent the daytime weather.
@@ -27,7 +27,7 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 - A red Night Shift appearance with Off, Always On, Fixed Schedule or locally calculated Sunset to Sunrise preferences, remembered startup fallback, and separate Day/Night brightness with gradual transitions.
 - Household messages sent from a phone or computer on the same network, with optional sharing among multiple ESP32-P4 clocks.
 - Touchscreen settings for Wi-Fi, location, display, messaging and saved alarm/night preferences.
-- One alarm with one-time or selected repeat days, Snooze, Dismiss, missed-alarm notices and restart recovery.
+- One alarm with one-time or selected repeat days, Snooze, Slide to Dismiss while ringing, missed-alarm notices and restart recovery.
 - Classic Beep, Classic Bell, and Rising Tones, with a five-second sound preview and gradually increasing alarm volume.
 - Sound Machine with nine repeating recordings, White/Pink/Brown Noise, independent volume and a sleep timer.
 - Automatic startup when the board receives power.
@@ -134,15 +134,23 @@ Your selected analog or digital face is the home screen.
 | Messages | Swipe left | Return to the clock. |
 | Clock | Swipe down | Open settings. |
 | Clock | Tap the speaker icon | Open Sound Machine; Back returns to the clock. |
+| Clock | Tap the next-alarm or **Alarm off** notice | Open Alarm Settings. |
+| Clock | Tap **Missed Alarm** | Dismiss the missed-alarm notice. |
+| Clock | Tap the snoozed-alarm notice | Open the snooze countdown screen. |
+| Clock | Tap the backup-clock warning triangle, when shown | Read the backup-clock notice and dismiss it after checking the problem. |
 | Settings editor | Tap **Cancel** | Discard that editor's unsaved changes; Weather returns to Device Setup, while Display, Device Setup and Alarm return to Settings. |
 | Settings entry | Tap **Back** | Return to the clock after first-use location setup is complete. |
 | Unread message | Tap the displayed message | Mark it read for this clock and return home after acknowledgment succeeds. |
 
 ### Weather and storm conditions
 
-Radar shows the latest RainViewer frame over a USGS map, with nearby town names,
-a marker at your saved weather location, the frame's local time and an echo-strength
-legend. It checks for a newer frame every five minutes. An unsuccessful update
+Radar shows the latest [RainViewer](https://www.rainviewer.com/) frame over a
+[USGS National Map](https://www.usgs.gov/programs/national-geospatial-program/national-map)
+background, with the map's printed town names, a marker at your saved weather
+location and the frame's local date/time. The key uses equal-width green, yellow
+and red sections labeled **Light**, **Moderate** and **Heavy**. These describe
+radar echo strength, not official storm warnings. Radar checks for a newer frame
+every five minutes. An unsuccessful update
 keeps the previous image and marks it “Old”; before any image arrives it shows
 “Radar unavailable.” This first version supports locations resolved in the
 United States. Radar is hidden for other locations; Forecast remains available.
@@ -153,11 +161,40 @@ snow. Falling pressure alone does not trigger an alert.
 
 During an alert, a pulsing edge indicator appears on the clock. It is amber during the day and red in Night Shift. Swiping left opens **Radar first**, then Forecast for U.S. locations, or Forecast alone elsewhere.
 
-Weather normally refreshes every ten minutes. If an update fails, the clock keeps the last available weather while retrying. That retained weather may be out of date.
+Weather normally refreshes every ten minutes. Until the first successful update,
+the clock and Forecast show **Waiting for weather…** with no invented readings.
+If a later update fails, the clock keeps the last available weather while
+retrying. The clock faces show its age, such as **Weather updated 2h ago**, or
+**Weather data stale** when the age cannot be trusted. Forecast uses **Weather
+data stale** above its main day heading. Clock-face weather details and their
+notices are hidden in Night appearance.
 
-In **Device Setup → Weather**, choose **Open-Meteo** without a key or
-**Visual Crossing** with your API key. The [configuration guide](#configuration)
+In **Device Setup → Weather**, choose weather data by
+[Open-Meteo](https://open-meteo.com/) without a key or
+[Visual Crossing Weather](https://www.visualcrossing.com/) with your API key.
+Location searches use Open-Meteo for either weather provider. The [configuration guide](#configuration)
 explains activation checks, key retention and clearing.
+
+The weather pages reached by swiping are Forecast and, for U.S. locations,
+Radar. The Conditions page in the design mockup is a retained reference and is
+not available through the clock's menus or swipes.
+
+### Clock and backup-clock notices
+
+| Notice | What it means |
+| --- | --- |
+| **Waiting for sync** | The backup clock supplied usable time, but internet time has not yet synchronized after startup. The clock and alarms can still run. |
+| **Time unavailable** | No usable time is available yet. The clock waits before triggering alarms. |
+| **Clock paused** | The displayed minute has stopped advancing while the display is still being updated. |
+| **Backup Clock Lost Time / Check Battery** | The RTC reported that its time could not be trusted. Check its coin cell. |
+| **Backup Clock Unavailable / Check Connection** | The clock could not access the RTC. Check its connection. |
+
+The triangle opens either backup-clock notice. Dismiss acknowledges the notice;
+it does not repair the hardware. Internet synchronization can restore time
+without clearing an undismissed notice. The RTC is checked again on each startup.
+
+**Settings storage unavailable** is a separate startup failure. The clock stops
+startup when it cannot load settings, rather than automatically erasing them.
 
 ### Night Shift
 
@@ -259,8 +296,9 @@ DISMISS** to the right end and release. Tapping the track or releasing a short
 drag keeps it ringing. Dismissal shows **DISMISSED** briefly before returning
 to the clock. The snoozed screen keeps its tap **DISMISS** button.
 
-For a one-time alarm, choose **Repeat → None**, set the time and Save. With Alarm
-On, it rings at the next occurrence of that time, today or tomorrow. Snooze works normally;
+For a one-time alarm, choose **Repeat → None**, set the time and Save. If Alarm
+is Off, turn it On after saving those choices. It rings at the next occurrence
+of that time, today or tomorrow. Snooze works normally;
 Dismiss turns the alarm Off. Turn it On again to reuse the time for another
 one-time alarm. Restart recovery keeps the original scheduled date.
 
@@ -268,9 +306,22 @@ Repeat also offers **Every Day**, **Weekdays** and **Custom Days**. Custom Days
 lets you select individual weekdays. Use Done or Back to return through Repeat
 to Alarm, then Save to apply the selection. Cancel on Alarm discards it.
 
+Turning Alarm Off stops ringing and cancels a pending snooze. Turning it On
+after today's alarm time arms the next scheduled alarm. After a restart, an
+unhandled alarm no more than 30 minutes overdue rings when usable time returns;
+an older ordinary occurrence produces **Missed Alarm**. A saved snooze resumes
+its countdown, or rings if its deadline is no more than 30 minutes overdue;
+an older snooze is discarded. The backup battery does not sound the alarm while
+main power is absent.
+
 ### Sound Machine
 
 Open **Settings → Sound Machine** or tap the speaker on either clock face.
+Choose from **Rain, Thunder, Ocean, Wind, Forest, Campfire, Stream, Night,
+Singing Bowl, White Noise, Pink Noise** and **Brown Noise**. The first nine are
+looping recordings; the three noises are generated continuously. Sleep Timer
+offers **Continuous**, **15**, **30**, **60** or **120 minutes**.
+
 Choose a sound, volume and sleep timer, then tap **Play**. Sound, volume and timer
 changes save and apply immediately; **Back** and **Done** keep playback running.
 Changing the sound keeps the remaining time; changing the timer starts its full
@@ -288,3 +339,40 @@ See the [firmware setup and update guide](targets/esp32-p4/README.md) for detail
 This project is licensed under the [Creative Commons Attribution-NonCommercial 4.0 International License](https://creativecommons.org/licenses/by-nc/4.0/).
 
 Original project © 2026 Josh Hendrickson. [Author](https://anoraker.com). The original project credits [MagicMirror](https://github.com/MagicMirrorOrg/MagicMirror) as inspiration.
+
+### Weather, location and map sources
+
+- **Weather data by [Open-Meteo](https://open-meteo.com/)** — the default forecast
+  and current-weather source. API data is provided under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); access to its free
+  service follows the [Open-Meteo terms](https://open-meteo.com/en/terms).
+- **Weather data provided by [Visual Crossing Weather](https://www.visualcrossing.com/)**
+  — the optional keyed forecast and current-weather source, under its
+  [weather data license](https://www.visualcrossing.com/weather-service-terms/)
+  and [attribution guidance](https://www.visualcrossing.com/resources/documentation/weather-data/how-to-properly-cite-or-attribute-visual-crossing-weather-data/).
+- **Location data by [GeoNames](https://www.geonames.org/), via
+  [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api#attribution)**
+  — place names, coordinates and timezones used by location setup, including
+  when Visual Crossing supplies the weather. GeoNames data is
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- **Radar data by [RainViewer](https://www.rainviewer.com/)** — latest radar
+  overlays, recolored for the clock's green/yellow/red key. See the
+  [RainViewer API terms](https://www.rainviewer.com/api.html).
+- **Map services and data available from U.S. Geological Survey, National
+  Geospatial Program.** The Radar background uses USGSTopo from
+  [The National Map](https://www.usgs.gov/programs/national-geospatial-program/national-map).
+  These map services and data are
+  [public domain](https://www.usgs.gov/faqs/what-are-terms-uselicensing-map-services-and-data-national-map);
+  the clock adjusts their brightness for its display.
+
+The clock converts provider units, selects representative forecast pictures and
+creates its own weather captions. These changes do not imply endorsement by the
+data providers. External data, libraries and assets retain their own licenses;
+the project's license does not replace them.
+
+### Sound sources
+
+Sound Machine recordings and the White, Pink and Brown Noise calculations were
+adapted from [soundmachine.app](https://soundmachine.app/). The clock's recordings
+have prepared loop crossfades and playback gain adjustments; generated noises
+use the source equations with the clock's output gain.

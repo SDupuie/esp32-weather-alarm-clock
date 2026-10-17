@@ -38,13 +38,13 @@ are not packaged. Playback uses the managed `esp_audio_codec` dependency pinned
 to 2.5.0 for the development board's revision 1.3; newer releases require newer
 P4 silicon. Its package retains its own license and notices.
 
-The checked-in configuration selects ESP32-P4. Use `scripts/set-target.sh` only when intentionally resetting the target configuration. See [test instructions](tests/README.md) for native checks.
+The checked-in configuration selects ESP32-P4. From the repository root, use `targets/esp32-p4/scripts/set-target.sh` only when intentionally resetting the target configuration. See [test instructions](tests/README.md) for native checks.
 
 Artwork generators update existing outputs. When adding or retiring a generated source, update `main/CMakeLists.txt` under the [source-list rules](../../docs/architecture.md#existing-code-changes-that-matter); there is no separate generated build manifest.
 
 ## Flash with a board
 
-After activation and building:
+Run these commands only when flashing is authorized, after activation and building:
 
 ```bash
 targets/esp32-p4/scripts/flash.sh /dev/tty.usbmodemXXXX
@@ -53,11 +53,11 @@ targets/esp32-p4/scripts/monitor.sh /dev/tty.usbmodemXXXX
 
 Alternatively, after activating the environment above, run `targets/esp32-p4/scripts/setup.sh` to reset the target configuration, build, detect the connected board, and flash it. It optionally opens the monitor. It does not install a toolchain or update repository source.
 
-For a deliberate whole-device backup before flashing, `scripts/backup-device.sh <serial-port> [output-dir]` defaults to the ignored `backups/<timestamp>/` directory under this target. Keep backups local. This is a manual hardware tool, separate from application settings saves.
+For a deliberate whole-device backup before flashing, run `targets/esp32-p4/scripts/backup-device.sh <serial-port> [output-dir]` from the repository root. It defaults to the ignored `backups/<timestamp>/` directory under this target. Keep backups local. This is a manual hardware tool, separate from application settings saves.
 
-For a diagnostic serial capture, `scripts/capture-serial-log.sh <serial-port> <output-path> [duration-seconds]` captures for the requested duration (150 seconds by default). A successful capture means the log was collected; it does not mean the firmware passed a benchmark or hardware test.
+For a diagnostic serial capture, run `targets/esp32-p4/scripts/capture-serial-log.sh <serial-port> <output-path> [duration-seconds]` from the repository root. It captures for the requested duration (150 seconds by default). A successful capture means the log was collected; it does not mean the firmware passed a benchmark or hardware test.
 
-That wrapper requests a restart before capture. To preserve an already frozen state, use existing `tools/capture_serial.py` directly without `--reset-before-capture`; do not reset or flash before collecting the stopped-state evidence.
+That wrapper requests a restart before capture. To preserve an already frozen state, use `python targets/esp32-p4/tools/capture_serial.py --port <serial-port> --output <output-path> --duration 150` from the repository root, without `--reset-before-capture`; do not reset or flash before collecting the stopped-state evidence.
 
 ## Prepare browser-installation files
 
@@ -112,6 +112,8 @@ One `main` component holds the application, grouped by function. UI files use `m
   Time source/trust, system timezone application, RTC correction and in-memory warnings
 - `main/alarm.*`
   Live alarm decisions, snooze/dismissal/missed-notice recovery and the separate operating record
+- `main/audio.*`
+  Alarm sounds and previews, Sound Machine playback, recording decoding and speaker ownership
 - `main/alarm_schedule.*`
   Stateless recurring-occurrence and daylight-saving calculations using the applied system timezone
 - `main/ds3231.*`

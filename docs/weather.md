@@ -1,10 +1,10 @@
 # Weather condition mappings
 
-Revised October 13, 2026.
+Revised October 16, 2026.
 
 This document owns the detailed condition-to-icon mappings for Open-Meteo and Visual Crossing. The [architecture](architecture.md#weather) owns location, measurements, refreshes, [quota recovery](architecture.md#visual-crossing-quota-recovery), stale-data presentation and existing warning rules. [Development work](work.md) records implementation and verification.
 
-**Status: approved October 13, 2026; implementation under verification in the current weather sprint.** Every listed provider input has a defined treatment, including shared pictures, unused conditions and unknown inputs. Open-Meteo remains the default; Visual Crossing is the keyed alternative. The approved [daily forecast policy](#five-day-forecasts) reuses the current selection method for both providers with a 50% probability and 1.5 mm precipitation requirement for ordinary Rain/Showers, the [two-report Hail and Rain & Snow majority rules](#additional-daily-pictures), and current-only Ice, Wind and Funnel/Tornado pictures. Delivery and genuine verification limits belong in [work.md](work.md).
+**Status: approved October 13, 2026 and implemented.** Every listed provider input has a defined treatment, including shared pictures, unused conditions and unknown inputs. Open-Meteo remains the default; Visual Crossing is the keyed alternative. The approved [daily forecast policy](#five-day-forecasts) reuses the current selection method for both providers with a 50% probability and 1.5 mm precipitation requirement for ordinary Rain/Showers, the [two-report Hail and Rain & Snow majority rules](#additional-daily-pictures), and current-only Ice, Wind and Funnel/Tornado pictures. Delivery evidence and remaining verification limits, including rare live provider IDs and real quota exhaustion, belong in [work.md](work.md#sprint-visual-crossing-and-approved-weather-mappings--authorized-october-13-2026).
 
 The approved mappings convert both providers into our shared conditions, our own icons and our own current-condition wording. Provider-specific decoding is required; Visual Crossing does not need to be converted into invented Open-Meteo codes. The five-day screen shows icons and temperatures, without condition captions.
 

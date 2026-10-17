@@ -1,5 +1,9 @@
 # ESP32 Weather Alarm Clock development work
 
+Start with the [current work list](#current-work--reconciled-october-16-2026)
+for completed work, approved remaining tasks and deferred items. The dated
+records below preserve the evidence and limits at each earlier checkpoint.
+
 ## Sprint: Visual Crossing and approved weather mappings — authorized October 13, 2026
 
 Status: implemented and verified for this bounded sprint. Native checks, firmware
@@ -242,7 +246,7 @@ changed. No software tests, firmware build or board checks were run for this
 documentation decision.
 
 Radar is not implemented. Its remaining design and implementation work is
-listed under [current work](#current-work--reconciled-october-13-2026).
+listed under [current work](#current-work--reconciled-october-16-2026).
 
 Follow-up: created a proposed round-screen radar preview with the selected
 palette, a background map and enlarged town labels. The
@@ -1601,7 +1605,7 @@ update.
 Completed a full review of AGENTS, architecture, weather and this work record.
 Corrected the accepted Bell verification limit, separated complete weather
 mappings from selection recommendations, identified Wind's new forecast branch,
-retired completed sprint instructions and reconciled one [current work list](#current-work--reconciled-october-13-2026).
+retired completed sprint instructions and reconciled one [current work list](#current-work--reconciled-october-16-2026).
 The earlier weather icon block is absent from the local architecture; it remains
 in the last commit because the documentation changes are uncommitted.
 The [audit report](../.reviews/docs-yagni-mece-2026-10-13.md) records findings,
@@ -3012,7 +3016,7 @@ recorded above; this completed plan does not add future Bell testing work.
 ## Existing development and verification record
 
 These are dated checkpoint records. Retain their performed checks, observations
-and limitations as evidence; use the [current work list](#current-work--reconciled-october-13-2026)
+and limitations as evidence; use the [current work list](#current-work--reconciled-october-16-2026)
 for ongoing actions rather than treating an older remaining-work statement as a
 new instruction.
 
@@ -5061,12 +5065,119 @@ native build are removed. Captures are closed and normal firmware remains runnin
 See the [local sprint evidence](../.reviews/main/slide-to-dismiss-2026-10-16/summary.md)
 for logs, identities, measurements and verification limits.
 
+## Attached RTC unattended checks — authorized October 16, 2026
+
+The user connected the DS3231 and requested thorough unattended testing,
+including the relevant pending checks. This pass uses the committed normal
+firmware and existing debugger/input facilities; no firmware source or test
+framework is added. Networking and alarm/Night/audio choices used below are
+temporary RAM-only test inputs, not saved user preferences. Evidence and limits
+are recorded in the [local RTC report](../.reviews/main/rtc-attached-2026-10-16/summary.md).
+
+- [x] Fresh native checks: all 44 pass, including the production RTC driver,
+  time trust/correction, warnings, alarm recovery, Night Shift and UI checks.
+- [x] Actual attached-device startup: returned calendar/control/status bytes
+  show valid UTC, enabled battery oscillation and no observed lost-time flag.
+  Before networking starts, the time owner reports usable RTC time and zero
+  network completions. The selected local timezone is applied.
+- [x] Genuine network synchronization changes the source to Network and the
+  normal RTC correction returns success. A later actual RTC read advances
+  across minute boundaries through powered restarts. This is not a battery
+  test or a long-term accuracy measurement.
+- [x] Controlled offline operation: the real RTC supplies time with networking
+  suppressed in RAM. The Analog clock's actual LVGL notice is visible as
+  `Waiting for sync`; solar Night Shift selects Night from the saved location
+  and RTC time. Real synchronization after reconnecting clears that notice.
+- [x] RTC-only alarm eligibility: the scheduled test occurrence enters Ringing
+  with no network completion and reaches the audio worker's ringing path.
+  Injected normal LVGL input invokes Snooze, and a powered restart recovers
+  exactly the same stored deadline using RTC time. It later resumes the same
+  occurrence. Slide to Dismiss returns the alarm to Idle; the audio worker's
+  playback is Idle with its session closed. No precise onset/cancellation
+  latency or acoustic result is inferred from debugger observations.
+- [x] Genuine reconnect/correction while Rain is active: the time owner accepts
+  Network time and successful RTC correction while the audio worker reports an
+  open Sound Machine session. No RTC warning is observed.
+- [x] Bounded combined load: over ten minutes between debugger observations,
+  Rain remains active with an open session and no reported playback error;
+  the ordinary ten-minute forecast refresh succeeds and Radar is valid. UI
+  time advances 618 seconds and the touch-read timer advances 617,578 ms.
+  No RTC or touch-read failure is recorded. These observations do not prove
+  every audio chunk met its deadline or every second was physically drawn.
+- [x] Restoration: Stop leaves playback Idle with its session closed; all 32
+  user preferences and both derived readiness fields match the private baseline
+  after a fresh storage reload. No raw NVS restore is used. Normal firmware is
+  restarted, the debugger is shut down and disposable private data/build output
+  is removed. No firmware source, flash or maintained test code is changed.
+- [ ] Physical battery retention: requires actual removal of all main power
+  with the coin cell retained. A debugger reset leaves the RTC powered and
+  cannot close this check.
+- [ ] Genuine lost-time/connection faults, extended accuracy and battery life:
+  not observed on this healthy module. Native fault checks pass; this is not
+  evidence of a real stopped oscillator, interrupted wire or depleted cell.
+
+Debugger pauses are excluded from timing/continuity claims. The injected input
+uses the board's real LVGL input processing, but does not establish physical
+finger feel, panel pixels or audible continuity. Previously deferred long-ring
+and greater-than-30-minute outage checks remain deferred.
+
+## Documentation refresh — October 16, 2026
+
+The user requested a complete documentation update, including current features,
+removed paths and weather-source attribution. This is a documentation-only
+slice: no product decisions, firmware, generated assets, saved settings or board
+state change. The existing attached-RTC evidence and deferred icon-storage
+consideration are preserved.
+
+- Root README: current navigation, one-time/recurring alarm controls and recovery,
+  clock/RTC and weather notices, all Sound Machine choices and timers. Weather
+  credits now name Open-Meteo, Visual Crossing Weather, RainViewer, USGS and
+  GeoNames, with provider/license links and the USGS acknowledgment. Original
+  project credit remains; soundmachine.app is credited for the recordings and
+  noise equations. The README contains no current development task list.
+- AGENTS: current work points here rather than declaring an old sprint current;
+  source-path permission and behavior-change disclosure rules remain intact.
+- Architecture/weather reference: current UI helper, weather-picture and audio/
+  alarm ownership; existing tasks and tests; delivered weather mapping status.
+  The optional approved controls path stays optional and no new source is added.
+- Target/test/fixture guides: runnable helper/executable paths, existing provider
+  captures, current coverage and accurate distinctions between native checks,
+  debugger observations and physical verification. The changelog summarizes
+  application enhancements without creating a release or version.
+
+Provider credit requirements were rechecked against their official pages.
+README attribution does not settle the previously deferred placement of credits
+on the device's weather screens. Open-Meteo's data-license guidance also calls
+for credit near displayed data; include it with that existing placement decision
+rather than treating documentation credits as proof that the device is complete.
+No credit layout or firmware change is approved by this update.
+
+Validation: all 352 local Markdown links and heading targets resolve across the
+nine updated documents; code fences are balanced and `git diff --check` passes.
+Three old links to the previous current-work heading are repaired. Guide paths
+and test descriptions were compared with the maintained helpers, test declarations
+and source. The existing native inventory contains 44 checks; this pass does not
+claim another test execution. The browser installer page was inspected and its
+prepared-image distinction remains in the target guide; no images are rebuilt
+or published.
+
+Independent source/document review found one correction: normal alarm notices
+open Alarm Settings, while Missed Alarm dismisses its notice and a Snoozed notice
+opens the countdown. The README now states each action. Final review of the
+current work list finds no consequential contradiction or lost approved task.
+Only the nine existing Markdown documents change; the source-file approval tree
+is preserved, with existing omitted test paths documented and the unused controls
+path still optional. No new source, firmware build, hardware test, flash, commit
+or remote change is part of this documentation pass.
+
 ## Current work — reconciled October 16, 2026
 
 This is the current work list. Dated entries above retain the observations and
 limits at their own checkpoints; their old remaining-work statements do not
-reopen checks subsequently closed. Startup and inherited-screen cleanup remains
-the priority under [AGENTS.md](../AGENTS.md#current-checkout-and-retained-material).
+reopen checks subsequently closed. The architecture owns the
+[startup and inherited-screen cleanup scope](architecture.md#structure), and
+[AGENTS.md](../AGENTS.md#current-checkout-and-retained-material) requires bounded,
+tested work on its approved remaining items.
 The Sound Machine investigation above includes the October 14 firmware and
 unattended board comparisons; other checkpoints retain their stated limits.
 The approved [routine footer removal](#routine-clock-footer-removal--october-14-2026)
@@ -5112,61 +5223,35 @@ all saved preferences are restored, legitimate recovery records are retained,
 temporary diagnostics are removed and the clean firmware passes its startup
 and saved-data checks. Physical finger feel and acoustic results are not inferred
 from injected input or worker measurements.
+The [attached RTC checks](#attached-rtc-unattended-checks--authorized-october-16-2026)
+now establish actual powered RTC startup/correction, bounded offline clock/Solar
+operation, RTC-only scheduled ringing and Snooze restart recovery, normal Dismiss
+and the recorded combined workload. Saved preferences are restored. These close
+the corresponding previously untested attached-device cases; battery retention
+through real main-power removal and the stated physical/fault limits remain open.
+
+The current source checkpoint is `cd6541f` (Radar, one-time alarms and reviewed
+display updates), including the completed drawing-efficiency and alarm-control
+slices above. The subsequent attached-RTC pass changes only this work record.
+The documentation refresh updates the guides and current list without changing
+that firmware checkpoint.
 
 ### Approved work still unfinished
 
-- **Sound Machine:** mockup and playback decisions are approved. The
-  [implementation sprint](#prepared-sound-machine-sprint) was sent to
-  Development Orchestration, including efficient noise generation.
-  [Preference storage](#preference-storage-checkpoint--october-13-2026) is implemented
-  and the [full source checkpoint](#sound-machine-source-checkpoint--october-13-2026)
-  passes software integration and review. The October 14 board investigation
-  closes the measured volume-save scan, recording-repeat delay, TLS allocation
-  failures and weather/drawing scheduling stalls within the recorded workloads.
-  The final matched Rain run crosses repeats and an ordinary ten-minute weather
-  refresh: zero wholly silent buffers among 101,845 inspected, and no repeated
-  or skipped submitted clock seconds during playback. Retained changes use
-  existing memory-placement settings, same-file reopening, a fixed heartbeat,
-  one binary weather gate and explicit drawing-core-0/audio-core-1 placement.
-  Temporary playback timing probes are removed; UI stack monitoring is retained.
-  Normal firmware passes 44 native checks/build and is
-  loaded with written-hash and boot-identity verification, working display/touch
-  initialization and successful live weather. See the
-  [full accounting and verification limits](../.reviews/sound-machine-sprint-2026-10-13/board/timing-closure.md).
-  The subsequent approved [review follow-up](#review-follow-up-visual-diagnostics-and-browser-recordings--october-14-2026)
-  removes inherited visual logging, corrects the gate comment and closes F1
-  browser-image preparation with a verified four-image local bundle. That
-  source/bundle passes software checks and independent review. Its application
-  changes are included in the subsequent Brown Noise load; browser installation
-  remains untested and unpublished. The UI stack monitor stays in place.
-  The [Brown Noise investigation](#brown-noise-cutout-investigation--october-14-2026)
-  records the retired generator's measured behavior; the user may still have
-  heard one very brief cutout with that former generator. The approved
-  [noise source-equation restoration](#noise-source-equation-restoration--october-14-2026)
-  supersedes that generator correction, removes our clipping and preserves output
-  gain. Its source verification, 44 native checks, independent review and build
-  pass. The authorized app-only flash has verified written/boot identity and
-  normal display/touch initialization and weather. The user confirms all three
-  restored noises are continuous and clear in the prompted short listening check.
-  The approved [recorded-sound gain slice](#recorded-sound-playback-gain--october-14-2026)
-  now passes implementation review, 44 native checks, firmware build and complete
-  host-decoded peak checks. Retained MP3 files and generated-noise output gain
-  are unchanged. The subsequently authorized application-only flash verifies
-  written/boot identity and normal display/touch initialization and weather.
-  The user confirms all nine boosted recordings sound good with no distortion or
-  cutouts in the requested brief check, including the four maximum-volume checks.
-  Later listening identified Night/Campfire as soft and the generated noises as
-  too loud. The approved
-  output-only balance adjustment passes all 44 native checks, independent review
-  and firmware build. Its application-only comparison flash verifies written/boot
-  identity, display/touch initialization and weather. The user confirms better
-  balance for all five adjusted sounds and acceptable Campfire at 100%, closing
-  this balance listening checkpoint.
-  These software/buffer observations do not establish every acoustic or physical
-  rendering case. The remaining sound/timer/fade/navigation/priority
-  checks remain open. These bounded results do not close the whole feature.
-  The ADPCM comparison has not changed the approved MP3 format. Preserve the existing weather
-  implementation work. Requirements belong in the
+- **Sound Machine verification:** implementation, source-equation restoration,
+  recording/noise balance and the prompted short listening checks are complete.
+  The [October 14 accounting](../.reviews/sound-machine-sprint-2026-10-13/board/timing-closure.md)
+  and later [combined load](#combined-audio-drawing-and-weather-load--authorized-october-16-2026),
+  [drawing](#drawing-delays-and-efficiency-sweep--authorized-october-16-2026) and
+  [attached RTC checks](#attached-rtc-unattended-checks--authorized-october-16-2026)
+  cover their measured workloads; they do not prove uninterrupted audible output
+  under every condition. Remaining checks concern timer expiry/fade, the full
+  sound/navigation/priority combinations and unmeasured physical behavior. Keep
+  the completed gain/listening and repeat checks closed. MP3 remains the approved
+  format; no ADPCM replacement or image cache is approved. Temporary probes are
+  removed and the existing UI stack monitor remains. Browser installation is
+  untested/unpublished, and its prepared bundle must be rebuilt from the intended
+  source before distribution. Product rules remain in the
   [specification](architecture.md#sound-machine-playback).
 - **Radar:** the [full-screen 75-mile revision](#full-screen-radar-revision--approved-design-october-15-2026)
   and [horizontal heading/plain-language key follow-up](#horizontal-radar-heading-and-plain-language-key--october-15-2026)
@@ -5176,16 +5261,16 @@ from injected input or worker measurements.
   prior actual-map checks cover unchanged image preparation. Application-only
   flash and passive startup pass. The user confirms the latest appearance and
   swipe-back behavior. The full-screen decoder-allocation defect is fixed and
-  covered by native tests enforcing the firmware bound. Broader resource/
-  concurrency, recovery, audio/alarm operation and unobserved physical states
-  remain outside this basic board check. Detailed product rules remain in the
+  covered by native tests enforcing the firmware bound. Subsequent combined-load
+  and RTC runs include Radar alongside weather/audio and UI activity within
+  their recorded limits. They do not establish every resource/fault/recovery
+  combination or unobserved physical state. Detailed product rules remain in the
   [Radar specification](architecture.md#radar-source-and-palette).
-- **Immediate Alarm Settings On/Off:** development checks and firmware build pass
-  in the October 13 slice above. It is included in the weather sprint's firmware
-  loads, with its physical check still unreported. Its remaining checkpoint is the physical check
-  of the shortcut, enabled-only save, Cancel with other draft edits and ordinary
-  alarm operation. Keep the existing board firmware and evidence distinct from
-  this development-only change.
+- **Immediate Alarm Settings On/Off verification:** implemented, checked in
+  software and included in subsequent firmware loads. Its separate physical
+  checkpoint remains unreported: the shortcut, enabled-only save and Cancel
+  with other draft edits. Preserve the already recorded ordinary alarm/recovery
+  results; this is a verification gap, not unimplemented switch behavior.
 - **Backup-clock wiring guide:** document the supported DS3231 module's connection
   to the Waveshare board, shared I2C bus and coin-cell placement. Hardware selection
   and user-facing battery limits remain in the root README.
@@ -5201,19 +5286,24 @@ from injected input or worker measurements.
   crossings; validation/error/empty/pending and real connection-phase states;
   Wi-Fi scrolling beyond three networks; Brightness Done/summary, visible
   12-hour padding and both applied brightness levels; Weather Back/Cancel retaining
-  Device edits and independent restart; stale/offline Conditions format Cancel
-  and other captions; and alarm/editor restoration. Include the older Settings-entry
-  immediate Alarm save, whose physical check is still unreported. Preserve passed
+  Device edits and independent restart; and alarm/editor restoration. The
+  immediate switch is now in Alarm Settings; Settings entry instead contains
+  Sound Machine. Do not reopen the retired Settings-entry switch check. Preserve passed
   Display Back/Cancel/live Save, analog caption/tap, Conditions `3 PM` / `15:00`
   updates, new Weather checks and Messaging observations; do not repeat them just
-  to extend the list. Native checks do not establish exact panel pixels or touch.
+  to extend the list. Conditions is retained code/reference without a device
+  route, so its unobserved physical states are not tasks to test through current
+  navigation. Native checks do not establish exact panel pixels or touch.
 - **Night Shift:** the populated Solar page, draft preview/Cancel, zero-offset
   Save/restart and sunset activation were observed. Remaining checks concern
   sunrise, precise transition timing, nonzero saved offsets, configured fades
-  and offline operation. Day 100%/Night 25% was restored and subsequently confirmed;
+  and battery-backed cold startup. Bounded powered offline operation using real
+  RTC time now passes in the [attached RTC checks](#attached-rtc-unattended-checks--authorized-october-16-2026);
+  it does not establish physical battery retention, sunrise or fade timing.
+  Day 100%/Night 25% was restored and subsequently confirmed;
   there is no outstanding temporary-50% restoration task. Record and restore the
   user's then-current preferences if later testing changes them. Equal brightness
-  levels cannot establish a fade; trustworthy offline startup needs an attached RTC.
+  levels cannot establish a fade.
 - **Alarm/recovery and audio:** prompted previews, resumed ringing/Dismiss, Off
   canceling Snooze and short power-cut recovery passed. F1/F2 corrections were
   included in the October 12 load but lack a separate board retest. Remaining
@@ -5222,30 +5312,59 @@ from injected input or worker measurements.
   activity. Keep the 12-minute ring and greater-than-30-minute outage/missed-notice
   checks deferred as requested. The accepted Classic Bell listening result does
   not establish measured normal-path timing and does not reopen declined Bell tests.
+  The [attached RTC pass](#attached-rtc-unattended-checks--authorized-october-16-2026)
+  additionally closes bounded RTC-only recurring activation, saved Snooze deadline
+  recovery through a powered restart, resumed ringing and scripted Dismiss.
+  It does not close exact timing, acoustic continuity or physical power-cut cases.
 - **Board reliability:** the controlled RTC-trigger correction and later overnight
-  operation passed their bounded checks. External RTC operation, extended stability,
-  network recovery, physical behavior during interrupted settings saves and other
-  untested faults remain unverified. Blue flashes remain a separate observation.
+  operation passed their bounded checks. The attached RTC's powered startup,
+  genuine network correction, bounded offline operation and combined workload
+  now pass as recorded in the [RTC test entry](#attached-rtc-unattended-checks--authorized-october-16-2026).
+  Battery-backed main-power removal, genuine RTC faults, extended stability,
+  broader network recovery, physical behavior during interrupted settings saves
+  and other untested faults remain unverified. Earlier display flashes and
+  scheduling faults have the bounded corrections and restoration evidence above;
+  those results do not establish all future faults or extended stability.
   Successful short power-cut checks are recorded under Alarm above; they do not
   establish every power-loss scenario. Retain original/comparison material only
   while it serves an identified current evaluation or recovery need.
 
 ### Deferred or unapproved work
-- Visual Crossing and mapping implementation is now authorized and underway in
-  the [current weather sprint](#sprint-visual-crossing-and-approved-weather-mappings--authorized-october-13-2026).
-  Provider-credit placement and real availability of rare provider IDs remain
-  separate unresolved/verification items; implementation does not settle them.
+
+- **Weather icon storage — deferred consideration, October 16, 2026.**
+  Consider generating all 18 weather icons from their original artwork at
+  **200×200 with 16-bit color plus 8-bit transparency**, then scaling them for
+  each display. The calculated saving against the existing linked images is
+  2,030,000 bytes (about 1.94 MiB); this is not a generated-build measurement.
+  Compare appearance and drawing cost on Analog, including the separate
+  400×400 review mockup, and the Forecast screen's existing 364×364 picture.
+  An exact 2× scale does not establish a speed or image-quality improvement.
+  Trimming transparent outer padding with generated X/Y offsets, and image
+  compression, remain alternatives to evaluate if needed. The user requested
+  a reminder for later, not implementation. Preserve approved display sizes,
+  positions and artwork; no asset, format, cropping, cache, firmware or official
+  mockup change is authorized by this entry.
+- Visual Crossing and mapping implementation is complete for its
+  [bounded sprint](#sprint-visual-crossing-and-approved-weather-mappings--authorized-october-13-2026).
+  Device credit placement remains deferred. The README now credits the actual
+  providers, including Open-Meteo/GeoNames, Visual Crossing, RainViewer and USGS;
+  this does not settle credit beside displayed weather. Rechecked official
+  [Open-Meteo attribution guidance](https://github.com/open-meteo/open-meteo#data-license)
+  and [Visual Crossing attribution guidance](https://www.visualcrossing.com/resources/documentation/weather-data/how-to-properly-cite-or-attribute-visual-crossing-weather-data/)
+  call for credit near displayed data. Keep device placement unresolved without
+  inventing a private-use exception or approving a new layout. Rare live provider
+  IDs and actual daily-quota/reset responses remain verification limits.
 - The accepted Shared Device ID query issue involving `&` remains deferred at
   the user's request; no allowed-character restriction or fix is approved.
 - Raising the brightness minimum from 20% to 30% remains an unapproved proposal.
   The current range is owned by the architecture; do not infer a changed minimum
   from the earlier recovery observations.
 
-The current implementation checkpoint is the authorized weather sprint above.
-The reviewed immediate Alarm Settings switch remains preserved, with its board
-status recorded in its own section. The broader combined board pass remains
-deferred as recorded; the weather sprint does not reopen it. Completed cleanup
-tasks stay closed.
+The current checkpoint and scoped completed tests are recorded above. The
+reviewed immediate Alarm Settings switch remains preserved, with its physical
+status recorded separately. Remaining board checks and the user's explicitly
+deferred long-ring/outage tests stay distinct from completed unattended checks.
+Completed cleanup tasks stay closed.
 
 PNG-decoder replacement was declined; retain the existing implementation under the [asset-tool decision](architecture.md#existing-code-changes-that-matter).
 
