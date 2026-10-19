@@ -11,11 +11,13 @@
 - Added Visual Crossing alongside Open-Meteo, expanded weather-picture mappings,
   dated five-day forecasts and concise waiting/stale-weather notices.
 - Added full-screen U.S. Radar from RainViewer and USGS, covering 75 miles
-  with a Light/Moderate/Heavy key; it replaces Conditions in device navigation.
+  with smoothed precipitation edges and a Light/Moderate/Heavy key; it replaces
+  Conditions in device navigation.
 - Reworked touchscreen settings to the approved design, including visible
   keyboard inputs, live Display Save and an immediate Alarm On/Off switch.
 - Simplified application ownership and removed superseded screen experiments
-  and routine clock-footer messages. Improved audio buffering, memory placement,
+  and routine clock-footer messages. Retired the unused Conditions screen and
+  its dedicated artwork, mockup and calculations, preserving storm detection. Improved audio buffering, memory placement,
   weather scheduling and drawing work while preserving approved behavior.
 
 See the [user guide](README.md) for current features and source credits. The

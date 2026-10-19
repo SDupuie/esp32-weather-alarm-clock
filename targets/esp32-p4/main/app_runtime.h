@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include <time.h>
 
-#include "storm_conditions.h"
 #include "clock_time.h"
 #include "alarm.h"
 #include "audio.h"
@@ -51,14 +50,7 @@ typedef struct {
   char summary[APP_WEATHER_SUMMARY_LEN];
   char icon_name[APP_WEATHER_ICON_NAME_LEN];
   app_forecast_day_t forecast[APP_FORECAST_DAYS];
-  /* Conditions view + storm alerts (storm_conditions.c); false when the
-   * current hour couldn't be found in the hourly data. */
-  bool has_conditions;
-  storm_conditions_t conditions;
-  /* Captions in conditions use this format; alternate captions use the other. */
-  bool conditions_time_24h;
-  char conditions_alternate_headline[STORM_TEXT_LEN];
-  char conditions_alternate_detail[STORM_TEXT_LEN];
+  bool storm_alert;
 } app_weather_snapshot_t;
 
 typedef struct {

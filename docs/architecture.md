@@ -1,10 +1,10 @@
 # Weather alarm clock architecture and product specification
 
-Revised October 16, 2026. This is the main authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. Detailed weather condition mappings and their decision status are maintained in [weather.md](weather.md). Neither document is an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
+Revised October 18, 2026. This is the main authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. Detailed weather condition mappings and their decision status are maintained in [weather.md](weather.md). Neither document is an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
 
 Build the weather alarm clock for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C using the existing ESP-IDF application. Only ESP32-P4 is supported. There is no requirement to maintain Raspberry Pi behavior, another firmware implementation, or backward compatibility with their settings or interfaces.
 
-Keep the existing weather, storm, location selection, Wi-Fi and House Messages capabilities, including the browser messaging page. No multiple-alarm feature, ambient-light sensor, battery-voltage monitor, outage log or separate diagnostics screen is introduced.
+Keep the existing weather, location selection, Wi-Fi and House Messages capabilities, including the browser messaging page. The approved [NWS watches and warnings](#nws-watches-and-warnings) replace the former provider-threshold storm feature; the official mockup integration is complete through October 18, 2026, and firmware implementation remains pending. No multiple-alarm feature, ambient-light sensor, battery-voltage monitor, outage log or separate diagnostics screen is introduced.
 
 [AGENTS.md](../AGENTS.md) defines working rules. [README.md](../README.md) provides the user-facing project overview, features, hardware, setup and user guide. Development status and verification records belong in [docs/work.md](work.md). Detailed build and test instructions remain in [targets/esp32-p4/README.md](../targets/esp32-p4/README.md) and [targets/esp32-p4/tests/README.md](../targets/esp32-p4/tests/README.md).
 
@@ -18,6 +18,7 @@ Keep the existing weather, storm, location selection, Wi-Fi and House Messages c
   - [Night Shift](#night-shift)
   - [Time and RTC](#time-and-rtc)
   - [Weather](#weather)
+    - [NWS watches and warnings](#nws-watches-and-warnings)
     - [Location resolution](#location-resolution)
     - [Weather icons](#weather-icons)
     - [Radar source and palette](#radar-source-and-palette)
@@ -33,7 +34,7 @@ Use ordinary saves with ESP-IDF storage.
 
 Cancel discards unsaved edits. Nested Done returns to the parent draft without saving. Sound Machine is the immediate-control exception described in its [playback rules](#sound-machine-playback); its Back and Done controls navigate without undoing applied choices. Display Settings has independent Cancel/Save controls. Save applies Home Screen, Time Format, Leading Zero and Day/Night brightness without restarting, then returns to Settings. Display Cancel and Back discard its edits and return to Settings. Apply the chosen Home Screen when returning to the clock, while preserving later manual clock-face navigation.
 
-Alarm Save applies without restart. The On/Off switch in Alarm Settings applies and saves immediately, writing only the enabled value. The Alarm Settings switch does not apply pending time, repeat, sound, volume or snooze edits; those still require Save. A successful switch change remains applied after Cancel or Back, while those other edits are discarded. Failed switch saves retain the applied On/Off state and pending edits for retry. The approved one-time alarm completion below also saves Off through the settings owner. Device Setup and Wi-Fi share pending edits for Save & Restart. Weather retains its independent save and restart, including location, coordinates, timezone and units. Its Back and Cancel return to Device Setup without discarding pending device edits. A Weather Save must not apply those unsubmitted device edits.
+Alarm Save applies without restart. The On/Off switch in Alarm Settings applies and saves immediately, writing only the enabled value. The Alarm Settings switch does not apply pending time, repeat, sound, volume or snooze edits; those still require Save. A successful switch change remains applied after Cancel or Back, while those other edits are discarded. Failed switch saves retain the applied On/Off state and pending edits for retry. The approved one-time alarm completion below also saves Off through the settings owner. Device Setup and Wi-Fi share pending edits for Save & Restart. Weather retains its independent save and restart, including location, coordinates, timezone, units and the approved alert sound settings. Its Back and Cancel return to Device Setup without discarding pending device edits. A Weather Save must not apply those unsubmitted device edits.
 
 Apply only changes made in that editor, preserving unrelated applied choices. Display saves cover only its five existing fields; Device saves cover the remaining Device Setup choices. Keep the existing settings owner, stored keys and ordinary save facilities. Validation errors remain in the editor; save failure retains the draft and does not automatically restart.
 
@@ -329,6 +330,16 @@ Ringing preempts menus, notices and previews; preemption alone does not acknowle
 
 The single approved visual entry point is [mockups/alarm-design.html](../mockups/alarm-design.html). It contains the complete combined device preview and the House Messages browser preview, selected using the controls above the previews. Images, fonts and both previews are embedded in that file. It owns appearance and controls; this specification owns behavior, defaults and source placement. Preview selectors and sample values are not production features. The digital ringing layout is the chosen ringing presentation; carousel alternatives are not additional screens.
 
+**NWS visual integration, completed October 18, 2026:** the
+[approved alert decisions and listed clock changes](#nws-watches-and-warnings)
+are integrated into that official reference, including the approved October 18
+follow-ups. The separate experimental mockups remain comparison material; the
+official file owns the integrated appearance. This does not authorize unlisted
+layout changes or establish firmware implementation.
+[work.md](work.md#official-nws-alert-mockup-integration--october-17-2026) and its
+[October 18 follow-up](work.md#official-nws-mockup-follow-up--october-18-2026)
+record the checks and remaining work.
+
 On October 16, 2026, the user approved replacing the chosen ringing layout's
 Dismiss button with **SLIDE TO DISMISS**, keeping **SNOOZE** as a tap button.
 Start at the left handle and drag to the right end to dismiss. A track tap does
@@ -345,23 +356,69 @@ replaces old input or confirmation; stale releases, completions and expiry must
 not act on it. Implementation and verification are recorded in
 [work.md](work.md#slide-to-dismiss--authorized-october-16-2026).
 
-Settings pages use the reviewed lower Back/title placement. Messaging's distinct
+**Shared menu appearance, approved October 18, 2026:** use the official
+reference's common heading, subtitle, ordinary rows, switches and footer alignment
+across menus where they fit. On its 800×800 design surface, Back is an 88×88
+button at (145,104), with a 32px icon; the title starts at (245,128), is 320px
+wide and uses 36px text with 1px letter spacing. Short subtitles start at
+(150,174), are 500px wide and use muted 28px text. Ordinary rows are 520×96
+at x140, beginning at y212 with a 108px step. Standard switches use a 100×56
+track and 44px knob; Provider and Alerts choice-row secondary text uses 24px.
+Footer buttons share vertical center y690, retaining each control's existing
+width, height, label, style, action and disabled state. Ordinary single buttons
+are usually 80px high; paired buttons and Custom Days Done retain 88px, and
+Snooze Done retains 96px. These are visual alignment rules, not changes to
+navigation, defaults, saving, playback or retry behavior.
+
+Preserve the approved exceptions in the reference: radio/checkbox scrolling
+lists retain their minimum 92px rows and 10px gaps; Custom Days retains its grid;
+forms and Fixed Schedule retain their specialized controls; the Provider API-key
+form summary retains 22px text; Wi-Fi connection-status pages retain their
+network-name subtitle location and Home/restarting controls; and the Alerts
+failure footer retains its approved position. Repeat places its summary below
+the title at the standard subtitle position and uses an 80px Done button at
+y650. Sleep Timer keeps all five choices in 520×76 rows at x140, starting at
+y212 with an 86px step; its last row ends at y632, above Done at y650. Alarm
+Sound raises Preview from y552 to y536 and places Done at y650. These approved
+layout changes preserve choices, navigation and audio behavior.
+
+All time editors—Alarm Time and Fixed Schedule Night Starts/Night Ends—use the
+approved shorter arrow buttons with the original large 104px time digits.
+Arrow buttons are 130×80 instead of 130×96. Retain the heading, Hour/Minute
+labels and upper arrow-row positions; place digits at y339, the colon at y341,
+lower arrows at y466, AM/PM at y566 and the 80px Done button at y650. Keep all
+other appearance and behavior unchanged, including five-minute stepping and
+12/24-hour handling. The proposed whole-block raise was rejected because Hour
+overlapped Back; the smaller-font alternative was not selected.
+The official reference owns the complete appearance and exact
+exceptions, while [work.md](work.md#shared-menu-appearance--october-18-2026)
+records integration and firmware parity status.
+
+Messaging's distinct
 Device ID guidance is vertically centered in the fourth-row space, with its
 three controls kept in their standard positions; normal messages replace that
 guidance in the same space. Guidance text sizes follow the approved visual reference.
 Device Setup's Weather entry opens the Weather editor with the common single-line
-heading placement. Its four rows are Weather Location, Provider, Units and API
-Key. Tapping the whole Weather Location row opens its usual input/keyboard;
-location, units, lookup and independent save/restart behavior remain.
+heading placement. The official layout has four rows in this order:
+**Weather Location, Provider, Alerts, Units**. Alerts replaces the separate API
+Key row and sits directly below Provider; API-key entry moves inside the
+Provider editor. This rearrangement is present in the official mockup; firmware
+integration remains pending. Tapping the whole Weather Location row opens its usual
+input/keyboard; location, units, lookup and independent save/restart behavior
+remain.
 
-Open-Meteo is the default provider and its API Key row reads Not required.
+Open-Meteo is the default provider and requires no API key. The Provider editor
+offers Open-Meteo and Visual Crossing, with the masked API-key editor under
+Visual Crossing. Selecting Visual Crossing without a retained key opens key
+entry; a retained key can be reviewed or replaced there without a separate
+Weather-level API Key button.
 Visual Crossing requires a nonempty API key. Weather Save checks a newly
 selected Visual Crossing provider or changed key with a forecast request before
 saving; failed checks retain the editable draft without a restart. Saves using
 the unchanged selected provider/key do not make another validation request.
 Provider and key belong to the ordinary Weather save, alongside location and
 units. Switching to Open-Meteo retains the saved key for later reuse; only the
-API Key input's Clear control explicitly clears it. The key is always masked,
+Provider editor's API Key input's Clear control explicitly clears it. The key is always masked,
 and Configured does not reveal it. Cancel discards unsaved provider/key changes;
 alarm preemption preserves the existing Weather draft and keyboard.
 
@@ -437,19 +494,17 @@ Retain the inherited `Clock paused` warning with its existing 135-second thresho
 - Refresh interval: every 10 minutes
 - Weather downloads require Wi-Fi and a saved location, independently of usable clock time or network-time synchronization. Failed weather downloads retry after 20 seconds, except for the confirmed daily-quota pause below. Network-time startup failures also retry after 20 seconds without preventing weather downloads; successful startup leaves synchronization and its transport retries running in the background.
 - Until live weather data arrives, use the approved waiting presentation, with `--` for any visible unavailable measurements; do not present fallback pictures or preview sample values as actual weather on the clock or Forecast screens.
-- On Analog and Digital, keep `Waiting for weather…` in the existing weather area during the initial download and failed retries before the first successful download. Hide weather values and artwork, and show no additional download-failure footer. Preserve the existing Night hiding of this weather presentation.
+- On Analog and Digital, keep `Waiting for weather…` in the weather area during the initial download and failed retries before the first successful download, using the approved [clock notice placement and alert suppression](#clock-display-changes). Hide weather values and artwork, and show no additional download-failure footer. Preserve the existing Night hiding of this weather presentation.
 - On Forecast, show `Waiting for weather…` in the existing central waiting area before the first successful download, including failed retries. Show `--` for all five day labels and temperatures, hide the five weather icons, and retain the background and forecast frames. Keep this waiting presentation visible in both Day and Night using the existing colors. Show no additional failure notice at the top or bottom. Replace the waiting presentation with provider-dated forecasts when data arrives.
-- On Conditions, show `Waiting for weather…` along the existing top curve before the first successful download, including failed retries. Preserve the compass, column icons and unavailable readings, and remove the separate bottom failure notice. Keep the existing heading size, colors and Day/Night visibility; automatic retries are unchanged.
-- Keep routine Wi-Fi connection, setup/location reminders and weather-download progress off the normal clock, Forecast and Conditions screens. Setup pages retain their connection and validation feedback, and operational logs remain available.
+- Keep routine Wi-Fi connection, setup/location reminders and weather-download progress off the normal clock and Forecast screens. Setup pages retain their connection and validation feedback, and operational logs remain available.
 - If a download fails after earlier weather was received:
   - continue serving the last known good payload when available
-  - on Analog, Digital and Conditions, show `Weather updated <age> ago` using the actual elapsed age since the last successful download when reliable; otherwise show `Weather data stale`
+  - on Analog and Digital, show `Weather updated <age> ago` using the actual elapsed age since the last successful download when reliable; otherwise show `Weather data stale`
   - age is measured from a download timestamp captured with usable network time; show `just now` below one minute, whole minutes below one hour, whole hours below one day, then whole days. Use the stale fallback if that timestamp is missing, current network time is unavailable, or the clock is earlier than the timestamp
-  - place that clock-face notice between temperature and High/Low on Analog, and below current weather and above the forecast strip on Digital; remove the additional failure footer
+  - place that clock-face notice above the bottom shortcuts on Analog, and below current weather and above the forecast strip on Digital; suppress it while alert text is displayed as specified under [clock display changes](#clock-display-changes); remove the additional failure footer
   - use no ending period on these short weather notices, and preserve their existing Night hiding
   - retain the failure/stale notice during retries until a successful download clears it; Wi-Fi loss still marks retained weather stale
 - On Forecast, a failed refresh with retained weather shows `Weather data stale` directly above the primary forecast's day heading (`Tomorrow` when applicable). Preserve the notice's existing font, colors and Night hiding, the rest of the forecast layout and automatic retries. This notice does not calculate elapsed age.
-- On Conditions, keep the retained-weather age/stale notice below the three condition columns, preserving its existing position, font and colors. The separate clock/backup-clock warnings retain their wording, appearance and visibility rules; storm warnings are unchanged.
 - Current condition rendering includes:
   - current temperature
   - high/low temperatures
@@ -516,49 +571,469 @@ retry interval. See the [provider's error guidance](https://www.visualcrossing.c
   - low
 - Show `Tomorrow` for the first entry only when usable local time confirms its date is the next calendar date. Otherwise show that entry's weekday. A missing or invalid provider date shows `--` for the label without rejecting otherwise valid weather values.
 
-#### Conditions Contract
+#### Storm detection
 
-- Inputs: provider current wind speed/direction, hourly pressure, wind/gusts,
-  precipitation amount/probability, snowfall, condition facts and temperature,
-  plus daily highs. Normalize both providers to km/h, hPa, mm and cm snowfall;
-  temperatures retain the selected unit and imperial display uses mph/inHg/in.
-  Missing measurements remain unavailable instead of becoming zero or supporting
-  a dry/calm claim. Hourly local labels come from provider dates/times; their
-  absolute timestamps identify the current interval and distinguish repeated hours.
-- Pressure trend is the 3h change (falling/rising beyond 1.5 hPa, otherwise
-  steady -- wide enough to ignore the ~1 hPa twice-daily atmospheric tide); before 03:00 local, the next 3h forecast change is used instead
-- Alerts consider now through the next 3h:
-  - `thunder`: reported thunder according to the [weather classification](weather.md#thunder-classification)
-  - `gusts`: gusts >= 40 mph / 64 km/h, else `wind`: sustained >= 25 mph / 40 km/h
-  - `precip`: >= 7.6 mm in an hour (`Heavy snow` if snowfall, else `Heavy rain`)
-- Falling pressure is not a storm-alert trigger. The user removed it on
-  October 15, 2026 because it was too sensitive. Pressure changes alone must
-  not activate the clock's storm indicator or storm-first navigation. Keep
-  pressure measurements/trend and any non-alert explanatory use; the thunder,
-  wind/gust and heavy-precipitation thresholds above are unchanged.
-- `summary.headline` / `summary.detail`: the first alert as a sentence with
-  its timing (`now` or `by <hour>`), and the second alert, when present, as the
-  detail. Pressure retains its separate informational wording below.
-- Things already happening say when they end, things on the way say when
-  they start: `Thunderstorms until 8 PM`, `Gusts up to 58 mph until 9 PM`,
-  `Heavy rain until 5 PM`, `Rain ending by 4 PM` vs `Thunderstorms likely by
-  4 PM`. Quiet-day priority: raining now (ending or ongoing), thunder later,
-  a front (`Turning much colder by 5 PM`: a drop of 15F / 8C within any 3h
-  of the outlook, so evening cooling doesn't count), gusts over the alert
-  threshold later, rain likely, chance of rain, a big day-to-day swing
-  (`Much colder tomorrow`: tomorrow's high 15F / 8C off today's), falling
-  pressure (`Dry for now` / `Falling pressure can mean rain later`), winds
-  easing, then `Breezy and dry` / `Calm and dry`
-- `summary.changeLevel` is `changing`, `may-change` or `steady` (concrete forecast change, early hints, or no change); `summary.changing` is true only for `changing`
-- Times follow `timeFormat` (`6 PM` or `18:00`). After successful Display Save,
-  retained Conditions headline/detail use the applied format by the next ordinary
-  UI update, without another weather download or restart. Unsaved format edits do
-  not change those captions. Weather data, wording and warning decisions remain
-  unchanged.
+The approved [NWS replacement](#nws-watches-and-warnings) supersedes the earlier
+requirement to retain provider-threshold storm detection, the right-edge storm
+glow and storm-first weather navigation. Those paths still exist in the current
+firmware pending replacement; their earlier preservation during Conditions
+removal is not a requirement to keep them alongside NWS alerts. Retire their
+exclusive calculations, indicator and tests when the replacement is integrated
+and verified. Current-weather classification, forecasts and daily-picture
+selection retain their existing owners and [weather mapping rules](weather.md).
 
-These warning limits are fixed, not editable settings. Imperial wind limits use
-the exact conversion of 1 mph to 1.609344 km/h; metric limits use the listed
-km/h values. Preserve these unit-specific cutoffs in the conditions calculation.
+#### NWS watches and warnings
+
+**Approved decisions through October 18, 2026; official mockup integration
+complete through October 18, firmware implementation pending.** This section
+records the final decisions from the alert design discussion. It supersedes
+earlier experimental alternatives and the old
+ad hoc storm feature, without changing unrelated approved screens or services.
+Implementation status and remaining work belong in the
+[work record](work.md#official-nws-mockup-follow-up--october-18-2026).
+
+The local comparison references used for the integration are the
+[experimental clocks](</Users/Scott/.codex/visualizations/2026/10/13/01a136f0-5cd8-7e40-a930-f8a93eb1638b/clock-status-notices.html>),
+[Alerts settings](</Users/Scott/.codex/visualizations/2026/10/13/01a136f0-5cd8-7e40-a930-f8a93eb1638b/alerts-settings.html>)
+and [Provider editor](</Users/Scott/.codex/visualizations/2026/10/13/01a136f0-5cd8-7e40-a930-f8a93eb1638b/provider-editor.html>).
+These separate chat mockups are review material, not new production entry
+points. The official file now demonstrates the integrated layout, shared
+dismissal across faces/reloads, new/escalated-event examples and the published
+priority ranks for all 55 reviewed event types. Its example revision labels
+demonstrate behavior, not a production NWS update parser. The older experimental
+clock still has per-face dismissal and a partial priority table; do not restore
+those shortcuts from it. Older galleries and abandoned variants do not authorize
+extra changes. Sample dates, times, places, alert counts, weather, selected
+sounds and preview states are illustrative, not product defaults.
+
+##### Alert source, catalog and priority
+
+- Obtain official watches and warnings from the National Weather Service,
+  independently of the selected Open-Meteo or Visual Crossing forecast provider.
+  Reuse the clock's saved weather location and coordinates. Add no separate
+  alert-location input or NWS API-key control.
+- **Approved October 18, 2026:** when the clock's saved weather location
+  changes, clear the old location's alerts, counts and dismissals, including
+  saved copies so they cannot return after a restart. Check the new location
+  immediately once Wi-Fi and its saved coordinates are available. Show the
+  question-mark triangle until that location's check succeeds. Keep the Watch
+  Sounds, Warning Sounds and Night Alert Sounds settings.
+- **Approved October 18, 2026:** check NWS once per minute during both Day and
+  Night Shift. This is the regular alert-check interval, independently of
+  forecast refreshes. After a failed check, continue once per minute without
+  rapid retries or progressively longer delays. Honor an explicit NWS request
+  for a longer pause. The question mark remains until a check succeeds.
+- **Approved October 18, 2026:** at startup, show the question-mark triangle
+  until the first successful NWS check. Start that check as soon as Wi-Fi and
+  the saved location coordinates are available, without waiting for a full
+  one-minute interval. After success, restore the normal triangle even if no
+  alerts are active, then continue the regular once-per-minute checks. Add no
+  startup setting.
+- **Approved October 18, 2026:** for a confirmed unsupported location, retain
+  the neutral question-mark triangle and show **NWS alerts unavailable** /
+  **for this location** in the Alerts list footer. Keep forecasts and sound
+  preferences operating normally. Pause NWS checks until the saved location
+  changes; this is the exception to the startup and one-minute check rules.
+  Use this state only when the location is confirmed unsupported. Temporary
+  failures retain **Unable to update alerts** and once-per-minute retries.
+- **Approved October 18, 2026:** when NWS alert updates cannot be obtained, the
+  clock's alert triangle must visibly indicate that condition. A notice only
+  inside the Alerts list is insufficient. Replace the exclamation mark inside
+  the triangle with a **question mark**, keeping the normal muted icon color
+  for Day and Night Shift. Use no special status color for now; this supersedes
+  the earlier request for an additional color. Warning/watch count badges keep
+  their red/yellow colors. Show the question mark after the **first failed
+  check** and restore the normal exclamation-mark triangle after the **next
+  successful check**. Play **no error sound** for a failed check.
+- **Approved October 18, 2026:** when a check fails, keep the previously received
+  alerts and their counts, respecting prior dismissals. A failed check alone
+  must not clear alerts or reopen dismissed headlines. Apply the approved
+  end-time rule below during failed checks as well.
+- **Approved October 18, 2026:** keep the last received alerts across restarts.
+  Restore them using the approved end-time rule and prior dismissals; do not
+  restore expired events or reopen headlines covered by dismissal. Restored
+  active events remain available in the list and counts. Restoring saved data
+  does not count as a successful NWS check: retain the startup question mark
+  until a fresh check succeeds, as specified above.
+- **Approved October 18, 2026:** if saving alerts or their dismissals fails,
+  keep live alerts and eligible sounds working normally and honor dismissals
+  in memory while the clock remains running. Retry the failed save during the
+  next scheduled alert check. Show the silent
+  [save-failure footer](#active-alert-list-and-details); play no error sound.
+  A restart can lose the latest alerts or dismissals if they were not saved
+  successfully.
+- **Approved October 18, 2026:** if saved alert data cannot be read or is
+  unusable, continue without that alert record and download fresh NWS alerts
+  under the existing startup/check rules. Apply the normal selected sound
+  settings to the fresh alerts, including the first successful check; add no
+  initial silent batch, additional setting or separate recovery system. With
+  the saved history unavailable, a previously sounded or dismissed alert can
+  be announced again. The ordinary no-replay rule still applies when saved
+  alerts are restored successfully. This fallback concerns the alert record;
+  it does not change existing handling of a general storage initialization or
+  user-settings startup failure.
+- **Approved October 18, 2026:** use the NWS event end time, **`ends`**, when
+  available; otherwise use the message expiration time, **`expires`**. The
+  selected time is the cutoff for including that alert in the clock headline,
+  active-alert list and counts, including while checks are failing. Do not
+  choose the earlier timestamp merely because both are supplied. An alert
+  reaching its cutoff does not clear the failed-check question mark; only the
+  next successful check does that.
+- Keep visual alerts enabled; sound can be disabled independently. Add no master
+  weather-alert On/Off setting. This feature covers watches and weather warnings;
+  it does not silently add advisories or non-weather emergency warning types.
+- Use the NWS event names in the scrollable sound-selection catalogs. The reviewed
+  [NWS event-type list](https://api.weather.gov/alerts/types) snapshot of October
+  14, 2026 contains 23 watches and 32 weather warnings, after excluding the ten
+  non-weather warning types identified by the
+  [NWS event-code reference](https://www.weather.gov/dsb/eventcodes). The reviewed
+  scope includes marine, avalanche, tsunami and ashfall events. The two catalogs
+  differ; do not reuse the warning list as the watch list.
+- Follow the published [NWS Hazards Map priority](https://www.weather.gov/help-map)
+  across both watches and warnings. Do not impose an unconditional
+  warnings-before-watches rule. Apply that order to headline candidates and the
+  full active-alert list. For example, the reviewed Tornado Watch / Freeze Warning
+  pair puts the watch first. The prototype's few sample priorities are not a full
+  firmware priority mapping.
+
+The reviewed watch names are: Avalanche Watch; Coastal Flood Watch; Extreme Cold
+Watch; Extreme Heat Watch; Fire Weather Watch; Flash Flood Watch; Flood Watch;
+Freeze Watch; Gale Watch; Hazardous Seas Watch; Heavy Freezing Spray Watch;
+High Wind Watch; Hurricane Force Wind Watch; Hurricane Watch; Lakeshore Flood
+Watch; Severe Thunderstorm Watch; Storm Surge Watch; Storm Watch; Tornado Watch;
+Tropical Storm Watch; Tsunami Watch; Typhoon Watch; Winter Storm Watch.
+
+The reviewed warning names are: Ashfall Warning; Blizzard Warning; Blowing Dust
+Warning; Coastal Flood Warning; Dust Storm Warning; Extreme Cold Warning;
+Extreme Heat Warning; Extreme Wind Warning; Flash Flood Warning; Flood Warning;
+Freeze Warning; Gale Warning; Hazardous Seas Warning; Heavy Freezing Spray
+Warning; High Surf Warning; High Wind Warning; Hurricane Force Wind Warning;
+Hurricane Warning; Ice Storm Warning; Lake Effect Snow Warning; Lakeshore Flood
+Warning; Red Flag Warning; Severe Thunderstorm Warning; Snow Squall Warning;
+Special Marine Warning; Storm Surge Warning; Storm Warning; Tornado Warning;
+Tropical Storm Warning; Tsunami Warning; Typhoon Warning; Winter Storm Warning.
+
+##### Alert sound settings
+
+Use the **Alerts** entry directly below Provider in Weather, as specified in the
+[Weather menu layout](#ui-and-visual-reference). Its summary describes enabled
+sound categories: **Watches**, **Warnings**, **Watches + Warnings**, or **Silent**.
+Silent means both sound families are Off; it does not disable visual alerts or
+mean that no watches or warnings are active.
+
+The Alerts screen has the following settings, plus the note **Uses alarm volume**.
+Alerts, Watch Sounds, Warning Sounds and Update Sounds use the standard settings
+title placement and short-subtitle treatment for that note, as shown in the
+official visual reference.
+The approved October 18 update-sound addition is included in the official
+mockup; firmware integration remains pending. The requested order is:
+
+- **Watch Sounds:** a scrollable multi-select list with **Off**, **All watches**
+  and the named NWS watch types. Off and All watches are exclusive choices;
+  individual watch types can be selected together.
+- **Warning Sounds:** the same behavior with **Off**, **All warnings** and the
+  named NWS weather warning types. Warning Types is not a separate setting.
+- **Alert Update Sounds:** approved October 18, 2026, defaulting to **Off**.
+  Offers **Off**, **Increased danger only** and **All updates**.
+  This permits sounds for updates to an existing event only when that alert
+  type is enabled by Watch Sounds or Warning Sounds. Night Alert Sounds still
+  controls permission during Night Shift.
+  Off leaves updates silent without disabling the existing new-event sounds.
+  Increased danger only uses the approved milestones below. All updates also
+  permits sounds for substantive revisions, including changed wording,
+  instructions, affected area, event times, forecast amounts or confirmation.
+  Repeated unchanged downloads or a changed message identifier alone do not
+  qualify as a substantive revision.
+- **Night Alert Sounds:** On permits the selected watch/warning sounds during
+  Night Shift; Off suppresses those sounds during Night Shift. It does not hide
+  visual alert indicators or alter daytime sound selections. This final label
+  replaces Night Alerts and Night Audible Alerts.
+
+Watch and warning selections are independent. Use the alarm volume, with no
+separate alert volume control. Retain full NWS Watch/Warning names in the
+selection lists. Use the existing nested draft rules: a sound list's Done
+returns its choices to Alerts, Alerts Done returns to Weather, and Weather Save
+applies them through its ordinary independent save/restart. Cancel/Back discards
+the relevant unsubmitted nested edits. These choices do not alter the existing
+Provider/API-key validation, masking, retention, explicit Clear or save rules.
+Mockup selections illustrate the controls. Only the values explicitly approved
+below are starting settings; examples do not choose the remaining defaults.
+
+**Approved October 18, 2026:**
+
+- **Watch Sounds defaults to Off.** Visual watches remain enabled; the user can
+  choose All watches or individual watch types using the existing selector.
+- **Warning Sounds defaults to All warnings.**
+- **Night Alert Sounds defaults to Off.** Night appearance still shows active
+  alert text and counts; the default suppresses weather-alert sounds at Night.
+- **Alert Update Sounds defaults to Off.**
+- **At least ten minutes must separate any two sounds for the same event.**
+  It is a minimum separation, not a periodic reminder. Display updates received
+  inside that interval silently, without queuing a delayed sound.
+- Watches and warnings use distinct sounds. **The approved watch sound lasts
+  2½ seconds**, unless dismissed early: a single 1,050 Hz tone in three
+  half-second bursts, with a half-second pause between bursts. The frequency
+  comes from NOAA Weather Radio; the approved shorter pulse pattern is this
+  clock's design, not an official NOAA watch-only cadence.
+- **The approved warning sound lasts
+  10½ seconds**, unless dismissed early: simultaneous 853 Hz and 960 Hz tones,
+  played as two identical groups of 2/1/1-second bursts, with half-second gaps
+  between all bursts. This is the synthesized warning preview approved in the
+  discussion, not a verified copy of Apple's recording.
+- Normalize weather-alert waveform magnitudes to the same peak range as the
+  loudest alarm pattern and retain the existing alarm playback-gain and
+  amplifier-headroom approach described under [execution](#execution). Continue
+  using alarm volume; add no separate alert volume control. This is magnitude
+  matching, not a new perceived-loudness target.
+- Alert playback ends automatically without requiring anyone to acknowledge it.
+  Tapping the dismissible alert text stops a playing weather-alert sound early
+  and applies the existing clock-text dismissal rules in both Day and Night.
+  Night uses the same alert text and position as Day, as specified below;
+  this replaces the proposed separate large Night **Dismiss** button.
+  Opening the Alerts list also stops the playing weather-alert sound and applies
+  the same [shared headline dismissal](#weather-alert-dismissal).
+- **Approved October 18, 2026:** do not replay sounds for restored alerts after
+  a restart, including when the first successful check confirms those same
+  events. Restore their visual presentation, counts and prior dismissals under
+  the existing rules. A genuinely new alert or increased danger remains
+  eligible for sound under the selected settings; a restart alone is not a
+  reason to sound again.
+- A ringing wake-up alarm takes priority over weather-alert audio and continues
+  uninterrupted. Keep the weather event active and available when the normal
+  clock returns. Skip that event's weather sound; do not queue it to play after
+  the alarm. This does not change the existing ringing screen or alarm actions.
+- An enabled weather-alert sound briefly interrupts Sound Machine and plays at
+  alarm volume. When the alert sound ends or is dismissed, automatically resume
+  Sound Machine at its previous volume. Its Sleep Timer continues counting
+  during the interruption; if the timer expires, leave Sound Machine stopped.
+  If a wake-up alarm begins, preserve its existing priority and Sound Machine
+  stop behavior, including no automatic resume after the alarm.
+- **Approved October 18, 2026:** if an eligible weather-alert sound arrives
+  during an alarm-sound preview, stop the preview and play the weather-alert
+  sound under the selected sound settings. Keep the user in the settings screen
+  with all unsaved choices intact. Leave the preview stopped afterward; the
+  user can start it again. This adds no setting and does not change the ringing
+  wake-up alarm's priority above.
+
+**Approved October 18, 2026 — Increased danger only:**
+
+| Existing warning | Qualifying increase |
+| --- | --- |
+| Tornado Warning | Damage threat: Base → Considerable → Catastrophic |
+| Severe Thunderstorm Warning | Damage threat: Base → Considerable → Destructive |
+| Flash Flood Warning | Damage threat: Base → Considerable → Catastrophic |
+| Snow Squall Warning | Newly receives the Significant impact designation |
+| Red Flag, Blizzard or Ice Storm Warning | Newly receives an explicit Particularly Dangerous Situation designation |
+
+Use NWS's documented damage/impact categories for the first four families,
+and its explicit designation for the last row. These meanings are documented in
+the [NWS impact tags](https://www.weather.gov/impacts/understanding),
+[CAP parameters](https://vlab.noaa.gov/web/nws-common-alerting-protocol/cap-documentation),
+[fire-weather guidance](https://www.weather.gov/media/twc/2024%20SW%20AOP.pdf)
+and [winter PDS notice](https://www.weather.gov/media/notification/pdf_2026/scn26-52_PDS_Wording_in_Blizzard_Warnings_and_IceStormWarnings.pdf).
+Do not invent a generic within-warning severity ladder or infer a new danger
+category from ordinary forecast-number changes.
+
+Each newly higher category or newly added designation qualifies at most once
+per event. Dropping and returning to a category already reached does not rearm
+the sound. Several qualifying changes arriving together produce at most one
+sound. The sound selections, Night permission, ten-minute separation and
+no-replay-after-restart rules above continue to apply.
+
+In Increased danger only mode, keep revised wording, extensions, ordinary
+movement and raw wind/hail/snowfall or other amount changes silent unless one
+of the listed escalation markers changes. Confirmation alone, such as radar
+indicated becoming observed, is also silent. Routine updates to other warning
+types without a documented escalation marker remain silent. This narrows the
+earlier broad eligibility of increased-danger sounds to these approved rules;
+it does not narrow the separately approved visual headline behavior below.
+
+##### Clock display changes
+
+These reviewed changes, including the October 18 Night alert-text follow-up, are
+integrated into the official normal Analog and Digital faces, in Day and Night
+appearance where applicable; firmware implementation remains pending. The
+official visual reference owns the exact reviewed geometry. The
+native pixel sizes below record explicit
+uniformity decisions, not permission to redesign surrounding elements.
+
+- Combine weekday and date into one line, with three-letter days, for example
+  **Wed, Oct 14**. Use the same quiet Analog treatment on both faces and both
+  appearances, with **1px letter spacing**. Retain the distinction between the
+  quiet date and the accent-colored alarm setting. The reviewed date is 32px;
+  do not restore a full weekday or a separate date row.
+- Move the alarm row into the row vacated by the separate date, directly beneath
+  the combined date. Match its font and spacing across faces, keep its complete
+  caption on one line, and clearly distinguish scheduled, Off, Snoozed and
+  Missed states. Use a **32×32 alarm icon with a 10px gap**; retain the reviewed
+  regular 28px caption and 26px missed-notice caption. Alarm-related notices use
+  the same alarm glyph; Clock paused and Waiting for sync retain their own
+  clock-status symbols. Preserve the missed notice's dismiss action. Add no
+  redundant Alarm On box.
+- Put Sound Machine, Alerts and Settings on a straight bottom row, with
+  **40×40 visible icons**, no visible titles and the reviewed larger tap areas.
+  Sound Machine and Settings align beneath Tuesday and Thursday on Digital;
+  keep the same horizontal icon spacing on Analog. Digital's row may sit lower
+  than Analog's. The final 40px increase moves the icon tops upward by 8px so
+  their bottoms stay approximately at the prior 32px positions. Analog icons
+  remain inside the dial with the reviewed clearance from its numerals.
+- Replace the Mail shortcut with the Alerts shortcut; retain House Messages,
+  their existing navigation and the left-edge message glow. No decision removes
+  House Messages or merges their content into the weather-alert list.
+- Keep the alert triangle neutral/muted, including when alerts are active. Show
+  a filled **red warning-count badge at its upper left** and a filled **yellow
+  watch-count badge at its upper right**, using the earlier circular badge
+  styling rather than plain side-by-side numbers. Hide zero counts. The icon
+  remains visible without active alerts; tapping it opens the active-alert list.
+  The question-mark treatment for unavailable updates is the shape exception
+  governed by [alert source and status](#alert-source-catalog-and-priority).
+- On Analog, reduce the central weather artwork to **400×400** while preserving
+  the dial, ticks, numerals, hands and reviewed artwork treatment. Center the
+  temperature on the left and vertically stacked High above Low on the right
+  as one group at the reviewed lower position. Match the Digital temperature's
+  **102px** size; High/Low use the reviewed 24px accent text with the final extra
+  separation between them. Stored image format and source artwork resolution
+  follow the separately approved [weather icon rules](#weather-icons).
+- When alert text is shown, replace Digital's five-day forecast strip or
+  Analog's temperature/High-Low group. Keep Digital's current conditions and
+  Analog's central weather picture otherwise intact when weather is available.
+  Show the event name on one line, omitting its trailing Watch/Warning word;
+  below it show **Watch · Tap to dismiss** or **Warning · Tap to dismiss**.
+  Use the reviewed matching 32px event name and 24px muted subtext, with the
+  event name yellow for a watch or red for a warning. Do not add an extra count
+  to this subtext; the icon already shows the two totals. Headline selection
+  follows the [dismissal rules](#weather-alert-dismissal), not an unconditional
+  highest-active-event rule.
+- While that alert text is displayed, hide routine forecast-provider notices,
+  including waiting, age and stale notices, on both faces. Restore the
+  applicable notice and ordinary weather/forecast area after dismissal. When
+  needed without alert text, routine age/stale notices use the fixed reviewed
+  22px row below Digital current conditions or above Analog's bottom icons.
+  **Waiting for weather…** is the explicit exception: retain its larger 28px
+  treatment in Digital's current-conditions area and Analog's temperature area.
+  On Analog, align its vertical center with the alert subtext's height. Keep it
+  hidden while alert text is shown; do not move it to the small status row.
+- **Approved October 18:** show the dismissible on-clock alert text during Night
+  Shift at each face's original daytime position and with the same text sizes
+  and tap-area dimensions. Digital keeps its existing enlarged time size,
+  fitting and centered position; add no Night-only alert offset or shorter
+  alert area. Use the reviewed subdued Night watch/warning text colors. The
+  normal headline and dismissal lifetime apply even when Night Alert Sounds is
+  Off or sound has finished. Alert counts and list/details remain available.
+  Preserve Night hiding of weather artwork, temperatures, forecast and routine
+  weather notices, along with warm Night AM/PM, clock formats and other palettes.
+- Preserve the backup-clock warning as a separate clock-status feature. On both
+  normal faces, put the **existing warning triangle to the left of the combined
+  day/date**, matching the alarm row's **32px icon and 10px gap**, and center
+  triangle plus date together as one group. Retain its existing amber Day and
+  muted Night warning colors; only the date gets the quieter date treatment.
+  Show it only while a backup-clock notice is pending. Tapping opens the existing
+  **Backup Clock Lost Time / Check Battery.** or **Backup Clock Unavailable /
+  Check Connection.** notice, with its existing dismissal behavior. This does
+  not change the [RTC warning lifetime](#time-and-rtc).
+
+When weather-alert text is inactive or dismissed, use the normal forecast or
+temperature area with no permanent alert-box placeholder. Preserve other clock
+behavior, including unavailable time, paused/sync notices, alarm operation,
+Sound Machine and settings actions. The unavailable-time surface is not
+redesigned by the normal clock examples. Do not carry forward the old right-edge
+storm glow, separate Watch/Warning badges, colored weather-alert triangle,
+weather-picture replacement with a triangle, or earlier header/banner positions.
+
+##### Active-alert list and details
+
+Use the standard **Alerts** title treatment and the standard subtitle position
+for warning/watch totals. Show all active watches and warnings in NWS priority
+order, including events whose clock text has been dismissed. Rows use the
+reviewed severity-colored triangle, full event name, expiry and detail affordance;
+long names can wrap. Omitting Watch/Warning from these full list titles was
+discussed read-only and is not an approved additional change. An example with
+three rows is not a limit on the number of active alerts.
+
+Selecting an event opens its details with Watch/Warning, **National Weather
+Service**, full event title, affected area, issue/end information, alert
+description and protective instructions. Use actual NWS content in operation;
+the mockup's explanatory examples are not live alerts or fixed message copy.
+Details return to Alerts, and the list returns to the clock. An empty successful
+check shows no active weather alerts.
+
+**Approved October 18, 2026:** after a failed update, replace the list's bottom
+**Back to Clock** button with **Unable to update alerts** and the last
+successful check time. Keep that notice outside the scrolling rows, with three
+alert rows in their normal positions and unchanged sizes. Retain the upper-left
+Back arrow, the standard totals subtitle and scrolling for additional alerts.
+The list retains its bottom Back to Clock button when no footer notice is
+needed; event details retain Back to Alerts. This approves the separate failure-footer
+layout, without changing other screen elements.
+
+**Approved October 18, 2026:** show **Unable to save alerts** in the same bottom
+notice area when saving alert data or dismissals fails, replacing the bottom
+Back to Clock button. Keep the three alert rows in their normal positions and
+retain the upper-left Back arrow. This notice has no error sound. It reports a
+save failure rather than a failure to obtain current NWS alerts.
+
+**Approved October 18, 2026:** before the first successful check, with no
+previous alert data, show **Checking for alerts…** in the list area while the
+first check runs. If that check fails, leave the list area blank and show only
+the footer **Unable to update alerts** / **No successful check yet**. Do not
+duplicate that failure with **Current alerts unavailable** in the list area.
+Use the same absence of a duplicate body notice when no retained alerts remain
+after a later failure; its footer still shows the last successful check time.
+Retain the question-mark triangle and upper-left Back action. Unknown alert
+status must not be presented as a successful check finding no active alerts.
+
+##### Weather-alert dismissal
+
+- Tapping the clock's alert text or opening the Alerts list dismisses the
+  headline. A clock-text dismissal applies to **both clock faces** and survives a restart
+  for the same active events. Forget the dismissal when those events end. It
+  restores the weather/forecast presentation; it does not remove active alerts
+  from the list or counts.
+- A dismissal covers the alerts already present when the user taps. Do not
+  immediately replace the dismissed headline with another already-present event
+  and prevent the forecast/temperatures from returning.
+- Repeated downloads and ordinary updates, such as wording or timestamp changes,
+  remain dismissed. Show text again when danger increases, for example a watch
+  becoming a warning, a tornado becoming confirmed or a stronger damage-threat
+  designation. Use NWS update relationships rather than treating every updated
+  message identifier as a genuinely new weather event; the
+  [NWS alert documentation](https://www.weather.gov/media/alert/CAP_v12_guide_05-16-2017.pdf)
+  describes those relationships. Exact comparisons are still to be specified.
+- A genuinely **new watch or warning reopens the text even if lower priority**
+  than a dismissed event. Select the highest NWS priority among new or escalated
+  events not covered by dismissal. An older, higher-priority dismissed event
+  remains listed and counted, but does not displace the new headline solely
+  because it is still active. For example, a new Freeze Warning can be displayed
+  after a Tornado Watch was dismissed. The full list still sorts all active
+  events by NWS priority.
+- These decisions govern on-clock text. The approved ability to dismiss a
+  playing sound early and the sound rules are recorded in
+  [alert sound settings](#alert-sound-settings).
+  Add no automatic reminder interval for unchanged dismissed text.
+
+##### Alert decisions still open
+
+**Reviewed October 18, 2026:** no additional product decision currently blocks
+implementation. Source/check/retry/expiry behavior, unavailable-location and
+failure presentation, restart retention, save failures, unreadable-data fallback,
+headline dismissal, sound patterns/durations/defaults, update-sound rules,
+minimum separation and audio interactions are settled above.
+
+Event/update matching, equal-priority headline ties, bounded storage layout,
+playback coordination and owner placement remain implementation details to
+specify and test. They must preserve the approved behavior and use NWS update
+relationships rather than prototype shortcuts. The official mockup is updated
+through October 18; the [work record](work.md#official-nws-mockup-follow-up--october-18-2026)
+contains its source and browser checks. This review does not implement firmware
+or establish build/device verification.
+
+No new settings beyond those listed, permanent service/task, new source path,
+general persistence framework or alert history is approved merely by this
+record. Reuse the existing facilities and obtain any required source-path
+approval before implementing a path outside the planned tree. Weather-artwork
+storage optimization remains the separate
+[deferred consideration](work.md#deferred-or-unapproved-work), not part of NWS
+alert integration.
 
 #### Location resolution
 
@@ -616,6 +1091,31 @@ Highest score wins among those qualified results. If the qualified search return
 
 Use the [weather mapping reference](weather.md) for provider classifications, icon names and artwork, selection recommendations and the current firmware mapping. That document is the sole owner of these details. Follow the [behavior-change disclosure rule](../AGENTS.md) before implementing selection changes.
 
+**Approved October 18, 2026:** regenerate all 18 weather
+icons directly from their original vector artwork on a logical **400×400**
+canvas. Do not enlarge the existing raster images. Store the result as
+uncompressed **RGB565A8**: a 16-bit color plane and an 8-bit transparency plane,
+using the format supported by the existing LVGL software renderer. Remove
+empty outer margins while retaining a six-source-pixel transparent guard,
+clamped to the canvas. Keep the original canvas size and crop origin as
+metadata so drawing preserves the artwork's intended scale and placement.
+Use direct drawing without a whole-image 32-bit conversion buffer.
+
+Display the Analog weather artwork in a **400×400 logical box**, retaining its
+center and the surrounding dial, hands and text. Preserve the other existing
+display sizes, condition mappings, artwork, transparency and Day/Night tint
+and opacity. Use the existing asset tools, asset files and UI ownership; no
+new decoder, image cache or drawing task is required. Implementation, flashing
+and verification are tracked in the [authorized icon sprint](work.md#sprint-trimmed-400px-weather-icons--authorized-october-18-2026).
+
+**Clock-hand format, approved October 18, 2026:** use the same direct planar
+RGB565A8 encoding for the three Analog hands. Preserve their existing source
+vectors, dimensions, pivot points, rotation, smooth alpha edges and Day/Night
+styles. This changes color encoding and storage, without cropping the hands or
+changing their geometry. The existing Analog generator owns these outputs;
+no separate decoder, cache or drawing task is introduced. Verification belongs
+in the [same sprint](work.md#sprint-trimmed-400px-weather-icons--authorized-october-18-2026).
+
 #### Radar source and palette
 
 The user selected RainViewer for the clock's radar and the custom green/yellow/red
@@ -626,27 +1126,28 @@ shows original colors on the left and the approved palette on the right, with
 a background map and town labels. It is a palette reference, not an approved
 clock screen layout or a location default.
 
-Weather Radar replaces the Conditions screen on the working clock for this
-pass, as selected on October 15, 2026. For supported U.S. locations the weather
-row contains Forecast then Radar normally, and Radar then Forecast during a
-storm alert, using the existing left/right swipes and row order retained for
-the current visit. Radar is disabled elsewhere: do not create its display
-objects or expose a route to it. Forecast is then the sole weather page and
-the storm indicator's destination. A country change that disables Radar exits
-an open Radar page to Forecast, overriding the held visit order. The storm
-indicator remains active. Radar is not a settings/menu page and has no return
-button.
+**Approved October 17, 2026; firmware integration pending:** use the fixed weather order
+**Clock → Forecast → Radar** at supported U.S. locations, with the existing
+left/right swipes and the reverse order when returning. Active watches,
+warnings and their dismissal do not reorder these pages. This replaces the
+old storm-first visit order: Radar takes two swipes from the clock rather than
+one during an alert. The Alerts shortcut opens the alert list, independently
+of this weather-page order.
 
-Keep Conditions available in the official mockup as a retained design reference.
-Retain its existing implementation, required assets and useful tests in their
-current source locations, as explicitly requested on October 15. Remove it from
-user navigation and other user-accessible routes while Radar occupies that slot.
-Do not create inactive Conditions display objects solely to keep the code, or
-add a fallback route, settings switch, alternate build mode or backup copy.
-The device consequently loses that page's wind, pressure and outlook display;
-this is an approved reduction in visible information. Preserve current weather
-data, calculations and storm detection used by the clock, Forecast and alert
-indicator. Removing the Conditions page does not disable those shared functions.
+Radar eligibility is unchanged. It is disabled outside the supported U.S.
+locations: do not create its display objects or expose a route to it. Forecast
+is then the sole weather page. A country change that disables Radar exits an
+open Radar page to Forecast. Radar is not a settings/menu page and has no
+return button.
+
+The Conditions screen is retired by the October 17, 2026 decision. Remove its
+renderer, private interfaces, exclusive assets, generators, display-only data
+and calculations, tests and official mockup page. No inactive screen, fallback
+route, settings switch, alternate build mode or backup copy is retained. Keep
+current weather and forecast selection. The storm paths retained during that
+removal are superseded by the separately approved [NWS replacement](#nws-watches-and-warnings)
+when it is integrated; Conditions retirement does not authorize removing
+working storm behavior before that replacement is ready.
 
 Use the dark USGS National Map USGSTopo background with brighter printed town
 labels, roads and terrain, following the Weather Radar page in the
@@ -731,11 +1232,24 @@ these color stops, interpolating each RGB component between stops within a band:
 | 95 | `#55000C` |
 
 RainViewer currently supplies only [Universal Blue tiles and its color table](https://www.rainviewer.com/api/color-schemes.html).
-Apply the custom mapping to the original, unsmoothed radar pixels before
-resizing or blending with the background; preserve transparency. Some source
-colors represent several echo strengths, so the mapping must not imply exact
-strength within those ranges. The comparison used snow coloring off; a separate
-snow presentation has not been selected.
+**Approved October 18, 2026:** request **512×512 radar
+tiles with RainViewer's built-in smoothing enabled**, Universal Blue selected
+and separate snow coloring disabled (`/512/7/{x}/{y}/2/1_0.png`). Keep the same
+geographic tile footprint, maximum zoom 7, 75-mile coverage and 800×800 output.
+The larger tile has twice as many image pixels along each side; it does not
+establish finer underlying radar measurements.
+
+Apply the custom mapping to decoded provider colors before output sampling or
+blending with the background, retaining the provider's smoothed transparency.
+Verify the smoothed source colors against the published table; transparency
+changes must not invalidate an otherwise supported color. Unknown visible
+colors must retain the existing failed-update handling rather than be assigned
+an invented echo strength. Some source colors represent several echo strengths,
+so the mapping must not imply exact strength within those ranges. Keep the
+existing output sampling for this change; no clock-side blur or bilinear filter
+is introduced. A separate snow presentation has not been selected. The
+[radar sprint](work.md#sprint-512px-radar-tiles-and-provider-smoothing--prepared-october-18-2026)
+tracks implementation and verification status.
 
 The [public API](https://www.rainviewer.com/api.html) needs no key, permits custom
 colors for personal use and requires visible RainViewer attribution. Its
@@ -810,12 +1324,12 @@ UI screen assignments follow the [approved visual reference](#ui-and-visual-refe
 | `connectivity.c/.h` | Network initialization, connection and scan state, and network-time synchronization transport/completion. Time trust and system timezone application belong to `clock_time`. |
 | `weather_client.c/.h` | Serialized weather/Radar requests, provider and PNG decoding, in-memory forecast-key quota admission, and the current Radar preparation/image buffers. Forecast/Radar scheduling and copied publication belong to the existing weather worker in `main.c`. |
 | `forecast_representative.c/.h` | Representative forecast calculation; no live weather state. |
-| `storm_conditions.c/.h` | Conditions and storm-summary calculation; no live weather state. |
+| `storm_conditions.c/.h` | Existing pure fixed-limit storm calculation, retained only until the approved NWS replacement is integrated and verified; it is not the future official-alert authority. No live weather state or screen formatting. |
 | `location_lookup.c/.h` | Geocoding requests and lookup results. `device_config` owns saved location values. |
 | `location_scoring.c/.h` | Query parsing, candidate ranking, resolved-label formatting and country-token checks; no saved location state. |
 | `timezone_table.c/.h` | Timezone mapping data used for validation and conversion. `clock_time` applies the selected mapping to the system clock's local-time rules. |
 | `weather_icon_names.c/.h` | Provider condition facts, picture selection, icon names and current-condition captions; no live weather state or refresh decisions. |
-| `assets/weather_icons.c/.h` and generated image assets | Lookup from selected icon names to LVGL images and the image data. Condition classification belongs to `weather_icon_names`; these resources make no weather decisions. |
+| `assets/weather_icons.c/.h` and generated image assets | Lookup from selected icon names to LVGL images, original-canvas crop placement metadata and image data. Condition classification belongs to `weather_icon_names`; these resources make no weather decisions. |
 | `message_service.c/.h` | Message records, acknowledgments, shared-client cache, hub role/discovery, message network operations and browser delivery. UI owns device navigation. |
 | `main/web/messages.html` | House Messages browser rendering and controls, outside the device LVGL views. `message_service` serves the page and owns message records and operations. |
 | `clock_time.c/.h` | Time source/trust, system timezone application, RTC synchronization and in-memory RTC warning. Uses the system clock; connectivity supplies actual network synchronization completion. |
@@ -827,12 +1341,12 @@ UI screen assignments follow the [approved visual reference](#ui-and-visual-refe
 | `solar_times.c/.h` | Solar-event calculations and unavailable-event results. `night` decides their effect on appearance. |
 | `ui/ui.c` | UI lifetime, active view and navigation, including return destinations, gestures and first-use entry; overlays, alarm preemption, input routing and presentation selection. Also holds the small drawing helpers shared by the renderers. Touch actions go to the correct feature owner; feature decisions remain with those owners. |
 | `ui/clock_views.c` | Rendering and object handles for analog/digital faces, unavailable time, ringing/snoozed clock surfaces, next alarm, missed alarm, clock status and backup-clock indicator/notice. Active-view and navigation state belong to `ui.c`. |
-| `ui/weather_views.c` | Rendering and private object handles for Forecast, Radar replacing Conditions, and storm treatment; retained Conditions rendering code without an active user route; messages and empty/important styling; weather status and warnings. Conditions also remains available in the mockup under the radar decision above. Consumes supplied snapshots and presentation inputs without retaining another weather/message model or active-view state. Navigation, retained display snapshots, displayed-message identity and dismissal completion decisions belong to `ui.c`; message operations belong to `message_service`. Clock-edge objects remain with `clock_views.c`. |
+| `ui/weather_views.c` | Rendering and private object handles for Forecast, Radar, messages and empty/important styling; storm treatment and weather status/warnings. Consumes supplied snapshots and presentation inputs without retaining another weather/message model or active-view state. Navigation, retained display snapshots, displayed-message identity and dismissal completion decisions belong to `ui.c`; message operations belong to `message_service`. Clock-edge objects remain with `clock_views.c`. |
 | `ui/settings.c` | Rendering and controls for Settings entry; Device Setup; Display settings and Messaging; Weather; Wi-Fi list, credentials and progress; Alarm, Time, Repeat/Custom Days, Sound and Snooze editors; Sound Machine and its selectors; Night Shift mode, fixed/solar schedule, offsets and brightness. Owns drafts, nested editing, immediate Sound Machine controls, validation/save/lookup presentation and submission of user changes, with its row/button, time-input and keyboard helpers kept in this file. Applied settings belong to `device_config`. |
 
-A copied value is a snapshot for a consumer, not another authority. Runtime fields about time and appearance come from their owners. Screens do not calculate alarm eligibility, infer RTC health, or drive the backlight. Feature-owner headers declare their own data; `app_runtime.h` holds data used for display, including values required by the approved weather age/stale presentation. Intermediate forecast calculations stay with `weather_client`; the display consumes the selected icon. The weather snapshot retains both time-format versions of the visible Conditions captions, produced from the same downloaded data by the existing calculation. The view selects the applied format; it does not retain another weather model or recalculate weather decisions. There is no general `wac_types.h` container. DS3231 access reuses the board bus and existing driver facilities without creating a second bus or an application fork of downloaded drivers.
+A copied value is a snapshot for a consumer, not another authority. Runtime fields about time and appearance come from their owners. Screens do not calculate alarm eligibility, infer RTC health, or drive the backlight. Feature-owner headers declare their own data; `app_runtime.h` holds data used for display, including values required by the approved weather age/stale presentation. Intermediate forecast calculations stay with `weather_client`; the display consumes the selected icon. Until NWS integration, the existing weather snapshot retains one storm-alert result; the view does not retain another weather model or recalculate storm decisions. NWS retrieval, event/dismissal state and storage must each have a single owner; their implementation placement is not selected by the experimental UI or this decision record. There is no general `wac_types.h` container. DS3231 access reuses the board bus and existing driver facilities without creating a second bus or an application fork of downloaded drivers.
 
-Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. Clock object handles remain private to `clock_views.c`; its private interface receives display inputs and callbacks from `ui.c` without exporting the shell's state or retaining another service/configuration model. Forecast, Radar, retained Conditions, message and weather-status object handles remain private to `weather_views.c`; the shell supplies current drawing inputs and visibility, without directly manipulating those objects. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
+Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. Clock object handles remain private to `clock_views.c`; its private interface receives display inputs and callbacks from `ui.c` without exporting the shell's state or retaining another service/configuration model. Forecast, Radar, message and weather-status object handles remain private to `weather_views.c`; the shell supplies current drawing inputs and visibility, without directly manipulating those objects. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
 
 `ui/controls.c` remains an optional approved path, not an implemented owner or a
 required extraction. Keep the existing helpers with their current UI owners
@@ -889,8 +1403,8 @@ users start. Allocate JSON nodes and strings in the board's PSRAM so downloaded
 responses do not consume the internal memory needed by tasks and drivers.
 Existing cJSON allocation failures still return through the current caller;
 there is no new parser, pool or storage mechanism. Weather transport scratch
-ends before decoding, so request buffers and Conditions formatting do not occupy
-the same task stack together. Verify both weather-worker and Settings activation
+ends before decoding, so request buffers do not occupy the decoding task stack
+at the same time. Verify both weather-worker and Settings activation
 paths on hardware rather than relying on native stack behavior.
 
 Use ESP-IDF's existing memory-placement settings to keep larger software
@@ -1033,7 +1547,7 @@ Use explicit update operations for the actual Save actions. The settings UI owns
 
 Serialize settings writers. Validate before writing, check NVS return values, and publish a new in-memory configuration after a successful save. Use a short lock for copying the published configuration, distinct from the slow save operation. On failure, follow the [editing and saving rules](#editing-and-saving-user-settings) and keep the previously applied running configuration; do not report rollback. Some stored keys may already have changed and will be read on the next normal startup, as allowed under [Editing and saving user settings](#editing-and-saving-user-settings).
 
-Alarm data needs only the current relevant occurrence, the one-time target/consumed state when used, snooze, dismissal and one pending missed notice, not a history log. Use a small explicit representation for those fields. Failed operating-record writes follow the [alarm and snooze recovery rule](#alarm-and-snooze). Use one last-effective-appearance value in the Night Shift owner. Warning persistence is governed by [Time and RTC](#time-and-rtc) and introduces no record. These operating records are not part of settings Save; one-time automatic Off is saved separately through the settings owner as approved above.
+Alarm data needs only the current relevant occurrence, the one-time target/consumed state when used, snooze, dismissal and one pending missed notice, not a history log. Use a small explicit representation for those fields. Failed operating-record writes follow the [alarm and snooze recovery rule](#alarm-and-snooze). Use one last-effective-appearance value in the Night Shift owner. Backup-clock warning persistence is governed by [Time and RTC](#time-and-rtc) and introduces no record. Separately, [weather-alert text dismissal](#weather-alert-dismissal) is approved to survive restarts for the same active events; retain only the information needed for that behavior, not an alert history. Its exact representation and owner placement remain implementation details; approved retention, save-failure and unreadable-data behavior belongs to the [alert service rules](#alert-source-catalog-and-priority). These operating records are not part of settings Save; one-time automatic Off is saved separately through the settings owner as approved above.
 
 Initialize NVS once in startup. A reported initialization failure must be visible and must not trigger a blanket erase/retry. Stop storage-dependent startup on that failure rather than adding an automatic repair service. Normal missing settings receive defaults; an actual read error is reported rather than treated as a missing key.
 
@@ -1069,7 +1583,7 @@ targets/esp32-p4/
     connectivity.c / .h                 Wi-Fi connections/scans and network time
     weather_client.c / .h               Weather/Radar requests, decoding and image buffers
     forecast_representative.c / .h      Representative forecast calculations
-    storm_conditions.c / .h             Conditions and storm summaries
+    storm_conditions.c / .h             Shared storm-alert calculation
     location_lookup.c / .h              Geocoding requests and lookup results
     location_scoring.c / .h             Location query parsing, ranking and resolved labels
     timezone_table.c / .h               Timezone mapping data
@@ -1093,8 +1607,8 @@ targets/esp32-p4/
       settings.c                        Settings editors, drafts and save/lookup feedback
       controls.c                        Optional shared LVGL helpers; not currently needed
     assets/
-      weather_icons.c / .h              Existing icon-name to LVGL-image lookup
-      wac_icons.c / .h                  Generated only for needed added icons
+      weather_icons.c / .h              Icon-name lookup and original-canvas crop metadata
+      wac_icons.c / .h                  Shared storm glow, UI and weather icon assets
       wac_fonts.c / .h                  Generated only for needed added glyphs
   tests/
     README.md                           Test commands and instructions
@@ -1105,7 +1619,7 @@ targets/esp32-p4/
     test_connectivity.c                 Wi-Fi/scan concurrency and network-time completion checks
     test_weather_service.c              Weather decoding and independent download/time retry checks
     test_forecast_representative.c      Daily-picture calculation and fixture checks
-    test_storm_conditions.c             Conditions/storm calculation and fixture checks
+    test_storm_conditions.c             Storm thresholds, hourly matching and fixture checks
     test_location_scoring.c             Qualified location query and ranking checks
     test_message_ack.py                 Message acknowledgment and shared-store handoff checks
     test_alarm.c                        Alarm/snooze, dismissal and restart-recovery checks
@@ -1125,7 +1639,7 @@ Weather/location checks compile the ESP32-P4 C calculations against the retained
 Existing fixtures for native C checks:
 
 - Forecast: [forecast-representative-cases.json](../shared/test-data/forecast-representative-cases.json).
-- Conditions: [storm-conditions-cases.json](../shared/test-data/storm-conditions-cases.json).
+- Storm detection: [storm-conditions-cases.json](../shared/test-data/storm-conditions-cases.json).
 - Location: [location-resolution-cases.json](../shared/test-data/location-resolution-cases.json).
 
 During implementation, use focused tests for settings validation/save errors, DST and catch-up boundaries, dismissal/snooze/missed-notice restart behavior, RTC status/correction, solar/fallback/brightness decisions, preview preemption, and draft/navigation behavior. Include qualified location searches, rejection of unusable timezones, Shared-mode identity validation and background message-dismissal success/failure. Test ordinary interrupted-save outcomes against the accepted partial-save behavior and operating-record failures against their accepted in-memory/restart behavior.

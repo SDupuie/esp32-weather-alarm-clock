@@ -198,7 +198,7 @@ add_executable(test_ui_shell test_ui.c test_support.c
   ../main/device_config.c ../main/timezone_table.c ../main/weather_icon_names.c ../main/alarm_schedule.c ../main/location_scoring.c
   "${CJSON_INCLUDE_DIR}/cJSON.c"
   ../main/assets/lv_font_clock_time_144.c ../main/assets/lv_font_temp_102.c
-  ../main/assets/lv_font_temp_105.c ../main/assets/lv_font_wind_speed_70.c ../main/assets/wac_fonts.c ../main/assets/wac_icons.c)
+  ../main/assets/lv_font_temp_105.c ../main/assets/wac_fonts.c ../main/assets/wac_icons.c)
 target_compile_definitions(test_ui_shell PRIVATE WAC_UI_SHELL_TEST=1)
 target_include_directories(test_ui_shell PRIVATE
   "${CJSON_INCLUDE_DIR}" "${platform_headers}" "${CMAKE_CURRENT_SOURCE_DIR}" ../main)

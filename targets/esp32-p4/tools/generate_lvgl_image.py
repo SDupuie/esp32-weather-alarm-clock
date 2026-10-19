@@ -149,6 +149,19 @@ def convert_rows(
     dither: bool = False,
 ) -> tuple[list[int], int]:
     width = len(pixels[0])
+    if fmt == "rgb565a8":
+        # LVGL locates the alpha plane after the RGB565 plane and gives it
+        # half the color stride, including padding (not an independent stride).
+        stride = align_up(width * 2, max(2, align))
+        if stride % 2:
+            raise ValueError("RGB565A8 needs an even color stride")
+        colors, _ = convert_rows(pixels, "rgb565", stride, dither)
+        alpha_stride = stride // 2
+        alpha = []
+        for row in pixels:
+            alpha.extend(pixel[3] for pixel in row)
+            alpha.extend([0] * (alpha_stride - width))
+        return colors + alpha, stride
     if fmt == "rgb565":
         bytes_per_pixel = 2
     elif fmt == "argb8565":
@@ -188,6 +201,22 @@ def convert_rows(
         out.extend(row_bytes)
 
     return out, stride
+
+
+def crop_transparent_margin(
+    pixels: list[list[tuple[int, int, int, int]]], guard: int = 6,
+) -> tuple[list[list[tuple[int, int, int, int]]], int, int]:
+    """Retain every nonzero alpha pixel plus the requested canvas-clamped guard."""
+    if guard < 0:
+        raise ValueError("Transparent guard must not be negative")
+    _, _, _, bounds = summarize_pixels(pixels)
+    if bounds is None:
+        raise ValueError("Cannot crop an entirely transparent image")
+    left = max(0, bounds[0] - guard)
+    top = max(0, bounds[1] - guard)
+    right = min(len(pixels[0]), bounds[2] + guard + 1)
+    bottom = min(len(pixels), bounds[3] + guard + 1)
+    return [row[left:right] for row in pixels[top:bottom]], left, top
 
 
 def summarize_pixels(
@@ -252,6 +281,7 @@ def render_source(symbol: str, header_name: str, fmt: str, width: int, height: i
     lv_format = {
         "rgb565": "LV_COLOR_FORMAT_RGB565",
         "argb8565": "LV_COLOR_FORMAT_ARGB8565",
+        "rgb565a8": "LV_COLOR_FORMAT_RGB565A8",
         "argb8888": "LV_COLOR_FORMAT_ARGB8888",
         "a8": "LV_COLOR_FORMAT_A8",
     }[fmt]
@@ -291,7 +321,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Convert a PNG into a compiled LVGL image descriptor.")
     parser.add_argument("--input", required=True, help="Input PNG file")
     parser.add_argument("--symbol", required=True, help="C symbol name")
-    parser.add_argument("--format", choices=("rgb565", "argb8565", "argb8888", "a8"), required=True)
+    parser.add_argument("--format", choices=("rgb565", "argb8565", "rgb565a8", "argb8888", "a8"), required=True)
     parser.add_argument("--output-c", required=True, help="Destination C source")
     parser.add_argument("--output-h", required=True, help="Destination header")
     parser.add_argument("--align", type=int, default=4, help="Stride alignment in bytes")

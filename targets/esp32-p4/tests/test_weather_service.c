@@ -39,7 +39,7 @@ _Static_assert(LODEPNG_MAX_ALLOC==RADAR_PNG_ALLOC_MAX,
  * worker. These examples do not establish live network or board behavior. */
 static const char provider_response[] =
   "{\"current_weather\":{\"temperature\":68,\"weathercode\":0,\"is_day\":1,"
-  "\"time\":\"2026-12-30T12:00\",\"windspeed\":10,\"winddirection\":180},"
+  "\"time\":\"2026-12-30T12:00\",\"windspeed\":10},"
   "\"daily\":{\"time\":[\"2026-12-30\",\"2026-12-31\",\"2027-01-01\","
   "\"2027-01-02\",\"2027-01-03\",\"2027-01-04\"],"
   "\"temperature_2m_max\":[80,71,62,53,24,45],"
@@ -52,7 +52,7 @@ static const char provider_response[] =
 
 /* Current-hour rows plus the original upcoming-day rows preserve the forecast
  * checks while supplying a storm at 13:00 and peak gusts at 14:00. */
-static const char conditions_hourly[] =
+static const char storm_hourly[] =
   "{\"time\":[\"2026-12-30T12:00\",\"2026-12-30T13:00\","
   "\"2026-12-30T14:00\",\"2026-12-30T15:00\",\"2026-12-30T16:00\","
   "\"2026-12-30T17:00\",\"2026-12-30T18:00\","
@@ -62,16 +62,14 @@ static const char conditions_hourly[] =
   "\"cloud_cover\":[0,90,0,0,0,0,0,50,50,50,90,90,90],"
   "\"wind_speed_10m\":[10,10,10,10,10,10,10],"
   "\"wind_gusts_10m\":[10,20,80,20,10,10,10],"
-  "\"pressure_msl\":[1013.25,1013.25,1013.25,1013.25,1013.25,1013.25,1013.25],"
-  "\"temperature_2m\":[68,68,68,68,68,68,68],"
   "\"precipitation\":[0,0,0,0,0,0,0],"
   "\"precipitation_probability\":[0,0,0,0,0,0,0],"
   "\"snowfall\":[0,0,0,0,0,0,0]}";
 
-static char *make_conditions_response(void)
+static char *make_storm_response(void)
 {
   cJSON *root = cJSON_Parse(provider_response);
-  cJSON *hourly = cJSON_Parse(conditions_hourly);
+  cJSON *hourly = cJSON_Parse(storm_hourly);
   assert(root && hourly);
   assert(cJSON_ReplaceItemInObjectCaseSensitive(root, "hourly", hourly));
   char *body = cJSON_PrintUnformatted(root);
@@ -89,6 +87,7 @@ static const char *radar_metadata_body;
 static const char *radar_saved_directory, *radar_saved_sample;
 static unsigned char *radar_saved_tile;
 static unsigned radar_image_requests, radar_base_requests;
+static int radar_requested_x, radar_requested_y;
 static unsigned char *radar_read_binary(const char *path, size_t *size);
 static size_t http_binary_length;
 static esp_http_client_config_t http_config;
@@ -177,17 +176,25 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *co
   assert(config && config->event_handler && config->user_data);
   if (radar_http_test && config->url && !strstr(config->url,"api.open-meteo.com")) {
     assert(config->user_agent && strstr(config->user_agent,"ESP32-P4"));
+    const http_response_t *response=config->user_data;
+    assert(response->external && response->maximum==
+      (strstr(config->url,"basemap.nationalmap.gov") ? RADAR_BASE_RESPONSE_MAX : WEATHER_RESPONSE_MAX));
     if (strstr(config->url,"weather-maps.json")) http_body=radar_metadata_body;
     else {
       bool base=strstr(config->url,"basemap.nationalmap.gov")!=NULL;
       assert(base || strstr(config->url,"tilecache.rainviewer.com"));
-      assert(base || strstr(config->url,"/256/7/")!=NULL);
-      assert(base || strstr(config->url,"/2/0_0.png")!=NULL);
+      assert(base || strstr(config->url,"/512/7/")!=NULL);
+      assert(base || strstr(config->url,"/2/1_0.png")!=NULL);
+      if (!base) {
+        const char *tile=strstr(config->url,"/512/7/");
+        assert(sscanf(tile,"/512/7/%d/%d/2/1_0.png",&radar_requested_x,&radar_requested_y)==2);
+        assert(radar_requested_x>=0 && radar_requested_x<128);
+      }
       assert(!base || (strstr(config->url,"size=800,800") && strstr(config->url,"format=png32")));
       if (base) ++radar_base_requests;
       else if (radar_saved_directory) {
-        int x=-1,y=-1;const char *tile=strstr(config->url,"/256/7/");
-        assert(tile && sscanf(tile,"/256/7/%d/%d/2/0_0.png",&x,&y)==2);
+        int x=-1,y=-1;const char *tile=strstr(config->url,"/512/7/");
+        assert(tile && sscanf(tile,"/512/7/%d/%d/2/1_0.png",&x,&y)==2);
         char path[1024];
         snprintf(path,sizeof(path),"%s/rainviewer-%s-z7-%d-%d.png",radar_saved_directory,radar_saved_sample,x,y);
         free(radar_saved_tile);
@@ -427,9 +434,7 @@ static void check_decoder(void)
   assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
   assert_forecast(&weather);
   assert(weather.updated_at == 0 && http_requests == 1 && http_cleanups == 1);
-  assert(!weather.has_conditions);
-  assert(weather.conditions_alternate_headline[0] == '\0');
-  assert(weather.conditions_alternate_detail[0] == '\0');
+  assert(!weather.storm_alert);
 
   const char *dates[] = { "", "bad", "2026-02-30", "2026-13-01", "2026-12-31-extra" };
   for (size_t i = 0; i < sizeof(dates) / sizeof(dates[0]); ++i) {
@@ -466,95 +471,37 @@ static void check_decoder(void)
   cJSON_Delete(root);
 }
 
-static void assert_timed_conditions(const app_weather_snapshot_t *weather, bool time_24h)
+static void assert_storm_weather(const app_weather_snapshot_t *weather)
 {
   assert_forecast(weather);
-  assert(weather->has_conditions && weather->conditions_time_24h == time_24h);
-  const storm_conditions_t *conditions = &weather->conditions;
-  assert(strcmp(conditions->headline, time_24h
-    ? "Thunderstorms likely by 13:00" : "Thunderstorms likely by 1 PM") == 0);
-  assert(conditions->has_detail);
-  assert(strcmp(conditions->detail, time_24h
-    ? "Gusts up to 50 mph by 14:00" : "Gusts up to 50 mph by 2 PM") == 0);
-  assert(strcmp(weather->conditions_alternate_headline, time_24h
-    ? "Thunderstorms likely by 1 PM" : "Thunderstorms likely by 13:00") == 0);
-  assert(strcmp(weather->conditions_alternate_detail, time_24h
-    ? "Gusts up to 50 mph by 2 PM" : "Gusts up to 50 mph by 14:00") == 0);
-  assert(conditions->has_speed && conditions->speed == 6);
-  assert(!conditions->has_gust && conditions->gust == 0); /* Gust equals live wind. */
-  assert(conditions->has_peak_gust && conditions->peak_gust == 50);
-  assert(conditions->has_direction && conditions->direction == 180);
-  assert(strcmp(conditions->cardinal, "S") == 0);
-  assert(conditions->has_pressure && conditions->pressure_value == 29.92);
-  assert(conditions->has_pressure_change && conditions->pressure_change == 0);
-  assert(strcmp(conditions->pressure_trend, "steady") == 0);
-  assert(conditions->has_precip_now && conditions->precip_now == 0);
-  assert(conditions->has_precip_outlook && conditions->precip_outlook == 0);
-  assert(conditions->alert && conditions->changing && conditions->alert_count == 2);
-  assert(conditions->alerts[0].kind == STORM_ALERT_THUNDER);
-  assert(strcmp(conditions->alerts[0].label, "Thunderstorms") == 0);
-  assert(conditions->alerts[1].kind == STORM_ALERT_GUSTS);
-  assert(strcmp(conditions->alerts[1].label, "Strong gusts") == 0);
+  assert(weather->storm_alert);
 }
 
-static void check_conditions_decoder(void)
+static void check_storm_decoder(void)
 {
-  for (int format = 0; format < 2; ++format) {
-    reset_platform();
-    bool time_24h = format != 0;
-    strcpy(applied_config.time_format, time_24h ? "24" : "12");
-    char *body = make_conditions_response();
-    http_body = body;
-    app_weather_snapshot_t weather;
-    memset(&weather, 0xa5, sizeof(weather));
-    assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
-    assert(http_requests == 1 && http_cleanups == 1);
-    assert_timed_conditions(&weather, time_24h);
+  reset_platform();
+  char *body = make_storm_response();
+  http_body = body;
+  app_weather_snapshot_t weather;
+  memset(&weather, 0xa5, sizeof(weather));
+  assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
+  assert(http_requests == 1 && http_cleanups == 1);
+  assert_storm_weather(&weather);
 
-    /* Compare the entire normal output with the existing calculation once,
-     * in addition to the independent expected captions/values above. */
-    cJSON *root = cJSON_Parse(body);
-    assert(root);
-    storm_conditions_config_t config = {.metric = false, .time_24h = time_24h};
-    cJSON *normalized_hourly=cJSON_GetObjectItemCaseSensitive(root,"hourly");
-    cJSON *flags=cJSON_AddArrayToObject(normalized_hourly,"condition_flags"); assert(flags);
-    cJSON *codes=cJSON_GetObjectItemCaseSensitive(normalized_hourly,"weathercode");
-    for (int i=0;i<cJSON_GetArraySize(codes);++i) {
-      weather_condition_facts_t facts=weather_facts_from_open_meteo(cJSON_GetArrayItem(codes,i)->valueint,0,0,0);
-      assert(cJSON_AddItemToArray(flags,cJSON_CreateNumber(facts.flags)));
-    }
-    storm_conditions_t normal;
-    assert(storm_conditions_build(&config,
-      cJSON_GetObjectItemCaseSensitive(root, "current_weather"),
-      cJSON_GetObjectItemCaseSensitive(root, "hourly"),
-      cJSON_GetObjectItemCaseSensitive(root, "daily"), &normal));
-    assert(memcmp(&weather.conditions, &normal, sizeof(normal)) == 0);
+  /* Thunder still alerts when the gust measurement is missing. */
+  cJSON *root = cJSON_Parse(body); assert(root);
+  cJSON_DeleteItemFromObjectCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "hourly"), "wind_gusts_10m");
+  char *single_alert = cJSON_PrintUnformatted(root); assert(single_alert);
+  http_body = single_alert;
+  assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
+  assert_storm_weather(&weather);
+  free(single_alert); cJSON_Delete(root); free(body);
 
-    /* Removing the gust alert leaves a timed headline with no detail. */
-    cJSON_DeleteItemFromObjectCaseSensitive(
-      cJSON_GetObjectItemCaseSensitive(root, "hourly"), "wind_gusts_10m");
-    char *single_alert_body = cJSON_PrintUnformatted(root);
-    assert(single_alert_body);
-    http_body = single_alert_body;
-    assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
-    assert(weather.has_conditions && !weather.conditions.has_detail);
-    assert(weather.conditions.detail[0] == '\0');
-    assert(weather.conditions_alternate_detail[0] == '\0');
-    assert(strcmp(weather.conditions_alternate_headline, time_24h
-      ? "Thunderstorms likely by 1 PM" : "Thunderstorms likely by 13:00") == 0);
-    free(single_alert_body);
-    cJSON_Delete(root);
-    free(body);
-
-    /* An unavailable current hour clears both previously populated forms. */
-    http_body = provider_response;
-    assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
-    assert(!weather.has_conditions);
-    assert(weather.conditions.headline[0] == '\0');
-    assert(weather.conditions_alternate_headline[0] == '\0');
-    assert(weather.conditions_alternate_detail[0] == '\0');
-    assert(http_requests == 3 && http_cleanups == 3);
-  }
+  /* A successful replacement with an unmatched hour clears the old alert. */
+  http_body = provider_response;
+  assert(weather_client_fetch(&applied_config, &weather) == ESP_OK);
+  assert_forecast(&weather);
+  assert(!weather.storm_alert);
 }
 
 static void run_worker(unsigned stop_after_delays)
@@ -815,7 +762,6 @@ static void observe_retention(void)
     retained_weather_seen = true;
     retained_weather = s_runtime_state.weather;
     assert_forecast(&retained_weather);
-    if (retained_weather.has_conditions) assert_timed_conditions(&retained_weather, false);
   }
   if (s_runtime_state.weather.stale) {
     stale_weather_seen = true;
@@ -868,11 +814,11 @@ static void check_retained_weather_after_wifi_loss(void)
   assert(!s_runtime_state.weather.stale);
 }
 
-static void check_retained_conditions(void)
+static void check_retained_storm(void)
 {
   reset_platform();
   retained_weather_seen = stale_weather_seen = false;
-  char *body = make_conditions_response();
+  char *body = make_storm_response();
   http_body = body;
   request_results[1] = ESP_ERR_TIMEOUT;
   on_delay = observe_retention;
@@ -880,7 +826,7 @@ static void check_retained_conditions(void)
   assert(http_requests == 2 && http_cleanups == 2);
   assert(request_ticks[0] == 0 && request_ticks[1] == 600000);
   assert(stale_weather_seen && s_runtime_state.weather.stale);
-  assert_timed_conditions(&s_runtime_state.weather, false);
+  assert_storm_weather(&s_runtime_state.weather);
   free(body);
 }
 
@@ -896,7 +842,6 @@ static char *make_vc_response(bool metric_units)
   cJSON_AddNumberToObject(current,"datetimeEpoch",1793518200); /* Second 01:30 at fall-back. */
   cJSON_AddNumberToObject(current,"temp",metric_units?1.2:34.2);
   cJSON_AddNumberToObject(current,"windspeed",metric_units?19.312128:12);
-  cJSON_AddNumberToObject(current,"winddir",180);
   cJSON_AddStringToObject(current,"conditions","type_40, type_38");
   cJSON_AddStringToObject(current,"icon","rain");
   cJSON *days=cJSON_AddArrayToObject(root,"days");
@@ -920,8 +865,8 @@ static char *make_vc_response(bool metric_units)
       cJSON_AddNumberToObject(hour,"tzoffset",i==0&&h==0?-5:-6);
       cJSON_AddNumberToObject(hour,"temp",metric_units?1.2:34.2);
       cJSON_AddNumberToObject(hour,"windspeed",metric_units?19.312128:12);
-      cJSON_AddNumberToObject(hour,"windgust",metric_units?24.14016:15);
-      cJSON_AddNumberToObject(hour,"pressure",i==0&&h==0?999:1013.25);
+      /* A strong gust belongs only to the first repeated local hour. */
+      cJSON_AddNumberToObject(hour,"windgust",i==0&&h==0?(metric_units?80:50):(metric_units?24.14016:15));
       cJSON_AddNumberToObject(hour,"cloudcover",0);
       cJSON_AddNumberToObject(hour,"precip",metric_units?2.0:2.0/25.4);
       cJSON_AddNumberToObject(hour,"snow",metric_units?0.5:0.5/2.54);
@@ -948,10 +893,7 @@ static void check_vc_decoder(void)
     assert(weather.valid && weather.temp==(units?1:34));
     assert(weather.observed_at==1793518200 && !weather.is_day);
     assert(strcmp(weather.icon_name,"hail")==0 && strcmp(weather.summary,"Hail & Thunder")==0);
-    assert(weather.has_conditions && weather.conditions.speed==(units?19:12));
-    /* Epoch chooses the second 01:00 hour; pressure=999 belongs to first. */
-    assert(weather.conditions.has_pressure && weather.conditions.pressure_value==(units?1013:29.92));
-    assert(weather.conditions.precip_now==(units?2:0.08));
+    assert(weather.storm_alert); /* Current Hail & Thunder retains the warning. */
     for (int i=0;i<5;++i) {
       char date[12]; snprintf(date,sizeof(date),"2026-11-%02d",i+2);
       assert(strcmp(weather.forecast[i].date,date)==0);
@@ -967,7 +909,13 @@ static void check_vc_decoder(void)
     char *optional=cJSON_PrintUnformatted(root); assert(optional); http_body=optional;
     assert(weather_client_fetch(&applied_config,&weather)==ESP_OK);
     assert(weather.icon_name[0]=='\0' && strcmp(weather.summary,"Unknown")==0);
-    assert(weather.valid && weather.conditions.has_speed); /* Hourly fallback remains available. */
+    /* Epoch chooses the second 01:00 hour and excludes the preceding gust. */
+    assert(weather.valid && !weather.storm_alert);
+    cJSON *hour=cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(root,"days"),0),"hours"),1);
+    cJSON_ReplaceItemInObjectCaseSensitive(hour,"windspeed",cJSON_CreateNumber(units?40:25));
+    free(optional); optional=cJSON_PrintUnformatted(root); assert(optional); http_body=optional;
+    assert(weather_client_fetch(&applied_config,&weather)==ESP_OK);
+    assert(weather.storm_alert); /* Missing live wind uses the hourly limit. */
     app_weather_snapshot_t retained=weather;
     cJSON_DeleteItemFromObjectCaseSensitive(cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(root,"days"),5),"tempmin");
     char *broken=cJSON_PrintUnformatted(root); assert(broken); http_body=broken;
@@ -1094,7 +1042,7 @@ static void check_retained_real_samples(void)
   assert(strcmp(weather.forecast[0].date,"2026-10-14")==0);
   assert(weather.forecast[0].high==89 && weather.forecast[4].low==53);
   assert(strcmp(weather.forecast[0].icon_name,"partlycloudy-day")==0);
-  assert(!weather.has_conditions); /* Stored forecast omitted epochs around constructed current. */
+  assert(!weather.storm_alert); /* Stored forecast omitted epochs around constructed current. */
   free(body);free(constructed);free(vc);cJSON_Delete(root);cJSON_Delete(supplement);
 }
 typedef struct { device_config_t config; app_weather_snapshot_t weather; esp_err_t result; } fetch_thread_t;
@@ -1235,12 +1183,10 @@ static void check_saved_live_response(const char *path)
   }
   weather_condition_facts_t current_facts=weather_facts_from_visual_crossing(current,number(field(current,"snow"))*2.54);
   cJSON *normalized_current=normalize_vc_current(&applied_config,root,current,current_facts);assert(normalized_current);
-  assert(number(field(normalized_current,"temperature"))==number(field(current,"temp")));
   assert(fabs(number(field(normalized_current,"windspeed"))-number(field(current,"windspeed"))*1.609344)<1e-10);
   assert(strcmp(string(field(normalized_current,"time"))+11,string(field(current,"datetime")))==0);
-  cJSON_Delete(normalized_current);
   cJSON *hourly=normalize_vc_hourly(&applied_config,root);assert(hourly);
-  int index=0,fractional_temps=0,fractional_precip=0,missing_record_offsets=0;
+  int index=0,fractional_precip=0,missing_record_offsets=0;
   for (int d=0;d<cJSON_GetArraySize(days);++d) {
     const cJSON *day=at(days,d), *hours=field(day,"hours");
     for (int h=0;h<cJSON_GetArraySize(hours);++h,++index) {
@@ -1248,9 +1194,7 @@ static void check_saved_live_response(const char *path)
       char expected_time[40];snprintf(expected_time,sizeof(expected_time),"%sT%s",string(field(day,"datetime")),string(field(hour,"datetime")));
       assert(strcmp(string(at(field(hourly,"time"),index)),expected_time)==0);
       assert(number(at(field(hourly,"epoch"),index))==number(field(hour,"datetimeEpoch")));
-      double temp=number(field(hour,"temp")),precip=number(field(hour,"precip"));
-      assert(number(at(field(hourly,"temperature_2m"),index))==temp);
-      if (isfinite(temp)&&temp!=round(temp)) ++fractional_temps;
+      double precip=number(field(hour,"precip"));
       if (isfinite(precip)) {
         assert(fabs(number(at(field(hourly,"precipitation"),index))-precip*25.4)<1e-10);
         if (precip!=round(precip)) ++fractional_precip;
@@ -1258,15 +1202,14 @@ static void check_saved_live_response(const char *path)
       double wind=number(field(hour,"windspeed")),snow=number(field(hour,"snow"));
       if (isfinite(wind)) assert(fabs(number(at(field(hourly,"wind_speed_10m"),index))-wind*1.609344)<1e-10);
       if (isfinite(snow)) assert(fabs(number(at(field(hourly,"snowfall"),index))-snow*2.54)<1e-10);
-      assert(number(at(field(hourly,"pressure_msl"),index))==number(field(hour,"pressure")));
       if (!field(day,"tzoffset")&&!field(hour,"tzoffset")) ++missing_record_offsets;
     }
   }
   assert(index==cJSON_GetArraySize(field(hourly,"time")));
-  assert(fractional_temps>0 && fractional_precip>0 && missing_record_offsets>0);
-  assert(weather.has_conditions);
-  printf("PASS: saved live Visual Crossing response decoded offline: current epoch, five dates/highs/lows, %d local hours, %d fractional temperatures, %d fractional precipitation values, %d hours without individual offsets.\n",index,fractional_temps,fractional_precip,missing_record_offsets);
-  cJSON_Delete(hourly);cJSON_Delete(root);free(body);
+  assert(fractional_precip>0 && missing_record_offsets>0);
+  assert(weather.storm_alert==storm_conditions_alert(false,normalized_current,hourly));
+  printf("PASS: saved live Visual Crossing response decoded offline: current epoch, five dates/highs/lows, %d local hours, %d fractional precipitation values, %d hours without individual offsets.\n",index,fractional_precip,missing_record_offsets);
+  cJSON_Delete(normalized_current);cJSON_Delete(hourly);cJSON_Delete(root);free(body);
 }
 
 /* These generated PNGs and frame times are constructed test inputs.
@@ -1318,21 +1261,22 @@ static void check_radar_download_growth(void)
 
 static void check_radar_tile_sampling(void)
 {
-  /* A half-pixel step gives independently known samples: output 1/2 use
-   * source 0, output 511/512 use 255, and all other edges stay untouched. */
-  uint8_t *pixels=malloc(256*256*4), *mapped=malloc(256*256*4);
+  /* A half-native-pixel step uses every 512px source index once: output
+   * 1 uses source 0, output 512 uses 511, and other edges stay untouched.
+   * Constructed altered alpha verifies support beyond the captured tiles. */
+  uint8_t *pixels=malloc(512*512*4), *mapped=malloc(512*512*4);
   uint8_t *expected=malloc(RADAR_PIXELS*4);
   assert(pixels && mapped && expected);
-  for (unsigned y=0; y<256; ++y) for (unsigned x=0; x<256; ++x) {
+  for (unsigned y=0; y<512; ++y) for (unsigned x=0; x<512; ++x) {
     uint32_t color=radar_source_rgba[(x*17+y*29)%128];
-    uint8_t *rgba=pixels+((size_t)y*256+x)*4;
+    uint8_t *rgba=pixels+((size_t)y*512+x)*4;
     rgba[0]=color>>24;rgba[1]=color>>16;rgba[2]=color>>8;
-    rgba[3]=(x+y)%7 ? (uint8_t)color : 0;
-    uint8_t *target=mapped+((size_t)y*256+x)*4;
+    rgba[3]=(uint8_t)color && (x+y)%7 ? 127 : 0;
+    uint8_t *target=mapped+((size_t)y*512+x)*4;
     memcpy(target,rgba,4);assert(radar_map_pixel(target));
   }
   unsigned char *png=NULL;size_t size;
-  assert(lodepng_encode32(&png,&size,pixels,256,256)==0);
+  assert(lodepng_encode32(&png,&size,pixels,512,512)==0);
   radar_http_test=true;http_status=200;radar_echo_png=png;radar_echo_png_size=size;
   radar.tile_x=radar.tile_y=1;
   radar.geometry=(radar_geometry_t){.left=255.5,.top=255.5,.step=0.5};
@@ -1343,7 +1287,7 @@ static void check_radar_tile_sampling(void)
   }
   memcpy(expected,radar.image[0],RADAR_PIXELS*4);
   for (int y=1; y<=512; ++y) for (int x=1; x<=512; ++x) {
-    const uint8_t *rgba=mapped+((size_t)((y-1)/2)*256+(x-1)/2)*4;
+    const uint8_t *rgba=mapped+((size_t)(y-1)*512+x-1)*4;
     uint8_t *bgra=expected+((size_t)y*APP_RADAR_WIDTH+x)*4;
     for (unsigned c=0; c<3; ++c)
       bgra[c]=(uint8_t)((rgba[2-c]*rgba[3]+bgra[c]*(255-rgba[3])+127)/255);
@@ -1354,13 +1298,44 @@ static void check_radar_tile_sampling(void)
   /* This unknown opaque source pixel is outside all selected output samples.
    * Full source validation must still reject it before changing any output. */
   pixels[0]=1;pixels[1]=2;pixels[2]=3;pixels[3]=255;
-  assert(lodepng_encode32(&png,&size,pixels,256,256)==0);
+  assert(lodepng_encode32(&png,&size,pixels,512,512)==0);
   radar_echo_png=png;radar_echo_png_size=size;
   radar.geometry=(radar_geometry_t){.left=356,.top=356,.step=0.125};
   assert(radar_tile()==ESP_ERR_INVALID_RESPONSE);
   assert(memcmp(radar.image[0],expected,RADAR_PIXELS*4)==0);
   lv_free(png);free(pixels);free(mapped);free(expected);
   free(radar.image[0]);radar.image[0]=NULL;radar_http_test=false;
+}
+
+static void check_radar_tile_seams(void)
+{
+  /* Constructed partial-opacity tiles must cover every output pixel exactly
+   * once, including both sides of the native 256px seam and longitude wrap. */
+  const uint8_t color[4]={255,238,0,127};
+  size_t size;
+  unsigned char *png=radar_test_png(512,512,color,&size);
+  radar_http_test=true;http_status=200;radar_echo_png=png;radar_echo_png_size=size;
+  radar.geometry=(radar_geometry_t){.left=-0.5,.top=255.5,.step=0.5,
+    .first_x=-1,.last_x=1,.first_y=0,.last_y=2};
+  radar.slot=0;radar.image[0]=malloc(RADAR_PIXELS*4);assert(radar.image[0]);
+  const uint8_t background[4]={19,31,43,255};
+  uint8_t expected[4]={0,232,255,255};
+  for (unsigned c=0; c<3; ++c)
+    expected[c]=(uint8_t)((expected[c]*127+background[c]*128+127)/255);
+  for (size_t pixel=0; pixel<RADAR_PIXELS; ++pixel)
+    memcpy(radar.image[0]+pixel*4,background,4);
+  radar_first_tile(&radar.geometry);
+  unsigned tiles=0;
+  do {
+    assert(radar_tile()==ESP_OK);
+    assert(radar_requested_x==(radar.tile_x<0 ? 127 : radar.tile_x));
+    assert(radar_requested_y==radar.tile_y);
+    ++tiles;
+  } while (radar_next_tile(&radar.geometry));
+  assert(tiles==9);
+  for (size_t pixel=0; pixel<RADAR_PIXELS; ++pixel)
+    assert(memcmp(radar.image[0]+pixel*4,expected,4)==0);
+  free(radar.image[0]);radar.image[0]=NULL;lv_free(png);radar_http_test=false;
 }
 
 static void check_radar_geometry_palette_png(void)
@@ -1415,6 +1390,18 @@ static void check_radar_geometry_palette_png(void)
     uint8_t rgb[3]; radar_color(cases[i].strength,rgb);
     assert(memcmp(rgb,cases[i].rgb,3)==0);
   }
+  const struct { uint8_t source[4],expected[3]; } source_cases[]={
+    {{0,71,104,127},{5,107,30}},       /* 34: green side of the boundary. */
+    {{255,238,0,127},{255,232,0}},     /* 35: yellow begins. */
+    {{255,129,0,127},{255,153,0}},     /* 44: yellow side of the boundary. */
+    {{255,68,0,127},{240,49,36}},      /* 45: red begins. */
+    {{255,255,255,127},{152,6,21}},    /* Repeated white uses 65, not 74. */
+    {{0,255,0,127},{115,0,17}}};      /* Repeated green uses 75, not 95. */
+  for (unsigned i=0; i<sizeof(source_cases)/sizeof(source_cases[0]); ++i) {
+    uint8_t rgba[4];memcpy(rgba,source_cases[i].source,4);
+    assert(radar_map_pixel(rgba) && rgba[3]==127);
+    assert(memcmp(rgba,source_cases[i].expected,3)==0);
+  }
   for (unsigned i=0; i<128; ++i) {
     uint32_t packed=radar_source_rgba[i];
     uint8_t rgba[4]={(uint8_t)(packed>>24),(uint8_t)(packed>>16),(uint8_t)(packed>>8),(uint8_t)packed};
@@ -1428,11 +1415,20 @@ static void check_radar_geometry_palette_png(void)
       /* Source duplicates occur only inside one of the approved bands. */
       assert(((int)i-32<35)==((int)first-32<35));
       assert(((int)i-32>=45)==((int)first-32>=45));
+      /* These altered alphas are constructed, not observed provider values. */
+      static const uint8_t altered_alpha[]={1,17,127,254};
+      for (unsigned a=0; a<sizeof(altered_alpha); ++a) {
+        uint8_t altered[4]={(uint8_t)(packed>>24),(uint8_t)(packed>>16),
+          (uint8_t)(packed>>8),altered_alpha[a]};
+        assert(radar_map_pixel(altered) && altered[3]==altered_alpha[a]);
+        assert(memcmp(altered,expected,3)==0);
+      }
     }
   }
-  uint8_t transparent[4]={100,9,200,0}, unknown[4]={1,2,3,255};
+  uint8_t transparent[4]={100,9,200,0}, unknown[4]={1,2,3,255}, black[4]={0,0,0,1};
   assert(radar_map_pixel(transparent) && transparent[3]==0);
   assert(!radar_map_pixel(unknown));
+  assert(!radar_map_pixel(black)); /* Clear table rows do not support visible black. */
   radar.base=malloc(RADAR_PIXELS);
   radar.image[0]=malloc(RADAR_PIXELS*4);assert(radar.base && radar.image[0]);
   radar.slot=0;
@@ -1448,17 +1444,32 @@ static void check_radar_geometry_palette_png(void)
   free(radar.base);free(radar.image[0]);radar.base=radar.image[0]=NULL;
   const uint8_t color[4]={1,20,230,127};
   size_t size;
-  unsigned char *png=radar_test_png(256,256,color,&size);
+  unsigned char *png=radar_test_png(512,512,color,&size);
   http_response_t response={.data=(char *)png,.length=size};
   lv_draw_buf_t *decoded=NULL;
+  lv_mem_monitor_t before,after;lv_mem_monitor(&before);
   assert(radar_decode_png(&response,false,&decoded)==ESP_OK && decoded);
   assert(memcmp(decoded->data,color,4)==0);
-  assert(decoded->header.w==256 && decoded->header.h==256);
+  assert(decoded->header.w==512 && decoded->header.h==512);
   lv_draw_buf_destroy(decoded);
+  lv_mem_monitor(&after);assert(after.free_size==before.free_size);
+  void *held[64];unsigned held_count=0;
+  while (held_count<64 && (held[held_count]=lv_malloc(256*1024))) ++held_count;
+  assert(held_count && held_count<64);
+  assert(radar_decode_png(&response,false,&decoded)!=ESP_OK && !decoded);
+  while (held_count) lv_free(held[--held_count]);
+  lv_mem_monitor(&after);assert(after.free_size==before.free_size);
+  png[size-1]^=1; /* Corrupt a chunk CRC without changing the dimensions. */
+  assert(radar_decode_png(&response,false,&decoded)!=ESP_OK && !decoded);
+  png[size-1]^=1;
   response.length=size/2;
   assert(radar_decode_png(&response,false,&decoded)!=ESP_OK && !decoded);
   lv_free(png);
-  png=radar_test_png(257,256,color,&size);
+  png=radar_test_png(256,256,color,&size);
+  response=(http_response_t){.data=(char *)png,.length=size};
+  assert(radar_decode_png(&response,false,&decoded)!=ESP_OK && !decoded);
+  lv_free(png);
+  png=radar_test_png(513,512,color,&size);
   response=(http_response_t){.data=(char *)png,.length=size};
   assert(radar_decode_png(&response,false,&decoded)!=ESP_OK && !decoded);
   lv_free(png);
@@ -1483,6 +1494,7 @@ static void check_radar_geometry_palette_png(void)
   oversized.user_data=&capped;oversized.data_len=WEATHER_RESPONSE_MAX+1;
   assert(http_event(&oversized)==ESP_ERR_INVALID_SIZE && !capped.data);
   check_radar_tile_sampling();
+  check_radar_tile_seams();
 }
 static void check_radar_publication(void)
 {
@@ -1493,7 +1505,7 @@ static void check_radar_publication(void)
   radar_metadata_body="{\"host\":\"https://tilecache.rainviewer.com\",\"radar\":{\"past\":[{\"time\":1700000000,\"path\":\"/v2/radar/opaque-frame\"}]}}";
   const uint8_t base_color[4]={210,200,180,255}, echo_color[4]={255,238,0,255};
   unsigned char *base=radar_test_png(APP_RADAR_WIDTH,APP_RADAR_HEIGHT,base_color,&radar_base_png_size);
-  unsigned char *echo=radar_test_png(256,256,echo_color,&radar_echo_png_size);
+  unsigned char *echo=radar_test_png(512,512,echo_color,&radar_echo_png_size);
   radar_base_png=base; radar_echo_png=echo;
   app_radar_snapshot_t snapshot={0};
   bool active=false;
@@ -1599,10 +1611,22 @@ static void check_radar_publication(void)
   assert(!active && snapshot.valid && snapshot.stale && snapshot.pixels==second_pixels);
   assert(snapshot.frame_time==1700000600);
   radar_echo_png_size*=2;
+  /* A valid PNG with an unsupported visible color also keeps the completed
+   * frame and timestamp, then allows an ordinary incomplete-image retry. */
+  const uint8_t unsupported[4]={1,2,3,127};size_t unsupported_size;
+  unsigned char *invalid=radar_test_png(512,512,unsupported,&unsupported_size);
+  radar_echo_png=invalid;radar_echo_png_size=unsupported_size;
+  acknowledged=snapshot.generation;
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
+  assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active));
+  assert(weather_client_radar_step(&applied_config,WEATHER_RADAR_CONTINUE,acknowledged,&snapshot,&active));
+  assert(!active && snapshot.valid && snapshot.stale && snapshot.pixels==second_pixels);
+  assert(snapshot.frame_time==1700000600);
+  lv_free(invalid);
   /* A complete transparent echo image is valid and removes prior echoes. */
   const uint8_t clear_color[4]={0,0,0,0};
   size_t clear_size;
-  unsigned char *clear=radar_test_png(256,256,clear_color,&clear_size);
+  unsigned char *clear=radar_test_png(512,512,clear_color,&clear_size);
   radar_echo_png=clear; radar_echo_png_size=clear_size;
   acknowledged=snapshot.generation;
   assert(!weather_client_radar_step(&applied_config,WEATHER_RADAR_CHECK,acknowledged,&snapshot,&active));
@@ -1648,6 +1672,56 @@ static unsigned char *radar_read_binary(const char *path, size_t *size)
   *size=(size_t)length;rewind(file);
   unsigned char *bytes=malloc(*size);assert(bytes);
   assert(fread(bytes,1,*size,file)==*size);fclose(file);return bytes;
+}
+static void check_saved_radar_tiles(const char *directory)
+{
+  /* Captured precipitation tiles exercise real provider bytes. The flat base
+   * below is a constructed sampling reference, not a USGS or board image. */
+  static const int coordinates[][2]={{27,46},{28,53},{24,50},{32,49},{35,53},{35,54}};
+  reset_platform();lv_init();assert(weather_client_init_images()==ESP_OK);
+  radar_http_test=true;http_status=200;
+  radar.slot=0;radar.image[0]=malloc(RADAR_PIXELS*4);assert(radar.image[0]);
+  const uint8_t background[4]={19,31,43,255};
+  for (unsigned i=0; i<sizeof(coordinates)/sizeof(coordinates[0]); ++i) {
+    char path[1024];
+    snprintf(path,sizeof(path),"%s/z7-%d-%d-512-smoothing1-snow0.png",
+      directory,coordinates[i][0],coordinates[i][1]);
+    size_t size;unsigned char *png=radar_read_binary(path,&size);
+    assert(size<=WEATHER_RESPONSE_MAX);
+    radar_echo_png=png;radar_echo_png_size=size;
+    http_response_t response={.data=(char *)png,.length=size};
+    lv_mem_monitor_t before,after;lv_mem_monitor(&before);
+    lv_draw_buf_t *reference=NULL;
+    assert(radar_decode_png(&response,false,&reference)==ESP_OK && reference);
+    unsigned visible=0;
+    for (unsigned y=0; y<512; ++y) for (unsigned x=0; x<512; ++x) {
+      uint8_t *rgba=reference->data+y*reference->header.stride+x*4;
+      visible+=rgba[3]!=0;
+      assert(radar_map_pixel(rgba));
+    }
+    assert(visible>0);
+    radar.tile_x=coordinates[i][0];radar.tile_y=coordinates[i][1];
+    radar.geometry=(radar_geometry_t){.left=radar.tile_x*256-0.25,
+      .top=radar.tile_y*256-0.25,.step=0.5};
+    for (size_t pixel=0; pixel<RADAR_PIXELS; ++pixel)
+      memcpy(radar.image[0]+pixel*4,background,4);
+    assert(radar_tile()==ESP_OK);
+    for (unsigned y=0; y<APP_RADAR_HEIGHT; ++y) for (unsigned x=0; x<APP_RADAR_WIDTH; ++x) {
+      uint8_t expected[4];memcpy(expected,background,4);
+      if (x<512 && y<512) {
+        const uint8_t *rgba=reference->data+y*reference->header.stride+x*4;
+        for (unsigned c=0; c<3; ++c)
+          expected[c]=(uint8_t)((rgba[2-c]*rgba[3]+background[c]*(255-rgba[3])+127)/255);
+      }
+      assert(memcmp(radar.image[0]+((size_t)y*APP_RADAR_WIDTH+x)*4,expected,4)==0);
+    }
+    lv_draw_buf_destroy(reference);
+    lv_mem_monitor(&after);assert(after.free_size==before.free_size);
+    printf("PASS: real 512px smoothed tile %d/%d; %zu compressed bytes, %u visible pixels; mapping, sampling, alpha blending and decoder cleanup.\n",
+      radar.tile_x,radar.tile_y,size,visible);
+    free(png);
+  }
+  free(radar.image[0]);memset(&radar,0,sizeof(radar));radar_http_test=false;lv_deinit();
 }
 static void check_saved_radar_data(const char *directory)
 {
@@ -1716,6 +1790,10 @@ int main(int argc, char **argv)
 {
   s_runtime_mutex = xSemaphoreCreateMutex();
   assert(s_runtime_mutex);
+  if (argc==3 && strcmp(argv[1],"--radar-saved-tiles")==0) {
+    check_saved_radar_tiles(argv[2]);
+    return 0;
+  }
   if (argc==3 && strcmp(argv[1],"--radar-saved-data")==0) {
     check_saved_radar_data(argv[2]);
     assert(pthread_mutex_destroy(s_runtime_mutex)==0);free(s_runtime_mutex);
@@ -1732,7 +1810,7 @@ int main(int argc, char **argv)
     return 0;
   }
   check_decoder();
-  check_conditions_decoder();
+  check_storm_decoder();
   check_worker_radar_schedule();
   check_worker_radar_offline();
   check_pending_time();
@@ -1745,7 +1823,7 @@ int main(int argc, char **argv)
   check_overlapping_failure_deadlines();
   check_retained_weather();
   check_retained_weather_after_wifi_loss();
-  check_retained_conditions();
+  check_retained_storm();
   check_current_period_and_failure();
   check_vc_decoder();
   check_quota();

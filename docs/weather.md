@@ -1,6 +1,6 @@
 # Weather condition mappings
 
-Revised October 16, 2026.
+Revised October 18, 2026.
 
 This document owns the detailed condition-to-icon mappings for Open-Meteo and Visual Crossing. The [architecture](architecture.md#weather) owns location, measurements, refreshes, [quota recovery](architecture.md#visual-crossing-quota-recovery), stale-data presentation and existing warning rules. [Development work](work.md) records implementation and verification.
 
@@ -14,7 +14,7 @@ The approved mappings convert both providers into our shared conditions, our own
 - Visual Crossing's quoted icon names are `icon` values requested with `iconSet=icons2`. `preciptype` is an array: retain every value. Specific reported freezing, mixed or hail evidence takes precedence over a broader provider icon.
 - **Direct** means the source explicitly identifies the condition family. **Shared artwork** retains the source distinction in our caption while reusing a picture. **Derived** combines evidence from the same short reporting period. **Approximation** uses the nearest existing picture with an accurate caption. **Unused** means neither provider supplies the precise condition needed to select that picture; it is a defined outcome, not an open mapping decision.
 - All Visual Crossing native-ID assignments are conditional on the ID being returned. Its published dictionary is not a confirmed list of conditions emitted in current reports or forecasts. Availability of rare conditions still needs real-response verification. See the [provider's explanation](https://www.visualcrossing.com/resources/documentation/weather-api/weather-condition-fields/).
-- The 64px images in [weather-icons/](weather-icons/) are documentation previews on a dark background. Draft previews do not replace canonical application assets or change firmware or official mockups.
+- The 64px images in [weather-icons/](weather-icons/) show the selected artwork on a dark background. Preserve those approved drawings when converting formats; do not substitute simplified redraws. The previews are not runtime assets. Fog's original SVG is kept in the existing shared icon path; the five added drawings' exact SVG markup is kept in the existing `build_weather_icon()` generator.
 
 ## Complete mapping table
 
@@ -71,7 +71,7 @@ For quantitative Rain & Snow, require positive `rain + showers` and positive `sn
 
 For current Open-Meteo combinations, obtain supported current rain/showers/snowfall fields with the current condition data. Do not borrow the previous hourly record to relabel now or override an incompatible dry condition solely because an earlier interval was wet. If the needed evidence is absent, retain the supported ordinary condition.
 
-Current day/night variants follow the source day flag or the record time against local sunrise/sunset. Five-day entries use daytime variants. Our own captions are generated from the decoded facts; provider free-text descriptions are not copied into the clock's existing Conditions outlook.
+Current day/night variants follow the source day flag or the record time against local sunrise/sunset. Five-day entries use daytime variants. Our own captions are generated from the decoded facts; provider free-text descriptions are not copied into the clock's weather captions.
 
 ### Five-day forecasts
 
@@ -92,7 +92,7 @@ The probability is the maximum hourly value in this window, not the probability 
 
 Remove the independent qualification based on three wet hours. Wet-hour counts remain available to the other existing condition checks. Preserve the existing Rain/Showers subtype calculation, including Showers winning a tie. If the paired requirement fails, continue to the existing fog and sky checks.
 
-The 50% threshold applies only to this ordinary daily Rain/Showers check. Existing probability thresholds in thunder, freezing and snow checks, current-condition pictures and short-term Conditions warnings retain their separate rules.
+The 50% threshold applies only to this ordinary daily Rain/Showers check. Existing probability thresholds in thunder, freezing and snow checks, current-condition pictures and short-term storm warnings retain their separate rules.
 
 This narrows selection of ordinary Rain/Showers from low-probability or trace precipitation. A brief event can still determine the daily picture when the paired requirements are met; this policy does not require a majority of daytime hours. The chosen values are a product decision, not a statistically validated accuracy improvement.
 
@@ -148,7 +148,7 @@ Visual Crossing forecast IDs still need real-response verification.
 
 ### Thunder classification
 
-The Open-Meteo thunder classification includes `95`, `96`, `97` and `99`; the Visual Crossing classification follows the Thunderstorm row. Hail may win the picture while retaining the thunder fact for the existing Conditions warning. Visual Crossing `18` selects the electrical-weather picture but does not set the thunder fact. Numerical warning thresholds remain in the architecture.
+The Open-Meteo thunder classification includes `95`, `96`, `97` and `99`; the Visual Crossing classification follows the Thunderstorm row. Hail may win the picture while retaining the thunder fact for the existing storm warning. Visual Crossing `18` selects the electrical-weather picture but does not set the thunder fact. Numerical warning thresholds remain in the architecture.
 
 ## Provider and display limitations
 
@@ -160,9 +160,11 @@ These have defined treatments in the table rather than unresolved mappings:
 - Detailed Visual Crossing IDs are handled if returned; real-response availability remains a verification matter. The decoder uses recognized accompanying evidence, then the defined Unknown fallback.
 - The previews illustrate the selected artwork. Firmware uses its existing generated assets, with the Fog revision and five added pictures; previews themselves are not application assets.
 
-The approved daily policy reuses existing selection behavior with the paired ordinary-rain requirement, two-report Hail qualification and Rain & Snow majority above. The mapping/artwork scope includes the richer freezing, mixed, hail and generic-ice distinctions developed in this discussion, with Ice, Wind and Funnel/Tornado confined to current conditions. Existing decoding, icon-selection, forecast and Conditions owners are sufficient; no new provider framework, worker, cache or storage owner is needed just for these mappings.
+The approved daily policy reuses existing selection behavior with the paired ordinary-rain requirement, two-report Hail qualification and Rain & Snow majority above. The mapping/artwork scope includes the richer freezing, mixed, hail and generic-ice distinctions developed in this discussion, with Ice, Wind and Funnel/Tornado confined to current conditions. Existing decoding, icon-selection, forecast and storm-detection owners are sufficient; no new provider framework, worker, cache or storage owner is needed just for these mappings.
 
 ## Current firmware mapping
+
+The generated weather artwork uses the approved [original-vector and storage rules](architecture.md#weather-icons). Image lookup and crop placement metadata belong to the existing asset owner; provider classifications and icon names are unchanged by the format conversion. Software and board verification are recorded in the [icon sprint](work.md#sprint-trimmed-400px-weather-icons--authorized-october-18-2026).
 
 Provider records are decoded into shared facts by
 [weather_icon_names.c](../targets/esp32-p4/main/weather_icon_names.c), without

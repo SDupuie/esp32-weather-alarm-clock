@@ -33,3 +33,4 @@ extern const lv_image_dsc_t wac_weather_hail;
 extern const lv_image_dsc_t wac_weather_ice;
 extern const lv_image_dsc_t wac_weather_wind;
 extern const lv_image_dsc_t wac_weather_tornado;
+extern const lv_image_dsc_t weather_edge_indicator;

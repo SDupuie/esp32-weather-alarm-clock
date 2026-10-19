@@ -19,7 +19,7 @@ from PIL import Image
 from rasterize_svg import apply_gaussian_blur_rgba
 
 STAGE_SIZE = 800
-# Matches the live face/hand coordinate system in ui/ui.c (ANALOG_CENTER_X/Y,
+# Matches the live face/hand coordinate system in ui/clock_views.c (ANALOG_CENTER_X/Y,
 # ANALOG_FACE_SIZE=760/2=380) -- NOT the baked stage image's Y-trim, since this
 # is a separate runtime lv_image object aligned directly on the 800x800 canvas.
 FACE_CENTER = STAGE_SIZE / 2  # 400
@@ -129,19 +129,9 @@ def render(output_path: Path, size: int = STAGE_SIZE, variant: str = "message") 
         # happens right after anyway.
         image = apply_gaussian_blur_rgba(image, BLUR_RADIUS_PX)
 
-    # Only ~12% of the full 800x800 canvas is ever non-transparent (this is
-    # a glow confined to one side of the face). Storing the full canvas as
-    # ARGB8888 costs 2.56MB of flash for a background that's ~88% blank --
-    # on top of the other analog assets, that was enough to push this
-    # firmware's total flash-mapped (DROM/IROM) content past the ~16MB
-    # window the ESP32-P4's bootloader can map, which silently truncated the
-    # image on flash (confirmed on-device: bootloader read real segment data
-    # up to ~16.55MB in, then found zeros where the next segment header
-    # should have been -- reproduced identically across a full chip erase +
-    # reflash, ruling out a bad/worn flash sector). Cropping to the actual
-    # content bounding box (plus a small margin) avoids storing dead
-    # transparent space. ui/ui.c's ANALOG_EDGE_INDICATOR_X/Y must match
-    # this crop's offset -- this prints it so that's easy to keep in sync.
+    # Crop transparent outer space to reduce the stored image. Blur first so
+    # the crop does not change visible edge pixels. The clock renderer's
+    # indicator position must match this crop's offset, printed below.
     alpha_channel = np.asarray(image)[..., 3]
     nonzero_rows, nonzero_cols = np.nonzero(alpha_channel > 0)
     margin = 4

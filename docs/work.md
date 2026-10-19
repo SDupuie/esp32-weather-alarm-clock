@@ -1,6 +1,6 @@
 # ESP32 Weather Alarm Clock development work
 
-Start with the [current work list](#current-work--reconciled-october-16-2026)
+Start with the [current work list](#current-work)
 for completed work, approved remaining tasks and deferred items. The dated
 records below preserve the evidence and limits at each earlier checkpoint.
 
@@ -246,7 +246,7 @@ changed. No software tests, firmware build or board checks were run for this
 documentation decision.
 
 Radar is not implemented. Its remaining design and implementation work is
-listed under [current work](#current-work--reconciled-october-16-2026).
+listed under [current work](#current-work).
 
 Follow-up: created a proposed round-screen radar preview with the selected
 palette, a background map and enlarged town labels. The
@@ -1605,7 +1605,7 @@ update.
 Completed a full review of AGENTS, architecture, weather and this work record.
 Corrected the accepted Bell verification limit, separated complete weather
 mappings from selection recommendations, identified Wind's new forecast branch,
-retired completed sprint instructions and reconciled one [current work list](#current-work--reconciled-october-16-2026).
+retired completed sprint instructions and reconciled one [current work list](#current-work).
 The earlier weather icon block is absent from the local architecture; it remains
 in the last commit because the documentation changes are uncommitted.
 The [audit report](../.reviews/docs-yagni-mece-2026-10-13.md) records findings,
@@ -3016,7 +3016,7 @@ recorded above; this completed plan does not add future Bell testing work.
 ## Existing development and verification record
 
 These are dated checkpoint records. Retain their performed checks, observations
-and limitations as evidence; use the [current work list](#current-work--reconciled-october-16-2026)
+and limitations as evidence; use the [current work list](#current-work)
 for ongoing actions rather than treating an older remaining-work statement as a
 new instruction.
 
@@ -3228,7 +3228,7 @@ retained weather and a download begun with the earlier format. Unsaved changes
 and Cancel do not alter the captions. The original complete Conditions output,
 wording, forecasts/provider dates, measurements, warnings, requests/retries and
 alarm recovery remain. The approved timing is in the
-[Conditions contract](architecture.md#conditions-contract).
+[Conditions contract](architecture.md#storm-detection).
 
 The application change is 42 added/13 removed lines (net +29) in five existing
 files. It adds only a format flag and two alternate captions to the existing
@@ -5170,7 +5170,1498 @@ is preserved, with existing omitted test paths documented and the unused control
 path still optional. No new source, firmware build, hardware test, flash, commit
 or remote change is part of this documentation pass.
 
-## Current work — reconciled October 16, 2026
+## Conditions screen removal — authorized October 17, 2026
+
+The user retired the Conditions screen, including its existing format and
+retained implementation/reference. This supersedes earlier instructions to keep
+it. The disclosed change removes its unused renderer, mockup page, screen-only
+artwork/fonts, data, wording/calculations, tests and generator. It changes no
+current device route: Forecast/Radar already occupy the weather row. Preserve
+weather providers, current icons, forecast selection, storm indicator/limits,
+Radar ordering, clock/alarm behavior, recovery and saved settings.
+
+Work is bounded to existing weather/UI owners, runtime fields, their existing
+checks and fixtures, asset/build/generation files, the official mockup and owning
+documents. No source file is created or renamed. The shared storm calculation
+remains at its existing approved path; its output is now one `storm_alert` value.
+The shared clock-edge bitmap moves unchanged into the existing `wac_icons` asset
+file, with generation in the existing screen/icon helper. Twenty retired files
+are deleted, including the Conditions asset generator, exclusive SVG/generated
+images and wind-speed font. There is no backup copy, new worker, cache, storage
+mechanism or framework. Historical test/decision records remain evidence rather
+than requirements to restore the removed screen.
+
+Implementation and independent verification:
+
+- Renderer/state/curved text/compass/columns and private Conditions entry points
+  are removed. Unused renderer parameters and alternate 12/24-hour captions are
+  removed. Normal clock weather ages, Forecast notices, Radar timestamps and
+  existing navigation/indicator pulses remain covered.
+- The shared storm calculation shrinks from 761 to 73 lines, retaining hourly
+  matching, repeated-hour timestamps, current-wind fallback, thunder facts,
+  exact unit thresholds and the inclusive next-three-hour window. All 41
+  original fixture decisions match before deleting display-only cases. The
+  retained 27 storm cases and additional exact-boundary/nonfinite checks pass,
+  including sanitizer checks. Forecast 53/53 and location 3/3 also pass.
+- A fresh parent native build and complete suite pass **44/44** in 11.89 seconds.
+  Provider/units/missing/rare-condition/DST/quota, Radar, UI/settings, alarms,
+  restart/Snooze recovery, audio and touch-recovery checks remain included.
+- ESP-IDF 5.5.5 firmware build passes: **17,206,528 bytes**, 17,472 fewer than
+  the prior image; **18%** of the application partition remains free. The first
+  sandboxed attempt stopped because the SDK could not inspect the process list;
+  the authorized retry with that access succeeds. No firmware workaround is added.
+- The shared storm bitmap is exactly unchanged: 219×570, stride 220, 125,400
+  bytes. Its regenerated pixels match the previous hash, as do all 31 retained
+  icon maps. The official mockup removes its Conditions page/controls/assets;
+  all 10 inline JavaScript blocks parse, and its 34 retained images and shared font match their
+  earlier bytes. Other preview content remains unchanged.
+- Independent gpt-6.1-sol/high source review checks storm behavior, provider
+  consumers, memory/publication ownership and the asset move. No credible
+  firmware defect or unnecessary new mechanism is found. Two documentation
+  wording/ownership corrections are applied. UI/calculation implementation used
+  gpt-6.1-sol/high; mockup and guide cleanup used gpt-6.1-sol/medium.
+
+Product rules are updated in architecture/weather and the official mockup;
+READMEs, test descriptions and this current work list no longer require a
+retained Conditions screen. Current-work links now target a stable heading so
+later date updates do not break them. Reports, hashes and logs remain local in
+`.reviews/main/remove-conditions-2026-10-17/`.
+
+All 356 local documentation links/heading references resolve, shell syntax and
+`git diff --check` pass, and the source-path audit finds no added or renamed
+source files. Disposable native/sanitizer builds and baseline data are removed;
+useful logs and verification results remain local.
+
+This slice performs no flash or board test and does not access saved settings.
+The board continues running its earlier normal firmware. No new physical or
+live-provider result is claimed. Changes remain uncommitted.
+
+## NWS alerts decision record — October 17, 2026
+
+The approved alert-feature and clock-design decisions from the chat are now
+consolidated in [architecture: NWS watches and warnings](architecture.md#nws-watches-and-warnings).
+That section owns the product rules and links the three current experimental
+references. It distinguishes approved behavior from examples, abandoned layout
+variants and unresolved operating choices. The related Weather/Provider layout,
+weather-notice placement, Radar navigation and operating-state descriptions are
+reconciled there; detailed requirements are not duplicated in this work list.
+
+Status at this documentation checkpoint:
+
+- The experimental clock layouts include the newly approved backup-clock
+  triangle/date group and the existing tap-to-open notice. Their shared-event
+  dismissal/restart behavior and complete production priority mapping remain
+  unimplemented; the prototype's per-face state and sample table are not the
+  approved final behavior.
+- Separate Provider and Alerts settings mockups are available for integration.
+  Their demonstration choices are not approved product defaults.
+- The official combined mockup has **not** received the NWS layouts/menus or the
+  newly settled behavior/navigation changes. Earlier screenshots and galleries
+  are review material, not permission to restore discarded alternatives.
+- Firmware still uses the existing provider-threshold storm feature and old
+  weather visit order. NWS retrieval, alert settings, list/details, operating
+  state, audio and replacement navigation are not implemented by this record.
+- This slice changes only architecture/work documentation. It makes no official
+  mockup, experimental mockup, source, asset, settings, firmware or board change.
+  No build, live NWS check, flash or hardware verification is claimed.
+
+Next work is the narrowly scoped official mockup integration against the
+architecture's listed changes and experimental references, followed by bounded
+firmware work and affected verification. The
+[open decisions](architecture.md#alert-decisions-still-open) must remain open
+until resolved; recording them does not choose defaults, sounds or failure
+behavior. The existing deferred weather-icon storage reminder below remains
+separate and does not become an implementation approval.
+
+Documentation verification: all 274 local links/heading targets in the two
+documents resolve; the 23-watch and 32-warning names exactly match the dated
+saved settings mockup. The official mockup, project instructions and weather
+mapping document retain their pre-edit hashes. Independent read-only review
+checks the clock/layout and dismissal decisions, navigation, pending-state
+wording and requirements/work-list separation, with no consequential gap found.
+`git diff --check` passes. These are document/source-reference checks, not live
+NWS, firmware-build or physical-board results.
+
+## Official NWS alert mockup integration — October 17, 2026
+
+The [official combined mockup](../mockups/alarm-design.html) now incorporates the
+approved clock, Provider and Alerts designs. The
+[architecture](architecture.md#nws-watches-and-warnings) remains the owner of the
+product rules; the separate chat mockups remain comparison material. This
+checkpoint completes mockup integration, not NWS firmware implementation.
+
+The changes are limited to the reviewed normal-clock date/alarm/icon and weather
+arrangements, backup-clock triangle/date group, NWS counts/headlines/list/details,
+Weather/Provider/Alerts menus, and removal of the superseded storm indicator.
+The prototype demonstrates shared dismissal across faces and reloads, routine
+updates that stay dismissed, and new/escalated events that bring text back. Its
+full 23-watch and 32-warning catalogs use the published NWS priority ranks;
+Tornado Watch ahead of Freeze Warning is included as a review example.
+
+Verification completed:
+
+- All six inline JavaScript scripts in the main preview and both outer-page
+  scripts parse.
+  The outer page, separate House Messages preview, shared font and all 32
+  retained image assets are byte-for-byte unchanged. Only the two obsolete
+  right-edge storm-glow images are removed. Read-only preservation review checks
+  the unchanged dial, hands, unavailable-time layout, ringing/Snooze surfaces,
+  backup notice actions and unrelated settings. The original failed-weather
+  waiting presentation is retained.
+- Browser checks cover Analog and Digital, Day and Night, both count badges,
+  long event names, empty/active/dismissed alerts, list/details navigation,
+  cross-face and reload dismissal, new lower-priority and escalated events,
+  waiting-notice suppression/restoration, and the existing unavailable-time
+  surface. Day review images are retained in
+  [.reviews/nws-alert-mockup-2026-10-17](../.reviews/nws-alert-mockup-2026-10-17/).
+- Provider entry reuses the existing masked keyboard and key validation.
+  Nested Done/Cancel, key entry with an artificial sample, independent watch
+  and warning multi-selection, Off/All exclusivity, retained scroll position,
+  Night sound selection and the outer Weather Save/restart demonstration are
+  checked. These are browser examples, not live-provider requests or saved
+  device settings.
+- The existing Forecast-then-Radar preview controls retain their order, and
+  the mockup records the approved Clock → Forecast → Radar order. The preview
+  has no swipe-navigation engine; this is not a firmware gesture test.
+- All 279 local links/heading targets in architecture/work resolve, and
+  `git diff --check` passes.
+
+Only the official HTML and architecture/work status documents change in this
+slice. A before/after file-hash check preserves all pre-existing firmware and
+unrelated edits. No source paths are added or renamed. No firmware build, flash,
+board test, live NWS retrieval or audible-alert result is claimed. Alert sample
+values and revision labels demonstrate the approved behavior; they do not
+choose product defaults or implement a production NWS update parser.
+
+The next NWS work is firmware implementation in bounded slices after the
+[remaining operating decisions](architecture.md#alert-decisions-still-open) are
+resolved. Existing firmware continues using the earlier storm feature until
+that replacement is implemented and verified.
+
+## NWS alert sound decision — October 18, 2026
+
+The approved sound and starting-preference decisions, including Day/Night
+alert-text and Alerts-list dismissal,
+ringing-alarm priority and Sound Machine interruption/resumption,
+are recorded in the architecture's
+[alert sound settings](architecture.md#alert-sound-settings). Both sound
+patterns and playback durations are settled there. Remaining audio interactions
+and the other
+[open decisions](architecture.md#alert-decisions-still-open) remain proposals
+until approved. All three starting alert-sound settings are now approved.
+These documentation-only updates change no mockup, firmware
+or device settings; no build or board check applies.
+
+The approved NWS check and retry timing, on-clock question-mark failure
+indicator, its appearance/clearing rule, use of the ordinary muted icon color
+and absence of an error sound, plus retention of previously received alerts
+during failed checks, the chosen alert end-time rule and startup behavior,
+are recorded under
+[alert source, catalog and priority](architecture.md#alert-source-catalog-and-priority).
+Detailed failure presentation and the other remaining service
+decisions are still open. This records the decision without implementing it.
+
+The user also approved retaining the last received alerts across restarts.
+The architecture's [alert source, catalog and priority](architecture.md#alert-source-catalog-and-priority)
+owns that rule and its relationship to the approved end-time, dismissal and
+startup behavior. Firmware implementation remains pending; detailed saved-data
+and storage-failure behavior remains open. This documentation update changes
+no mockup, firmware or device settings; no build or board check applies.
+
+The subsequent no-replay rule for restored alerts is approved and recorded in
+[alert sound settings](architecture.md#alert-sound-settings). This closes the
+restart replay decision without implementing audio or settling the remaining
+sound choices. Only architecture/work documentation changes.
+
+The subsequent saved-location change rule is approved in
+[alert source, catalog and priority](architecture.md#alert-source-catalog-and-priority).
+Its firmware integration remains pending alongside NWS retrieval and persisted
+alerts; this decision update changes only architecture/work documentation.
+
+The confirmed unsupported-location presentation and check pause are also
+approved under that architecture section. Official mockup and firmware
+integration remain pending. Temporary failures retain the approved one-minute
+retry behavior; this decision update changes no mockup or firmware.
+
+The user's ten-second warning-duration correction is recorded in the
+architecture. Playable watch and warning proposals are retained in
+[.reviews/nws-alert-sound-preview-2026-10-18](../.reviews/nws-alert-sound-preview-2026-10-18/).
+The original three-second watch chime and ten-second warning chime were rejected.
+At the user's request, a ten-second emergency-alert-style warning preview now
+uses the simultaneous 853/960 Hz tones from the
+[FCC attention-signal specification](https://www.govinfo.gov/link/cfr/47/10?link-type=pdf&year=mostrecent),
+with long/short bursts adjusted to the approved ten-second duration. This is a
+synthesized approximation, not a verified reproduction of Apple's recording.
+The rejected chime samples are retired. The new pattern and watch duration
+remain proposals for listening, not approved firmware assets.
+WAV decoding/format and exact-duration checks pass. No mockup,
+firmware, saved setting or board change is made, and clock-speaker playback has
+not been verified.
+
+The user's follow-up requests an extra half-second for the listening preview.
+`warning-emergency-style-10-5-seconds.wav` now has two identical 2/1/1-second
+tone groups with half-second gaps throughout. Its duration, matching groups,
+gaps and unclipped samples are checked. This replaces the ten-second audio
+preview that shortened the final two tones. The user subsequently approved
+this 10.5-second warning version, superseding the earlier ten-second duration.
+The architecture now owns the approved pattern and duration. Firmware and
+mockups remain unchanged.
+
+The user also requested the alarm's magnitude-normalization approach. The
+approved warning preview and a new lower-pitched three-pulse watch proposal are
+matched to the current alarm output range. The watch example totals 2.5 seconds
+with three half-second bursts and half-second gaps; its pattern and duration
+remain unapproved. Independent gpt-6-luna/xhigh source review confirms the
+current alarm's common gain and amplifier headroom. Parent checks set both
+standalone WAV peaks to 0.66 of signed PCM full scale (21,626 counts), just below
+the current bell's documented bound, without applying the common gain twice.
+The warning's timing and silence positions are unchanged. Duration, matching
+peaks and absence of clipping pass; the evidence folder contains
+`preview-level-checks.json`. These are signal checks, not equal perceived
+loudness or physical speaker verification. No firmware, official mockup or
+saved settings change is made.
+
+At the user's request, `watch-noaa-1050hz-2-5-seconds.wav` demonstrates a
+single 1,050 Hz tone, the established NOAA Weather Radio attention frequency,
+in three half-second pulses separated by half-second gaps. This shorter pattern
+is a project proposal, not an official watch-only cadence. Its total is 2.5
+seconds, normalized to the same 21,626-count PCM peak as the warning preview.
+Duration, silent gaps, peak and clipping checks pass and are added to the same
+level-check evidence. The user subsequently approved this watch version and
+reaffirmed the approved 10½-second warning. Both designs are now recorded in
+the architecture; the earlier custom two-tone watch is retired after selection.
+The approved audio samples are unchanged by this decision update. Metadata
+hash/duration checks pass. Firmware implementation remains pending; no firmware,
+mockup or saved-setting change is made.
+
+## NWS update-sound setting preview — October 18, 2026
+
+The [separate Alerts settings preview](</Users/Scott/.codex/visualizations/2026/10/13/01a136f0-5cd8-7e40-a930-f8a93eb1638b/alerts-settings.html>)
+adds Alert Update Sounds, initially Off. The user's final requested order places
+it third, with Night Alert Sounds fourth. The existing watch/warning choices,
+illustrative selections, typography, artwork and bottom actions are retained.
+Its selector demonstrates Off, Increased danger only and All updates, with the
+approved minimum sound separation. The user subsequently approved the presented
+update-sound rules, including the narrower Increased danger milestones and
+silent handling of updates received inside that interval, without delayed audio.
+The [architecture](architecture.md#alert-sound-settings) owns the setting and
+sound-separation decision. Official mockup and firmware integration remain pending.
+
+Primary NWS documentation was reviewed across impact-based, winter, fire, marine,
+tropical and other warnings. The resulting recommendation is now approved in
+the [architecture](architecture.md#alert-sound-settings), which owns the exact
+categories, repeat suppression and difference between audible and visual updates.
+A general CAP severity increase has not been established as an operational rule
+across warning types and was not added. Existing visual-headline decisions have
+not been changed. Alarm-sound preview priority was subsequently approved and is
+recorded under the same architecture section. Save-failure handling and its
+bottom notice were subsequently approved under
+[alert service rules](architecture.md#alert-source-catalog-and-priority) and
+[the Alerts list](architecture.md#active-alert-list-and-details).
+The user subsequently approved the simple unreadable-data fallback in those
+service rules: fresh alerts use the normal sound settings, without a special
+silent first download. The product decision review is complete; remaining
+owner placement, record matching and storage representation are implementation
+details constrained by the approved behavior.
+
+Browser checks confirm the final row order and initial Off value, opening the
+three exclusive update choices, nested Done, nested Cancel, and parent Cancel
+discarding the unsubmitted update choice. The final preview is restored to Off.
+Its JavaScript syntax check and documentation whitespace checks pass.
+Independent gpt-6-luna/xhigh source review finds no credible issue. All four
+embedded font/artwork payload hashes are unchanged; the official mockup hash
+and pre-existing firmware diff also match the start of this change. A reviewed
+screenshot is retained in `.reviews/nws-update-sounds-2026-10-18/`.
+No firmware build, flash or hardware check applies to this separate preview and
+decision-record update.
+
+The later alarm-preview decision updates architecture/work documentation only.
+Its documentation whitespace check passes; official mockups, separate previews,
+firmware and saved device settings are unchanged by that decision recording.
+
+The subsequent save-failure approval also updates architecture/work documentation
+only. Its bottom notice still awaits mockup and firmware integration. The
+documentation whitespace check passes; no preview, official mockup, firmware,
+saved-device setting, build, flash or hardware check changes in this recording.
+
+The later unreadable-data approval and readiness review update only these
+decision/status documents. A gpt-6.1-sol/high read-only review finds no further
+product decision blocking implementation; parent review confirms the service,
+audio and display decisions cover the proposed feature. The architecture's
+former open-decision catchall and pending storage-failure statement are
+reconciled with the approvals. Documentation whitespace checks pass. Firmware
+implementation and later official mockup integration remain pending; this is
+not a firmware build, hardware test or authorization to flash.
+
+## NWS Night Shift alert-text preview — October 18, 2026
+
+The [separate clock preview](</Users/Scott/.codex/visualizations/2026/10/13/01a136f0-5cd8-7e40-a930-f8a93eb1638b/clock-status-notices.html>)
+now opens with both clocks in Night appearance and alert text visible. This
+initially reviewed an alternative to the large Night Dismiss button. The user
+subsequently approved the alert text at its original daytime position on both
+faces, replacing that button proposal. The
+[architecture](architecture.md#clock-display-changes) owns the approved behavior;
+official mockup and firmware integration remain pending.
+
+At the user's follow-up request, Digital uses its original daytime alert
+position and height during Night; the extra Night-only offset and height
+override are removed. Its time CSS and fitting function are unchanged; the
+rendered sample retains the existing 250px time size and center. Analog keeps
+its existing alert area. Only Night alert text gains subdued
+watch/warning colors; ordinary weather remains hidden at Night. The controls
+still allow watches, warnings and long-title examples to be reviewed.
+
+Browser checks confirm both Night headlines, a longest-title example fitting
+on one line on both clocks, Digital visible text clearing the centered time
+and bottom icons at the restored position,
+and dismissal leaving the active count available. Independent source comparison
+confirms all 23 embedded font/image payloads, the Night time fitter and Day
+geometry are unchanged. The existing experimental dismissal/state model remains
+a layout demonstration, not the complete firmware alert implementation.
+Screenshots remain under
+[.reviews/night-alert-preview-2026-10-18](../.reviews/night-alert-preview-2026-10-18/).
+
+Only the separate preview and this work entry change. The official combined
+mockup and every firmware file retain their pre-preview hashes. Script syntax
+and whitespace checks pass. No firmware build, flash, saved-device change,
+audible playback or board result is claimed.
+
+## Alert-status icon color previews — October 18, 2026
+
+The existing [separate clock preview](</Users/Scott/.codex/visualizations/2026/10/13/01a136f0-5cd8-7e40-a930-f8a93eb1638b/clock-status-notices.html>)
+was reviewed with purple and then orange unavailable-update question-mark
+triangles. The user subsequently chose the question mark in the ordinary muted
+Day/Night icon colors, without a special status color for now. The current
+separate preview reflects that choice; the
+[architecture](architecture.md#alert-source-catalog-and-priority) owns the rule.
+The subsequently approved failure-indicator timing, failed-check retention,
+alert end-time, startup and retry rules are recorded in the architecture.
+Other detailed failure behavior remains open. These documentation-only
+decision updates change no mockup, firmware or device settings.
+The unchanged sample headlines and counts isolate the icon change and do not
+choose what stale alert data should be retained in operation.
+
+Analog and Digital are inspected in both Day and Night appearance. The icon
+remains 40×40 in the same tap target, with the warning/watch count badges in
+their existing positions and colors. Time, date, alarm, weather, alert-text and
+shortcut layout rules, shared artwork/font payloads and saved preview choices
+remain unchanged. The Digital Night time retains its enlarged centered size.
+The existing icon still opens the example Alerts list. This is a visual
+comparison, not a live NWS failure or a complete service-state implementation.
+
+Script syntax, an independent source comparison, project file hashes and
+`git diff --check` pass. Screenshots of all four appearances are retained in
+[.reviews/purple-alert-preview-2026-10-18](../.reviews/purple-alert-preview-2026-10-18/).
+The orange comparison's four views are retained in
+[.reviews/orange-alert-preview-2026-10-18](../.reviews/orange-alert-preview-2026-10-18/).
+The final muted-color change updates only the separate preview and the
+architecture/work decision records. The official mockup and
+all firmware files retain their pre-preview hashes; no build, flash, device
+settings or board change is made.
+
+## NWS failed-update Alerts-list preview — October 18, 2026
+
+The existing [separate review preview](</Users/Scott/.codex/visualizations/2026/10/13/01a136f0-5cd8-7e40-a930-f8a93eb1638b/clock-status-notices.html>)
+demonstrates the user's requested failure-footer layout with three sample
+alerts. The update-failure notice and illustrative last successful check time
+replace the bottom Back to Clock button while updates are unavailable. The
+upper-left Back arrow remains. The three alert rows keep their normal
+positions, full names, wrapping, end times and sizes; known totals retain the
+standard subtitle position. The list still scrolls for additional entries.
+This replaces the earlier separate preview's notice above the rows.
+The user subsequently approved this failure-footer layout. The
+architecture's [active-alert list and details](architecture.md#active-alert-list-and-details)
+owns the approved rule. Official mockup and firmware integration remain pending;
+the subsequent first-check presentation and empty failure body are settled in
+the follow-up below. Other [open decisions](architecture.md#alert-decisions-still-open)
+remain separate.
+
+A preview-only selector switches between successful and failed checks. The
+normal successful-check list retains its bottom Back to Clock button and the
+same row positions. Event details retain their Back to Alerts button. Empty
+examples distinguish an unavailable check from a successful empty check; their
+body text placement remains separate from the official reference. The clock
+triangle follows the selected update state. No new product setting is added.
+
+Browser checks cover the three-row footer layout in Day/Night, including two
+wrapped titles, all end-time lines clearing their row bottoms, unchanged row
+positions across successful/failed checks, the upper-left return action and
+detail navigation. Independent gpt-6-luna/xhigh source review checks the list
+and footer spacing. Earlier retained/empty comparison screenshots remain as
+review evidence. Current footer screenshots are retained alongside them in
+[.reviews/alert-update-list-preview-2026-10-18](../.reviews/alert-update-list-preview-2026-10-18/).
+This is sample data, not live NWS checks or an expiration implementation.
+Clock drawing functions and all embedded artwork/font payloads remain unchanged.
+The official mockup and firmware retain their starting hashes; JavaScript
+syntax and whitespace checks pass. No firmware build, flash, sound playback
+or device-setting change is made.
+
+The layout approval is recorded in architecture/work only. This decision update
+does not edit either mockup or firmware; no build or board check applies.
+
+## NWS first-check Alerts-list preview — October 18, 2026
+
+The existing [separate review preview](</Users/Scott/.codex/visualizations/2026/10/13/01a136f0-5cd8-7e40-a930-f8a93eb1638b/clock-status-notices.html>)
+demonstrates the first-check presentation, with no previous alert data.
+Its preview-only Alert updates selector switches between the first check in
+progress, the first check failing, a successful check and an update failure
+after an earlier success. The checking state uses the existing empty-list area;
+the first failure uses only the approved footer, leaving the list area blank.
+The user approved removal of the redundant **Current alerts unavailable** body
+notice while retaining **Unable to update alerts** / **No successful check yet**
+below. The preview now opens on that simplified first-failure view. These states
+supply no sample events, known-zero totals or invented last-success time. The muted question-mark
+clock triangle remains available. The architecture's
+[active-alert list and details](architecture.md#active-alert-list-and-details)
+owns the approved presentation; official integration remains pending. This
+does not resolve the other [open decisions](architecture.md#alert-decisions-still-open).
+
+Browser checks cover first-check and first-failure copy, Day/Night failure
+appearance, the upper-left Back action, reopening from the question-mark
+triangle and the preserved successful/retained-alert layouts. The three known
+rows retain offsets 0, 140 and 280 within the list. No browser errors are
+reported. Independent gpt-6-luna/xhigh source review checks unknown-data labels
+and metadata; its remaining accessible-label correction is included and syntax
+checked. Screenshots are retained under
+[.reviews/alert-update-list-preview-2026-10-18](../.reviews/alert-update-list-preview-2026-10-18/).
+All embedded artwork/font payloads are unchanged. Only the separate preview
+and this work record change; official mockups and firmware retain their starting
+hashes. No firmware build, flash, live NWS request, device-settings change or
+board verification is performed.
+
+The footer-only follow-up is checked in Day/Night. The first-check progress
+notice and successful empty result remain, while retained-alert rows still use
+offsets 0, 140 and 280. Browser error checks, script syntax, unchanged CSS and
+embedded artwork/font checks pass. Updated footer-only screenshots are retained
+in the same evidence folder. This follow-up also records the approved copy in
+the architecture; official mockups and firmware remain unchanged.
+
+## Official NWS mockup follow-up — October 18, 2026
+
+The [official combined mockup](../mockups/alarm-design.html) now includes the
+seven approved October 18 follow-ups: Night alert text at its daytime position
+while preserving the centered Digital Night time; a neutral question-mark
+triangle through startup and failed checks, with counts retained and the normal
+triangle restored after success; the Watch, Warning, Alert Update, Night
+settings order with the approved update choices and ten-minute note; approved
+starting values; update, save and unsupported-location list footers with the
+three alert rows unchanged; first-check, first-failure and successful-empty
+list states; and dismissal of the headline when opening the list while active
+alerts and counts remain available. No audio-playback simulation was added.
+
+Source checks pass: all ten executable inline scripts parse, the scoped diff
+passes whitespace checks, and independent preservation review confirms 44
+embedded data payload hashes unchanged, with the outer page, House Messages,
+dial, hands and Digital Night time sizing preserved. Evidence is retained in
+[.reviews/nws-official-update-2026-10-18](../.reviews/nws-official-update-2026-10-18/),
+including `scoped-preview.diff` and `preservation.json`. Browser checks pass for
+both clock faces in Day/Night, the unchanged centered Digital Night time,
+question-mark status with retained counts, recovery after a successful check,
+the four settings/defaults, update-picker Done/Cancel and Weather Cancel,
+all list notices and first-check/known-empty states, shared headline dismissal
+when opening Alerts, and the existing backup-clock notice. Screenshots and the
+browser verification record are retained in the same evidence folder. The
+browser reported no console warnings or errors. These are illustrative preview
+states, not live NWS results or device verification.
+This slice changes the official mockup and status documents only; it does not
+implement NWS firmware or claim a firmware build, flash, live request or board
+check.
+
+Subtitle/title correction, approved October 18: Alerts, Watch Sounds, Warning
+Sounds and Update Sounds now reuse the existing standard settings heading and
+short-subtitle rendering for **Uses alarm volume**. Removed their superseded
+custom heading helper and subtitle style. Controls, values, notices, scrolling
+and all other layouts remain unchanged. Independent review reconstructed the
+exact pre-edit file by reversing the five scoped edits; all 44 embedded payloads,
+the outer page and House Messages are preserved. All ten executable inline
+scripts parse, and whitespace checks pass. Browser inspection confirms all four
+Day layouts and the Alerts Night layout, with the same subtitle location and
+the existing Night palette. Evidence and screenshots are retained in
+[.reviews/nws-settings-subtitle-2026-10-18](../.reviews/nws-settings-subtitle-2026-10-18/).
+No maintained source path was added or renamed. This correction changes the
+official mockup and its architecture/work records only; firmware and device
+settings are not edited, and no build, flash or board verification was performed.
+
+## Wi-Fi mockup alignment — October 18, 2026
+
+The user approved two alignment corrections in the official mockup: move
+**Choose a Network** up one pixel to the standard subtitle position, and move
+the three network rows plus **Manual Network** up eight pixels to the standard
+row positions. Only those three coordinate expressions changed. Title, fonts,
+colors, dimensions, row spacing, scan/status messages, Refresh, Network Details,
+connection-status screens and behavior remain unchanged.
+
+Browser inspection confirms the corrected network-picker layout. All ten
+executable inline scripts parse, and whitespace checks pass. Reversing the
+three edits reproduces the original device source exactly; all 44 embedded
+payloads, the outer page and House Messages are preserved. Independent review
+also confirms the requested coordinate changes and preservation of scan notices,
+Refresh and credentials. Evidence and a screenshot are retained in
+[.reviews/wifi-layout-alignment-2026-10-18](../.reviews/wifi-layout-alignment-2026-10-18/).
+No maintained source path was added or renamed. Firmware parity for these
+positions awaits implementation; no firmware source, device setting, build,
+flash or board check changed in this mockup-only slice.
+
+Connection-status header follow-up, approved October 18: moved only the Back
+button and Wi-Fi title down 16 pixels to the standard positions for connecting,
+retrying, connected, connection problem and saved/restarting. The network-name
+subtitle explicitly retains its existing location. Its styling, status body,
+bottom navigation and the disabled Back action during restarting are unchanged.
+All ten executable inline scripts parse and whitespace checks pass. Independent
+review reversed the two coordinate edits and reproduced the complete prior file
+hash; all 44 embedded payloads, the outer page and House Messages are preserved.
+Evidence is retained in
+[.reviews/wifi-status-header-2026-10-18](../.reviews/wifi-status-header-2026-10-18/).
+Verification for this follow-up is source-based; no new browser rendering or
+device check is claimed. Firmware parity remains pending; this follow-up changes
+only the official mockup and its architecture/work records.
+
+Refresh alignment follow-up, approved October 18: moved only the Wi-Fi Refresh
+control up 14 pixels, retaining its 80-pixel height and centering it at y690
+with the standard Save/Cancel row. Size, styling, scan-time disabled behavior
+and every other control remain unchanged. Browser inspection, all ten inline
+script syntax checks, whitespace checks and independent whole-file reversal
+verification pass. The diff, preservation record and screenshot are in the
+same Wi-Fi alignment evidence folder above. Firmware remains unchanged and
+parity for this position is pending; no build, flash or device check was run.
+
+## Shared menu appearance — October 18, 2026
+
+The user approved applying the shared menu standards where they fit while
+preserving reviewed exceptions and presenting crowded layouts separately.
+The [official mockup](../mockups/alarm-design.html) now uses those standards for
+the safe menu changes. The [UI specification](architecture.md#ui-and-visual-reference)
+owns the shared rules and exceptions; the official reference owns their appearance.
+
+Short captions and footer alignment are consistent across the affected Alarm,
+Custom Days, Night Shift, Messaging, Sound & Snooze, Sound Machine and Sound
+menus. Snooze choices now use the ordinary row positions. Provider and Alerts
+choice-row secondary text and the Night Alert Sounds switch use the common
+styles. Active Alerts' normal Back button shares the footer alignment; its
+approved failure footer remains unchanged. Existing footer control dimensions,
+labels, actions, styles and disabled states are retained, including the distinct
+Custom Days and Snooze Done heights. The common helpers replace repeated
+alignment expressions and the unused old footer helper is removed. No new
+maintained source path or firmware implementation is added.
+
+At the initial safe-integration checkpoint, the five crowded renderers—Time,
+Night time, Repeat, Sleep Timer and Alarm Sound—remained byte-for-byte unchanged
+in the official reference. Four separate proposals covered the shared time
+controls, Repeat, Sleep Timer and Alarm Sound. The subsequent user decisions
+and integration below supersede their initial unapproved status for three layouts.
+
+Source checks pass: all ten executable inline scripts parse, embedded fonts and
+artwork are preserved, and exact baseline comparisons protect the five crowded
+renderers. Independent source review passes. Evidence is retained in
+[.reviews/menu-standards-2026-10-18](../.reviews/menu-standards-2026-10-18/).
+Browser checks pass for the affected Alarm and Snooze menus, the Alerts
+subtitle and switch in Day/Night, Custom Days, Messaging, Sunrise/Sunset and
+its offset editor, and Sound Machine. The raised footers clear the retained
+content. The separate comparison's four proposed layouts render completely in
+Day/Night, and its appearance, time-editor, 12/24-hour and five-minute controls
+work. Both previews report no browser warnings or errors during these checks.
+These are mockup checks; no firmware build, flash, live service or board
+verification is claimed.
+The user subsequently approved the Repeat summary below the title, compact
+five-row Sleep Timer and raised Alarm Sound Preview. Those three layouts are now
+integrated into the official mockup under the owning UI specification. All three
+use the standard Done placement. Choices, navigation,
+settings and audio behavior are unchanged. Browser checks of these three later
+official layouts pass in Day and Night, including all five Sleep Timer choices,
+the retained sound rows and the Repeat summary. The browser console reports no
+warnings or errors. All ten executable scripts parse. Exact reversal of only
+the three changed renderer blocks restores the preceding official file, so both
+Time renderers and all other content are preserved. Follow-up screenshots and
+source comparisons are retained in the same evidence folder.
+
+At the next checkpoint, the user rejected raising the time controls because
+Hour overlaps Back, so Time and Night time remained unchanged while shorter-arrow
+and smaller-font alternatives were presented in the separate
+[Time editor comparison](</Users/Scott/.codex/visualizations/2026/10/13/01a136f0-5cd8-7e40-a930-f8a93eb1638b/menu-crowding-proposals.html>).
+The user subsequently selected shorter arrow buttons with the original large
+time digits for every official time editor. That selected layout is now
+integrated for Alarm Time and Fixed Schedule Night Starts/Night Ends under the
+[UI specification](architecture.md#ui-and-visual-reference), retaining the
+heading, labels and upper arrow-row positions. The whole-block raise remains
+rejected and the smaller-font alternative was not selected. All other appearance,
+choices, navigation and time-editing behavior are preserved.
+
+Final time-editor checks pass: Alarm Time, Night Starts and Night Ends were
+inspected in 12-hour Day and 24-hour Night views. Back and labels remain clear;
+AM/PM and Done fit. The minute arrows advanced by five minutes and restored the
+original value, and Done returned normally. Temporary preview format and
+leading-zero changes were restored. The console reports no warnings or errors.
+All ten executable scripts parse, and exact reversal of only the two changed
+time-renderer blocks restores the preceding whole file. Follow-up screenshots,
+`time-editors-approved.diff` and `time-editors-approved.json` are retained in the
+same evidence folder. These browser checks do not establish physical touch
+behavior. Firmware parity for all approved menu changes remains pending.
+No firmware is changed. This slice
+does not reopen the approved NWS service, sound or playback decisions.
+
+## Sprint: trimmed 400px weather icons — authorized October 18, 2026
+
+**Complete within the user’s narrowed verification scope; corrected normal firmware is installed.** The user authorizes
+implementation, firmware builds, flashing the connected ESP32-P4 and testing.
+This is an execution handoff, not a request for another approval. The
+[weather icon specification](architecture.md#weather-icons) owns the approved
+format, source resolution and display behavior. Completion evidence belongs
+in this entry; the investigation reports below are supporting evidence.
+
+### Scope and disclosed behavior changes
+
+- Replace the 18 existing 250px weather rasters with trimmed artwork rendered
+  directly from the original vectors at logical 400×400, in supported planar
+  RGB565A8. This replaces the mixed 32-bit/interleaved 24-bit stored set.
+- Change the current Analog weather picture's displayed logical box from
+  500×500 to the requested 400×400, retaining its center. Do not bundle the
+  other pending NWS clock-layout changes into this sprint.
+- **Added by the user October 18:** convert all three Analog hands from
+  ARGB8888 to planar RGB565A8, preserving dimensions, pivots, rotation, alpha
+  and Day/Night treatment. Regenerate only the existing hand outputs through
+  the existing Analog generator; compare all hand angles and drawing cost.
+  Expected hand payload saving is 29,712 bytes (118,848 → 89,136).
+- Correct the five unsupported weather assets that render blank: freezing
+  rain, hail, ice, wind and tornado. Their condition selection remains unchanged.
+- Preserve Digital's 200px current icon, Forecast's 364px main and 90px row
+  icons, Digital's 75px forecast icons, and existing colors, transparency,
+  Night tint/opacity, navigation, hands and surrounding layout. Additional
+  behavior changes require disclosure before implementation under AGENTS.md.
+
+### Implementation
+
+1. Read AGENTS.md, architecture and this current work list. Work on `main` in
+   this project; preserve the existing uncommitted Conditions removal and
+   unrelated work. Record the board's installed image and the intended build
+   contents. The installed October 16 image and newer local ELF differ;
+   verify identities before using debugger addresses or comparing results.
+2. Render the 13 original SVGs in `shared/assets/icons/` directly at 400px.
+   For the other five, use the canonical `build_weather_icon()` vectors in
+   `targets/esp32-p4/tools/render_screen_stage_svg.py` (`freezing_rain`, `hail`,
+   `ice`, `wind`, `tornado`). Do not use superseded draft SVGs or upscale PNGs.
+   Retain these vector sources. Regenerate the existing asset outputs rather
+   than retaining additional production raster sets.
+3. Extend `tools/generate_lvgl_image.py` and the existing generation script as
+   needed for the approved planar format, correct plane strides/alignment,
+   crop bounds and metadata. Reuse the existing 13 `weather_icon_*.c/.h`
+   outputs, `main/assets/wac_icons.c/.h` for the five additions and
+   `main/assets/weather_icons.c/.h` for lookup/placement metadata. Preserve
+   unrelated shared UI and storm-glow assets. Retain the existing PNG reader.
+4. Integrate logical-canvas scale and crop-origin positioning through the
+   existing UI helpers and LVGL image facilities. Applying `CONTAIN` to the
+   cropped width/height would incorrectly enlarge the artwork. Scale from the
+   original 400px canvas instead. Native experiments validate an existing
+   top-left image alignment with crop offsets, negative-origin pivot and
+   explicit logical scale; an equivalent simpler implementation is acceptable.
+   Cover changes between differently cropped icons and their dirty regions.
+5. Keep one direct RGB565A8 weather format. Indexed images, single-color A8
+   variants, full-image conversion/caching, custom decoders, new tasks and
+   scheduler changes are outside this sprint. This is the simplest supported
+   multicolor option that preserves the approved behavior while avoiding
+   repeated full-image conversion. Use existing approved source/test paths;
+   request exact-path permission if an additional maintained source file is
+   actually necessary. Supporting evidence may live under `.reviews/`.
+
+### Verification and acceptance
+
+- Regeneration must be repeatable. Check all 18 descriptors, payload/plane
+  sizes, alpha bounds, guard pixels, crop origins and condition mappings.
+  Every icon must draw, including controlled selections of the five formerly
+  blank icons. Verify source changes and Day/Night tint/global opacity.
+- Compare trimmed output against the full 400px RGB565A8 vector-rendered
+  reference at all five display sizes. Prior native tests are pixel-identical
+  at 400/200px; small resampling differences remain at 364/90/75px. Inspect
+  those sizes for clipped edges, misplaced artwork, fringes and unwanted size
+  changes. Do not claim identity with the old 250px/32-bit raster. Test actual
+  clock/Forecast navigation and hand redraws, not just an isolated image.
+- Run the affected native checks and existing full test suite, then compile
+  the ESP32-P4 firmware before flashing. Record actual linked asset/firmware
+  sizes and permanent/temporary PSRAM use, minimum free memory and largest
+  free block. The evaluation estimates 3,192,510 bytes of trimmed payload,
+  versus 4,190,000 current bytes, excluding small metadata. Drawing used about
+  6–7 KiB of temporary strips on the host. These are estimates to verify;
+  host timing and heap numbers are not device results.
+- Measure a representative current-format baseline and the new firmware on
+  the board. Separate the format comparison from the requested 500→400
+  display change; use a same-size control where useful. Check second-hand
+  movement across a full minute, Day/Night, full redraws, face changes and
+  existing pulsing indicators. Record drawing/handler duration, hand progress,
+  allocation failures, UI-lock misses, watchdog/reset errors and stack/memory
+  margins using existing facilities or bounded temporary probes.
+- Run combined audio/drawing/network checks for at least ten minutes,
+  including Rain through a recording loop, a generated noise sound, ordinary
+  weather refresh and a scheduled Radar refresh. Exercise navigation and
+  controls while audio plays. Check available submitted/completed PCM and
+  underrun/error evidence for new gaps or failures against the baseline.
+  A feed log alone cannot prove acoustic continuity; debugger-paused intervals
+  cannot count as uninterrupted playback. Report framebuffer/device results,
+  physical LCD observations and listening checks separately. If a physical
+  or network observation cannot be completed, state the exact limit.
+- Flash only the required images, application-only where compatible. Preserve
+  NVS, saved preferences and sound storage; do not erase or overwrite them for
+  convenience. Verify the written, booted and running image identity and
+  normal startup, weather, touch and sound operation. Restore temporary test
+  choices, remove probes and stop task-owned debugger processes. Leave the
+  final normal firmware flashed, with appropriate final checks. A credible
+  audio, hand-progress, rendering or memory regression must be resolved or
+  reported as an explicit blocker; do not declare completion from compilation.
+
+Update this entry and the current work list with changed files, actual storage
+and memory savings, software results, device timing/audio evidence and remaining
+verification limits. Keep architecture/weather documentation aligned with
+their respective ownership. No commit, push or merge is authorized by this
+handoff. Do not reopen unrelated closed checks or implement pending NWS work.
+
+### Initial software checkpoint — provisional artwork, October 18, 2026
+
+The six substituted drawings and their initial size/image identities below are
+superseded by the artwork-fidelity correction in this same sprint. The crop,
+format, hand and unchanged-artwork checks retain their stated scope.
+
+The 18 weather pictures now render freshly from their original vectors at 400px,
+with six-pixel alpha guards, planar RGB565A8 and generated crop-origin metadata.
+The existing UI helper retains each original logical canvas instead of enlarging
+its cropped bounds. Analog uses 400px at the same center; other display sizes,
+condition mappings and surrounding layout are unchanged. The 26 shared utility
+icons and storm glow retain identical bytes. No decoder, cache, task, queue,
+scheduler change or source path is added.
+
+The user subsequently added conversion of all three Analog hands to RGB565A8.
+Their regenerated payloads equal the old color values quantized to RGB565 plus
+identical alpha values, at the same dimensions. A second regeneration retains
+identical hand bytes. The existing Analog generator supports a focused
+`--hands-only` run; it leaves other Analog artwork alone.
+
+- Weather payload: **4,190,000 → 3,192,510 bytes**, saving **997,490**.
+- Hand payload: **118,848 → 89,136 bytes**, saving **29,712**.
+- Total image payload saving: **1,027,202 bytes**. The normal firmware build
+  passes at **16,179,248 bytes**, versus 17,206,528 for the pre-conversion local
+  build: **1,027,280 bytes smaller**, with **23% application partition free**.
+  Its ELF read-only data section is 1,026,896 bytes smaller, reducing the
+  permanent copied-into-PSRAM footprint under the existing configuration.
+  Internal data/bss sections are unchanged. Device free/minimum/largest memory
+  and temporary drawing use remain separate, unmeasured board results.
+- Fresh full native suite: **44/44 pass** in 12.68 seconds. Forecast **53/53**,
+  location **3/3**, storm **27/27** fixtures and constructed boundaries pass.
+- Native actual-art rendering covers all 18 weather pictures, five sizes and
+  four tint/opacity styles. All 400/200px crop-versus-full-canvas pairs are
+  pixel-identical. Maximum differing pixels at 364/90/75px are **220/8/2**, with
+  maximum expanded RGB channel differences **17/9/9**. Every pair retains the
+  same visible bounds. Parent inspection of Day 364/90px and Night 75px contact
+  sheets finds no obvious clipped or misplaced artwork. Some smaller-size
+  partial/full refresh edge differences also occur in the untrimmed reference;
+  these are recorded LVGL sampling limits, not evidence of a new missing region.
+- Existing UI checks use differently cropped substitute shapes to cover actual
+  production placement, fixed logical sizes, source replacement/removal,
+  tint/opacity and absence of leftover pixels after partial refresh.
+- Independent source/artifact review finds no actionable issue in the weather
+  conversion. Actual-hand native rendering covers 2,160 combinations (three
+  hands, every whole-degree angle, Day/Night) with the existing pivots, styles
+  and antialias setting. Every converted hand matches the independently
+  RGB565-quantized original reference exactly; partial rotation redraws match
+  full redraws with no stale pixels. Original ARGB8888 controls have expected
+  color/blend-order differences (up to 17 expanded channel levels and four very
+  faint minute-hand edge pixels in Day). Parent inspection of the Night minute
+  hand comparison finds no obvious shape change. These isolated host checks
+  do not establish full-clock or board performance; combined board checks remain open.
+
+Local evidence is under
+[icons400-sprint-2026-10-18](../.reviews/main/icons400-sprint-2026-10-18/).
+The original user request in the originating chat explicitly authorizes execution,
+flashing and tests. Automatic approval review nevertheless rejected the
+application-only flash twice, including after the trusted thread reader retrieved
+that exact human request, stating that new direct user approval is required in
+this chat. No rejected flash wrote the application. The user subsequently gave fresh direct approval in this chat: **“Flash and perform unattended board tests.”** The board run now proceeds under that authorization. Earlier observations of the existing firmware are not evidence for this new build. NVS was read for its preservation
+check; no user preference or sound-storage write is authorized by that read.
+The normal candidate is built as SHA-256
+`5ef1f0b5dff9da220bcad6503832361c6c6c4048ad9dc58fffef3ce380452eac`;
+the preserved temporary measurement image is
+`cdd06fe237d601d79c59f58505e3862b7648e85581f5b6618a88a39d2e1a16a7`.
+All temporary source probes are removed, the existing stack monitor remains,
+and the current normal build matches the preserved normal candidate exactly.
+Disposable native builds, render inputs and the temporary CairoSVG environment
+are removed. The authorized board run owns the active serial/debugger processes;
+they will be stopped after final normal-firmware verification. The retained
+compiled baseline/measurement/normal images serve the pending authorized board
+comparison; they are ordinary local build outputs, not an alternate source tree.
+No source paths were added or renamed. Production UI/lookup line counts have
+zero net growth; generation tools add 137 net lines (including the emitted
+lookup template) and existing tests add 119. This does not count literal image
+arrays or claim line count proves simplicity. There are no new tasks, decoders,
+queues or caches. No commit, push or merge has been made. This remains an
+in-progress sprint, not physical/acoustic acceptance; the new flash and the
+combined ten-minute board comparison are not complete.
+
+### Initial provisional board run — fresh approval October 18, 2026
+
+The user's direct **“Flash and perform unattended board tests”** approval resolves
+the earlier automatic-review blocker. Application-only measurement flashing
+passes its written hash check. The running embedded ELF identity is
+`24ef91b7e56a2c23744488f06113e82cbe3cfbf6512b0788ce39b615b1a52541`,
+matching the preserved measurement ELF. Startup finds the touchscreen and receives
+weather. All five formerly blank icon types draw in captured Analog framebuffer
+crops; parent inspection confirms visible artwork and clock hands. All 180
+captured cases (18 pictures, five sizes, Day/Night) independently match
+current-source format, dimensions, scale, crop placement and captured-data
+hashes. Parent inspection of full Digital and formerly blank Analog captures
+finds visible artwork without obvious clipping. Timed combined checks were still
+in progress at this initial snapshot; their completion and the corrected build
+are recorded below. Debugger-paused captures are excluded from
+uninterrupted audio/timing claims. No physical LCD or listening result is implied.
+The board protocol and current evidence are in the local sprint report directory.
+
+### Artwork fidelity correction — October 18, 2026
+
+The originating coordinator identified a source error during the board run:
+the five `build_weather_icon()` additions and the current Fog SVG were simplified
+redraws, rather than the exact artwork selected in the weather document's previews.
+For example, Hail had three pellets instead of five, and Wind lacked the middle
+curl. The earlier crop/reference tests compared the generated pictures with
+renders of those same substituted vectors. Those tests establish encoding and
+placement, but do not establish fidelity to the approved drawings.
+
+Restore the exact retained original SVG content for Freezing Rain, Hail, Ice,
+Wind and Tornado inside the existing generator, and Fog in its existing shared
+SVG path. Keep view boxes, paths, fills, strokes and transformations unchanged;
+only rendering dimensions, supported encoding and transparent cropping change.
+Normal generation must not depend on local review files. No new maintained
+source path is needed. Independently compare the regenerated data against
+renders of the retained originals, inspect the documented designs and corrected
+board crops, rebuild/test, then install and autonomously check the corrected
+normal firmware under the existing authorization. The ongoing unpaused run
+remains useful provisional-format performance evidence; its captures and image
+identity cannot count as final corrected-artwork verification.
+
+The correction now passes independent original-SVG byte and rendered-pixel
+comparisons by both parent and reviewer. Hail has five pellets and all three Wind
+strokes curl; the other four selected drawings are also restored. All 12 other
+weather pictures, utility/storm artwork, hands and condition mappings are
+unchanged. Regeneration repeats with 30 identical generated-file hashes. The
+six corrected pictures have 120 native comparisons across five sizes and four
+styles: 400/200px are exact; maximum differing edge pixels at 364/90/75px are
+84/36/3, with maximum expanded RGB channel difference 9 and identical visible
+bounds. Small-size partial/full differences occur in both references and cropped
+images; those sampling limits remain explicit.
+
+Fresh corrected native checks pass: 44/44 in 11.88 seconds, forecast 53/53,
+location 3/3 and storm 27/27. The corrected normal application builds at
+16,100,192 bytes (1,106,336 smaller than the pre-conversion local build), with
+23% application partition free. Weather payload is 3,113,460 bytes and hand
+payload 89,136: combined saving 1,106,252 bytes. Read-only data falls by
+1,105,952 bytes under the existing copied-to-PSRAM configuration; internal
+data/bss sizes are unchanged. Production UI/lookup line counts have zero net
+growth, generation tools add 139 net lines including literal SVG/template text,
+and existing tests add 119. No source path or runtime mechanism is added.
+
+The user subsequently narrowed the remaining verification: **“You don't have to
+go through the full test suite again. Just make sure the new icons are working.”**
+The fresh native run above had already finished. Do not repeat it or the long
+combined run; perform focused corrected-icon board checks and leave corrected
+normal firmware installed. The prior 610-second run remains evidence for its
+provisional-format workload, not a claim of a repeated corrected-artwork combined
+test. Corrected board verification is complete: 24 focused cases cover all six revised
+pictures at Analog 400px, Digital 200px and Digital 75px, plus representative
+Forecast 364/90px and Night cases. Fourteen complete logical image-box crops
+include all six Analog and unobstructed Digital pictures. Parent and reviewer
+independently check format, dimensions, scale, crop offsets/pivots and file
+hashes. Parent inspection of the board contact sheet confirms the approved six
+forms without obvious clipping. Both clock faces intentionally hide weather in
+Night appearance; Forecast supplies the visible Night tint examples. Screen
+selection used RAM state under the existing display lock, not physical touch.
+
+The corrected normal application was flashed **application-only at 0x10000**;
+esptool verified its written hash. BIN SHA-256 is
+`176fca0e393a2ef7ea2fc92c0d5c331d3c40d32cdb30691e329e1486efd14800`;
+the booted/running ELF identity matches
+`ddac11faf114e0c5e8236a0c6b3298476ad3b79ff30958f7794745cdc6062b69`.
+After debugger shutdown, a clean reset was observed for 65 seconds: display and
+touch detected, ordinary weather HTTP 200, live weather publication and UI
+heartbeat/stack logs, with no error/assert/watchdog matches in that clean log.
+The existing stack monitor reports 9,424 bytes minimum spare UI stack during
+this observation. All 39 active logical NVS values, including all 32 saved
+preferences, match their initial values. Raw storage bytes differ; no specific
+cause is inferred and nothing was rewritten to force a raw match. Sound storage
+was not written. Raw settings snapshots and temporary source probes are removed;
+the existing stack monitor remains, and task-owned capture/debug processes are
+stopped. The standard build is the corrected normal image. No commit, push or
+merge was performed.
+
+The preceding 610-second unpaused provisional-format run included Rain through
+nine additional repeats, White Noise, ordinary weather HTTP 200 and scheduled
+Radar advancement. It recorded no PCM write error, queue overflow, allocation
+failure, UI-lock miss or sampled hand-step exception. Its tracked minimum free
+PSRAM was 6,903,808 bytes and observed largest block 7,077,888; UI/audio stack
+minima were 8,000/1,140. These figures describe that provisional workload, not the
+corrected final build. Matched cloudy/hand Day controls, whose measured assets
+are unchanged by the correction, averaged 174.725ms old versus 114.624ms new at
+400px (59 renders over 59 heartbeat intervals each). This compares the complete
+asset package, not encoding alone, isolated hand benefit or CPU time. No Night
+percentage is inferred from extra/empty cycles.
+
+Per the user's instruction, no corrected combined run or full suite was repeated
+after narrowing. Physical LCD/finger/listening acceptance and isolated temporary
+drawing-allocation measurements are not supplied by these checks; transferred
+audio counters cannot establish acoustic continuity. Corrected evidence is in
+[the local board report](../.reviews/main/icons400-sprint-2026-10-18/corrected/board-results.json),
+with [approved-art comparison](../.reviews/main/icons400-sprint-2026-10-18/correction-approved-preview-vs-original-vs-native.png)
+and [on-board corrected icons](../.reviews/main/icons400-sprint-2026-10-18/corrected/board-corrected-digital-six.png).
+These remaining observation limits are explicit; they do not reopen unrelated
+completed tests.
+
+Supporting investigations:
+
+- [Earlier indexed-format evaluation](../.reviews/main/icon-format-tradeoff-2026-10-18/analysis.json)
+  — retained comparison evidence; indexed conversion was not selected.
+- [Direct storage/native rendering](../.reviews/main/direct400-storage-2026-10-18/direct-storage-decision.json)
+  — six-pixel guard and logical-canvas geometry; earlier one-pixel estimate superseded.
+- [Partial-buffer processing comparison](../.reviews/main/current32-palette-processing-2026-10-18/system-impact.json)
+  — why indexed conversion is excluded; host timings are not board timings.
+- [Five-icon board reproduction](../.reviews/main/weather-icon-board-check-2026-10-18/board-results.json)
+  — installed-image blank rendering and reversible RGB565A8 correction.
+
+## Sprint: 512px radar tiles and provider smoothing — prepared October 18, 2026
+
+**Released for execution by Development Orchestration, October 18, 2026.**
+The user now directs sending this sprint to that task. The authorized scope
+includes implementation, firmware build, flashing the attached ESP32-P4 and
+unattended testing, as requested when the sprint was prepared. Preparation
+changed documentation only. Execution is now complete, with results and
+verification limits recorded below. The approved behavior belongs to
+[Radar source and palette](architecture.md#radar-source-and-palette).
+
+### Scope and disclosed changes
+
+Replace the current 256px, smoothing-off RainViewer requests with 512px,
+provider-smoothing-on requests. This improves the supplied overlay's sampling
+and softens its edges without adding a clock-side blur. Preserve the approved
+custom green/yellow/red palette, snow-off choice and the existing geographic
+area, basemap, labels, layout, refresh schedule and failure/retry behavior.
+The implementation also needs to accept supported source RGB colors when
+smoothing changes their alpha, instead of requiring an exact full RGBA match.
+Validate that behavior against real tiles before choosing the lookup change.
+Any other behavior change must be disclosed before implementation.
+
+The previous finer-rendering preview also included bilinear enlargement after
+recoloring. This sprint covers the two requested provider changes and retains
+current nearest-pixel output sampling. It must show the actual result of that
+scope rather than claim to reproduce every part of that preview.
+
+### Implementation and ownership
+
+1. Start after the active [400px icon sprint](#sprint-trimmed-400px-weather-icons--authorized-october-18-2026)
+   finishes its device checks and normal-firmware restoration. Read AGENTS.md,
+   architecture and the current work list; preserve unrelated working changes.
+   Record the source/build and running-image identities used as the baseline.
+   Do not interrupt the current board run or bundle pending NWS work.
+2. Keep the existing weather worker, request gate, state machine, basemap cache
+   and two immutable publication slots. Make the request/decoder/composition
+   changes in `targets/esp32-p4/main/weather_client.c`. Request the existing
+   validated frame path with `/512/7/{x}/{y}/2/1_0.png`: 512px, zoom 7,
+   Universal Blue, smoothing on and snow off. Preserve the metadata check and
+   unchanged-frame behavior; do not download the background on every update.
+3. Preserve the current 256-native geographic coordinates, 32,768-pixel world
+   at zoom 7, tile indices and 128-column wrap. Map them into the 512px source
+   when sampling a tile, multiplying continuous coordinates before rounding
+   so the new odd-numbered source pixels are usable. Update tile dimensions,
+   bounds and full-source validation loops together. Do not change the USGS
+   bounding box or double the ground area. Final output remains 800×800.
+4. Inspect real smoothed 512px source tiles and the provider color table.
+   Where RGB remains a known table color while alpha changes, match known RGB,
+   retain the received alpha and keep the existing conservative handling of
+   duplicate colors within an intensity band. Recolor before sampling/blending.
+   Validate the entire visible source tile before composing it. Transparent
+   pixels remain clear; unknown visible RGB remains an update failure. Do not
+   add nearest-color guesses or silently revert to another tile mode. If live
+   smoothing produces colors this rule cannot map reliably, report the exact
+   evidence and unresolved mapping before claiming feature completion.
+5. Accept exactly 512×512 radar PNGs while preserving the separate 800×800
+   background limit and existing malformed-input/allocation protections.
+   Measure compressed 512px samples and set a bounded tile-response allowance
+   if required. Do not raise the forecast/metadata 192 KiB allowance merely to
+   admit larger radar tiles. The existing 4 MiB per-allocation PNG limit already
+   covers the larger background; retain it unless measurements establish a
+   concrete need. Preserve PSRAM allocation and the existing response-buffer
+   growth that copies outside the interrupt-masking heap lock.
+6. Extend the existing `tests/test_weather_service.c` fixtures/assertions and
+   relevant existing test documentation. No new source file, module, worker,
+   queue, cache, persistent storage, settings control or generalized rendering
+   framework is needed. Use existing approved paths; an actually necessary new
+   maintained source path still requires its exact-path permission.
+
+### Verification and acceptance
+
+- **Requests and geography:** verify 512/smoothing-on/snow-off URLs and decoder
+  dimensions. Test center alignment, 75-mile coverage at representative
+  latitudes, adjacent-tile seams, tile edges and longitude wrapping. Basemap,
+  marker and radar must stay aligned with no gaps, shifted echoes or doubled
+  coverage. Do not confuse a larger image with increased source observations.
+- **Palette and pixels:** cover known RGB with altered/partial alpha, fully
+  transparent pixels, duplicate source colors, the 35/45 dBZ band boundaries
+  and unknown visible RGB rejection before composition. Use real precipitation
+  tiles, not only constructed solid-color inputs. Retain one same-frame,
+  same-area comparison of 256/off, 512/off and 512/on so tile size and provider
+  smoothing are distinguishable. Inspect the full clock screen in Day/Night,
+  including coastlines/town labels beneath transparent edges. A clear-weather
+  frame alone cannot verify smoothing. Temporary test coordinates must not
+  rewrite the user's saved weather location.
+- **Bounds and publication:** test truncated/corrupt and wrong-size PNGs,
+  oversized responses, allocation failures and cleanup. Preserve the last
+  complete image and its timestamp after failure, the initial unavailable
+  state, incomplete-image retry and safe slot acknowledgment. An unchanged
+  provider frame must not trigger redundant tile downloads or acquire a new
+  displayed timestamp. Run the affected checks and the existing full native
+  suite, then compile the ESP32-P4 firmware before flashing.
+- **Memory and load:** measure peak/minimum free internal RAM and PSRAM,
+  largest free blocks, request/decode/recolor/composition time and repeated
+  replacement cleanup. One decoded RGBA tile rises from 262,144 to 1,048,576
+  bytes, an additional 786,432 bytes; compressed responses and decoder scratch
+  add separate temporary costs. Retained image/base buffers remain 5,760,000
+  bytes. Measure overlapping old/new growth allocations rather than claiming
+  the whole feature uses four times the memory or assuming icon savings prove
+  enough headroom. Compare against the final icon-sprint baseline.
+- **Unattended board run:** after dispatch, flash the required images,
+  application-only where compatible, preserving NVS, preferences and sounds.
+  Verify written/booted/running image identity and a real 512px smoothed update.
+  Run at least 15 minutes including ordinary five-minute checks and multiple
+  tile replacements. If the provider frame stays unchanged, use bounded test
+  inputs to exercise repeated replacement, label them separately and keep
+  genuine unchanged-frame behavior intact. Include Rain across a recording
+  loop, a generated noise sound, ordinary clock-hand updates, face navigation,
+  Day/Night and live forecast activity. Compare audio completion/underrun
+  evidence, hand progress, UI-lock misses, watchdog/reset errors, allocation
+  failures and memory recovery with the baseline. Do not count debugger pauses
+  as continuous playback or infer audible continuity from feed logs alone.
+- **Finish:** remove temporary probes, restore temporary choices and normal
+  firmware, verify final image identity/startup, map display, touch and sound
+  operation, and stop task-owned processes. Record software, framebuffer and
+  device observations separately from physical viewing/listening. Resolve or
+  explicitly report credible memory, audio, clock-hand or rendering regressions;
+  compilation alone does not close this sprint. Update this entry and the
+  current work list with results, actual memory/timing changes and remaining
+  limits. No commit, push, merge or unrelated cleanup is authorized.
+
+### YAGNI and MECE check
+
+The YAGNI choice is the existing pipeline with one fixed provider mode and its
+necessary bounds/mapping updates. It expands image quality while preserving
+the agreed coverage, behavior and ownership. It avoids additional filtering,
+controls and infrastructure; the practical tradeoff is more tile decoding and
+source-pixel work to measure on the board. Requesting 512px without smoothing
+would omit part of the requested feature. Adding local blur or bilinear output
+would expand this sprint and is not selected.
+
+The weather client remains the sole owner of requests, decoding, palette
+conversion and mutable image buffers. Existing scheduling stays in `main.c`,
+copied publication status in `app_runtime.h`, and screen presentation in the
+existing UI. No UI/source-layout change is needed just to use the new tiles.
+The existing weather-service tests verify the pipeline. Architecture owns
+product rules; this entry owns execution/evidence. Review both implementation
+and documentation for duplicate state, redundant fallback modes and machinery
+without a current benefit before closing the sprint. This planning review does
+not establish that the eventual implementation or board performance passes.
+
+Provider documentation checked October 18, 2026:
+
+- [Weather Maps API](https://www.rainviewer.com/api/weather-maps-api.html): 256/512
+  image sizes and `{smooth}_{snow}` options.
+- [Universal Blue color table](https://www.rainviewer.com/api/color-schemes.html).
+- [Current public-service limits](https://www.rainviewer.com/api/transition-faq.html).
+
+Preparation included a read-only gpt-6.1-sol/high review of current code, bounds,
+geometry, tests and ownership. No firmware tests/builds or device checks were
+run for that planning-only change. Source-color compatibility, compressed-size
+limits and board load were left as execution acceptance checks.
+
+### Execution checkpoint — October 18, 2026
+
+**Complete:** implemented, tested, flashed and autonomously checked. Execution
+starts from the final corrected icon firmware (BIN `176fca0e…14800`, ELF
+`ddac11fa…62b69`). The trusted source-chat reader confirms the human's release
+and flash/unattended-test instruction. Exact quotes, raw evidence, independent
+checks and limits are in the local [execution report](../.reviews/main/radar512-sprint-2026-10-18/summary.md).
+No commit, push or merge was made.
+
+The existing weather client now requests fixed 512px smoothed tiles, checks exact
+source bounds, matches known RGB while retaining received alpha and scales
+continuous native coordinates before rounding. Geography, layout, sampling,
+schedules, publication and failure/retry behavior are preserved. The 192 KiB
+non-basemap response allowance and 4 MiB individual PNG-allocation cap remain.
+The Radar production section has three net added lines, with no new file,
+owner, task, queue, cache, setting, filter or persistence mechanism. No permanent
+audio or drawing change was needed. The normal application grows by 128 bytes
+(to 16,100,320), with unchanged static RAM and rodata. A decoded tile adds
+786,432 temporary bytes; retained map/image buffers stay 5,760,000 bytes.
+
+Software checks pass: full native 44/44 in 12.43 seconds, forecast 53/53,
+location 3/3, storm 27/27 plus boundaries, ESP-IDF 5.5.5 firmware build and
+whitespace checks. The existing weather-service test covers geography/odd
+pixels/seams/wrap, alpha/duplicate colors/band boundaries, whole-source rejection,
+response/decoder limits, cleanup, retry and immutable publication. Its saved-tile
+mode processes six real 512/on precipitation PNGs. All 30 corrected icon
+asset/lookup/header hashes remain unchanged.
+
+The 18 captured real tiles cover six footprints and one fixed 22:00 UTC frame,
+each at 256/off, 512/off and 512/on. Parent checks all 128 official rain-table
+entries and 841,415 visible pixels: no unknown RGB or altered-alpha known RGB
+appears in this finite cohort. Altered-alpha acceptance is separately tested
+with constructed inputs. Largest observed 512/off and 512/on PNGs are 67,588
+and 55,297 bytes; these observations support the unchanged cap without proving
+all future provider sizes or colors.
+
+Same-frame instrumented current-pipeline controls total 307.034, 966.584 and
+945.765 ms of decode/recolor/compose wall time for 256/off, 512/off and 512/on.
+They are not original-binary CPU or network benchmarks. Phase minimum free
+external RAM is 6,915,944 / 4,829,672 / 4,832,808 bytes; all three recover to the
+same 7,648,304 free bytes and 7,471,104 largest block after release. Decoder
+growth's measured old-plus-new maximum rises from 663,953 to 2,655,060 bytes;
+allocation-event maxima must not be summed into an exclusive feature peak.
+One incomplete 512/off control preserves the old valid image/time marked stale
+and succeeds on a bounded retry. Prior debugger/C6 backlog confounds its cause
+and request latency. No production fix was needed for that test event.
+
+Genuine saved-location Leander and temporary RAM-only Miami updates pass. A
+separate inland fixture uses retained real USGS-derived luminance and the real
+board PNG decoder/recolor/composition: all 640,000 map pixels match the
+independent host reference exactly. Actual Day/Night framebuffers preserve
+readable heading/time/marker/key/credits and map labels through partial-alpha
+rain. Night changes existing UI colors, not map pixels. County/river labels and
+riverbanks overlap rain; Paducah's town name lies in a clear gap. Host coastal
+comparisons and device fixtures do not establish independent geographic survey,
+physical LCD, finger-touch or listening results.
+
+The fresh unpaused window lasts 930.999944 seconds, with 600 seconds of Rain
+and 330 of White Noise, normal face/page/theme changes, two live Radar frame
+replacements and two ordinary forecast HTTP 200s. Six requests minus two tile
+decodes account for four metadata checks with the cached base; unchanged frames
+do not cause new tile decoding or newer timestamps. All 930 adjacent sampled
+hand steps are normal across 931 rows, with no display-lock miss. The last
+steady audio row yields 130,686 inspected completed buffers after subtracting
+eight setup events, with no full-buffer zero/constant result, returned write
+error, skipped invalid buffer or queue overflow. Initial priming and the
+intentional sound-format change are excluded. One existing already-disabled
+channel diagnostic occurs at that change and is retained separately. Buffer
+scans do not prove acoustic continuity or every partial-buffer defect; the
+observer also changes cache/interrupt timing. No exact uninstrumented performance
+claim is made. UI-update timing excludes panel painting and view selection.
+Minimum monitored free RAM is 96,383 internal and 4,831,752 external bytes;
+UI/audio/weather spare-stack samples are 9,360 / 1,124 / 2,472 bytes. Startup
+minima restored after the monitor have a different boundary.
+
+Normal BIN `187631d6…dd37a` and full running ELF `8cb2b9f4…f616d` match the
+retained production candidate. Normal Leander Radar is fresh, Play is active
+without a reported error before Stop, and Stop returns successful request
+acceptance. The final reset leaves playback Stopped. The 65.014-second debugger-
+free startup has the expected identity, display/touch initialization, saved-
+location forecast HTTP 200, UI spare-stack minimum 9,424 bytes and no error,
+panic, watchdog or assertion line. Physical touch/listening are not inferred.
+
+The board owner compares all 39 logical stored keys, including 32 preferences,
+and the full 24 KiB NVS region: unchanged, with matching raw SHA `a4b82ac9…499f`.
+This read occurs after normal Play/Stop and before the last clean-reset
+observation. Parent and reviewer check retained comparison/read logs and the
+cleanup hash manifest; they do not independently reparse the deleted private
+NVS dumps. Application-only writes preserve sound storage. All source probes
+are removed, the normal rebuild matches byte-for-byte, task-owned debugger/
+serial processes stop, and extra build copies/raw buffers/private dumps are
+removed. Standard normal build outputs, useful PNGs/source captures/logs/hashes
+remain. Independent source and evidence reviews find no credible consequential
+defect within this scope. Existing broader physical/acoustic and finite-sample
+limits remain in the current work list; this does not close those tests or
+implement the separate NWS work.
+
+## Sprint: NWS alerts and approved screen/menu parity — prepared October 18, 2026
+
+**Prepared only. Held for review; not sent or released for execution.** The user
+requested a sprint that implements NWS retrieval, tracking, persistence, sounds
+and the reviewed screens, including all later approved menu changes. Its
+execution scope includes behavior tests, the ESP32-P4 build, flashing the
+attached device and unattended checks. None of those execution actions is
+started by preparing this document. Begin only after the user releases the
+sprint. No commit, push, merge, NVS erase or unrelated change is included.
+
+### Objective and authoritative references
+
+Replace the remaining provider-threshold storm system with the approved NWS
+watches and warnings, and bring firmware screens and menus into agreement with
+the current [official mockup](../mockups/alarm-design.html). This includes the
+changes approved after the last NWS implementation question, rather than only
+the first alert-screen designs. The official reference at preparation has
+SHA256 `4ba74cf3469b276c1324578a27baf5e43b3957d049803edd26c35eb4ca601fa7`.
+Check for later approved changes at execution start; do not replace the current
+reference with an older experimental gallery.
+
+Product behavior, defaults and exceptions remain owned by
+[NWS watches and warnings](architecture.md#nws-watches-and-warnings) and
+[UI and visual reference](architecture.md#ui-and-visual-reference). The
+[official follow-up](#official-nws-mockup-follow-up--october-18-2026),
+[Wi-Fi alignment](#wi-fi-mockup-alignment--october-18-2026) and
+[shared menu appearance](#shared-menu-appearance--october-18-2026) entries record
+the approved integration and checks. This sprint owns the implementation order
+and acceptance evidence, not a second product specification.
+
+### Scope and disclosed changes
+
+- Replace forecast-derived storm decisions, their right-edge glow and their
+  navigation-order effect with independent official NWS events, the reviewed
+  triangle/counts/headlines and the fixed Clock → Forecast → Radar visit order.
+  Forecast-provider selection, weather retrieval and Radar behavior retain their
+  existing rules. Preserve House Messages and their left-edge glow.
+- Implement the four alert-sound settings and Provider editor, moving API-key
+  entry inside Provider and putting Alerts directly below Provider in Weather.
+  Preserve independent Weather saves and the existing key validation, masking,
+  retention, explicit Clear and nested draft behavior.
+- Apply the reviewed Analog/Digital clock layouts, alert list/details and later
+  menu alignment changes listed below. These are the specifically approved
+  layout changes; implementation is not permission to redesign other elements.
+- Add the approved weather-sound coordination: finite watch/warning sounds,
+  interruption/resumption of Sound Machine, preemption of an alarm preview and
+  uninterrupted wake-alarm priority. Preserve the existing ringing screen,
+  Snooze/Dismiss behavior, Sound Machine timer and other playback rules.
+- Retire superseded storm code, fields, tests, fixture cases and glow assets
+  only after their NWS replacements are integrated and checked. Keep provider
+  measurements and shared assets still used by forecasts, artwork or other
+  approved features. Do not retain both alert systems or a compatibility mode.
+
+Before each slice, identify any further proposed change to existing behavior,
+including failure/retry handling. Explain and resolve it before coding under
+AGENTS.md. Do not silently narrow the reviewed features to simplify the sprint.
+
+### Bounded slices and ownership
+
+1. **Baseline and implementation contract.** Read AGENTS.md, architecture and
+   current work; record the current source/build, running image and saved-value
+   baseline without interrupting another task's device run. Confirm which visual
+   deltas are already implemented: the Analog 400px weather picture, hand/image
+   conversion and recent Radar work are complete and must not be redone. Specify
+   event/update identity from NWS relationships, deterministic priority ties,
+   cutoff handling, bounded response/record sizes and concurrent sound/footer
+   handling. Keep broader visual escalation separate from the narrower audible
+   update milestones. Record the concrete owner allocation in architecture
+   before implementation; no new product settings or generic recovery layer.
+2. **Retrieval and live alert state.** Extend the existing weather worker in
+   `targets/esp32-p4/main/main.c` with an independent NWS deadline. The proposed
+   allocation is `weather_client.c/.h` for NWS HTTP/parsing and the single event,
+   dismissal and operating-record owner, reusing current HTTP/JSON facilities.
+   Keep its short copied-state operations separate from slow request/storage
+   work; expiry and dismissal must remain responsive during either. Interleave
+   due NWS work with bounded forecast/Radar steps, preserve their existing
+   schedules and honor NWS's explicit longer pauses. Use saved coordinates,
+   HTTPS verification and the required identifying request headers; do not send
+   a forecast-provider key to NWS. Apply only complete validated responses;
+   malformed, truncated or oversized data must not clear retained alerts or
+   masquerade as a successful empty check. Publish copied state through the existing
+   application interfaces rather than adding another live alert model in UI.
+   Keep the reviewed catalog/priority data in one place for both service and UI.
+3. **Preferences and restart retention.** Extend `device_config.c/.h` for the
+   four approved sound settings and existing Weather save operation. Keep alert
+   operating data with its event owner, separate from preference saves, using
+   ordinary direct NVS operations. Bind records and in-flight results to the
+   saved location; reject late old-location results and old persisted records.
+   Retain only active-event data and the identity/dismissal/reached-milestone/
+   sound information needed for approved behavior, not an alert history. The
+   existing NVS partition is only 24 KiB: measure usable pages and full record
+   sizes with installed preferences and credible overlapping alerts before
+   selecting the representation. Test replacement writes as well as first saves.
+   Do not silently trim active events or protective text to make a record fit,
+   resize partitions, erase settings or move data into the recordings filesystem.
+   Returned capacity/write failures use the approved live-operation/save-error
+   behavior. If ordinary expected cases cannot fit reliably, report the measured
+   storage decision needed before claiming persistence complete.
+4. **Sounds and playback coordination.** Extend `audio.c/.h` and its existing
+   worker/command facility for the approved synthesized patterns. Reuse alarm
+   volume, normalization/gain and speaker ownership; no extra sound worker,
+   separate volume control, recording asset set or repeated-warning timer.
+   Eligibility, event identity and the minimum same-event sound separation
+   belong to the alert owner; audio owns actual playback/completion and Sound
+   Machine interruption/resumption. Keep one authoritative Sleep Timer and
+   prevent a canceled or superseded command from reviving playback. Apply the
+   settled wake-alarm and preview priorities without disturbing drafts/navigation.
+5. **All reviewed screens and menus.** Keep active view/navigation and actions
+   in `ui/ui.c`, clocks in `ui/clock_views.c`, alert list/details in
+   `ui/weather_views.c`, and settings/drafts in `ui/settings.c`. Extend
+   `app_runtime.h`, `app_ui.h` and `ui/ui_private.h` only for needed copied inputs
+   and owner actions. Reuse existing icon/font containers and generators for
+   required alert glyphs. Complete the visual checklist below and retire the
+   superseded storm paths in the same bounded integration. Update the direct
+   firmware/test source lists and existing tests when removing obsolete sources.
+6. **Regression, device run and closure.** Complete the test matrix below,
+   firmware build, flash and unattended checks after release. Review the finished
+   code and documents for YAGNI and MECE, remove temporary instrumentation,
+   restore temporary settings and normal firmware, and record actual results
+   with their limits. Close the work only after the final normal image and saved
+   values are verified; compilation or a mockup comparison alone is insufficient.
+
+This allocation uses existing approved paths. A new `nws_alerts.*`, `test_nws.*`,
+permanent task, queue framework or separate test harness is not implicitly
+authorized. If a new maintained source path becomes concretely necessary,
+obtain permission for its exact path and purpose before creating it. Do not put
+implementation/test tooling in `.reviews/` or a temporary directory to avoid
+that rule; those locations may hold supporting evidence and disposable data.
+
+### Complete visual parity checklist
+
+Use the current official reference for exact fonts, positions, sizes, colors and
+tap areas, and compare current firmware before changing a control. In particular,
+firmware's common Back/title already matches the corrected Wi-Fi header: do not
+blindly apply the mockup's former 16px correction again.
+
+| Existing UI owner | Included approved changes |
+| --- | --- |
+| Clock views and navigation | Combined three-letter weekday/date with quiet treatment; aligned alarm row and alarm/status icons; backup-clock triangle/date group; straight 40px Sound Machine/Alerts/Settings row; neutral alert triangle with separate upper red warning/yellow watch counts; reviewed Analog temperature/stacked high-low group; shared alert headlines replacing only the reviewed weather area; routine weather-notice suppression/restoration and the larger Waiting for weather exception. Preserve the dial/hands, House Messages glow and existing 400px artwork. |
+| Night clock views | Alert text at each face's daytime position with reviewed subdued colors; unchanged centered enlarged Digital time; counts, tapping and dismissal remain available while sound is Off. Preserve warm AM/PM and Night hiding of ordinary weather. |
+| Alerts list/details | Standard title/totals subtitle; full priority-ordered event names, wrapping and scrolling beyond three visible rows; actual NWS details/instructions; normal Back controls; fixed update/save/unsupported-location footer outside the three normal rows; checking, first failure, retained data and successful-empty states. |
+| Weather, Provider and Alerts settings | Weather Location / Provider / Alerts / Units; Provider's nested API-key controls; sound-category summary; Watch Sounds / Warning Sounds / Alert Update Sounds / Night Alert Sounds; correct defaults and independent multi-select catalogs; standard title/subtitle on all four alert settings screens, 24px choice descriptions and common Night switch. |
+| Wi-Fi | Standard Choose a Network subtitle and picker row positions, including Manual Network; Refresh centered with the ordinary bottom actions; corrected common Back/title for connecting, retrying, connected, problem and saved/restarting. Preserve the network-name subtitle at its reviewed position, status bodies, disabled/restarting actions, scan behavior and credentials. |
+| Other settings menus | Apply the common header/subtitle, ordinary rows, switch and footer alignment wherever approved: Alarm, Custom Days Done, Snooze choices/Done, Sound & Snooze, Sound Machine, Sound selector, Messaging, Night Shift/Mode, Fixed Schedule, Sunrise/Sunset, offsets and Brightness. Preserve each approved control's behavior and exceptional dimensions. |
+| Approved crowded menus | Repeat summary below title and standard Done; all five compact Sleep Timer choices; raised Alarm Sound Preview and Done; shorter arrow buttons with original large digits for Alarm Time, Night Starts and Night Ends. Keep time headers, labels and upper arrow row in place. |
+
+Retain the approved exceptions: Custom Days grid; specialized forms and Fixed
+Schedule controls; scrolling radio/checkbox row styling; Provider form summary;
+Wi-Fi network-name subtitle and Home/restarting behavior; Alerts failure footer;
+distinct Custom Days and Snooze Done heights. Do not implement the rejected
+whole-block time-control raise, smaller time fonts, colored status triangles,
+separate Watch and Warning badges, a permanent alert-box placeholder or removal
+of House Messages.
+Keep unchanged controls and artwork in place; no broad screen rewrite for style.
+
+### Behavior and software acceptance
+
+Extend the existing `test_weather_service.c`, `test_device_config.c`,
+`test_audio.c` and `test_ui.c` with production-owner and real LVGL coverage where
+appropriate. Update existing supporting tests/build definitions when affected.
+Use both documented/representative CAP examples and clearly labeled constructed
+failure inputs. Do not treat a mockup's sample IDs, revisions or priority subset
+as a production event matcher.
+
+| Area | Required acceptance cases |
+| --- | --- |
+| Retrieval/status | Immediate startup/new-location check; independent one-minute Day/Night checks and failure retries; explicit longer NWS pause; confirmed unsupported location versus temporary failure; first-failure question mark, next-success restoration and no error sound; successful empty differs from unknown. Forecast quotas/failures must not disable NWS. |
+| Catalog/order/tracking | Reviewed 23 watches and 32 weather warnings with exclusions; full NWS ordering across both families, including Tornado Watch before Freeze Warning; deterministic ties; ordinary revision versus genuinely new event, escalation, cancellation/removal and repeated identical download. A changed message ID alone must not create a new event. Three visible rows must not become a storage/list limit. |
+| Expiry/concurrency | Use ends when available and expires otherwise, including ends later than expires; remove ended events from headline/list/counts during failed or blocked checks without clearing the question mark. Exercise actual owner behavior while HTTP and NVS are blocked; short snapshots/dismissal must still work. |
+| Dismissal | Clock tap and list opening stop weather sound and cover all events already present across both faces and restart, while retaining list/counts. No immediate rotation to another dismissed event. Ordinary updates stay dismissed; visual escalation or a new lower-priority event reopens appropriately; ended-event dismissals are forgotten. |
+| Persistence/location | Retained active data/dismissals restore with startup question mark and no replay, including fresh confirmation of the same events. New eligible events/updates still work. Missing/corrupt/read-failed alert record uses normal fresh-alert sounds. Save failures preserve live behavior and in-memory dismissal, show the silent footer and retry on the next check. Clear old-location live/saved state and reject late results without losing sound preferences, including through restart/interrupted saves. |
+| Preferences/drafts | Exact defaults, exclusive Off/All and independent named selections; all four setting rows and sound-category summaries; nested Done/Cancel/Back; Weather save isolated from Device drafts; Provider/key validation, retained key, Clear and restart behavior unchanged. |
+| Update sounds | Off/Increased danger only/All updates; approved damage-threat, Significant and explicit PDS milestones only; no generic severity ladder or confirmation-only sound in Increased danger mode. Each newly reached milestone at most once; regression/re-entry does not rearm; simultaneous changes do not multiply sounds. Substantive revisions differ from identifier-only/unchanged downloads. Enforce at least ten minutes between any sounds for the same event, including the first sound and restart handling; suppress rather than delay an ineligible repeat. |
+| Sound waveform and priority | Exact 2½-second 1,050 Hz watch pattern and 10½-second dual-tone warning pattern from architecture; independent cadence/frequency/peak checks, alarm-volume/gain limits, early stop and automatic finish. Wake alarm wins with no deferred weather replay; weather preempts preview without losing drafts; Sound Machine resumes at prior volume with its original timer, stays stopped if expired, and never resumes after wake-alarm stop. |
+| UI and regressions | Every visual-checklist row in both appearances and applicable clock formats; longest catalog titles, more than three active events, counts, list/detail scrolling and notice/footer combinations. Preserve alarms/Snooze/missed notices, unavailable/paused/sync time, RTC warning, settings saves/keyboard/preemption, House Messages, forecasts and the completed Radar behavior. |
+
+Each source-changing slice must pass its affected behavior checks and an
+ESP32-P4 build. Before the final flash, run the existing full suite and build
+the integrated firmware from the repository root after activating ESP-IDF:
+
+```bash
+source targets/esp32-p4/scripts/activate-idf.sh
+cmake -S targets/esp32-p4/tests -B /tmp/esp32-p4-native-tests
+cmake --build /tmp/esp32-p4-native-tests
+ctest --test-dir /tmp/esp32-p4-native-tests --output-on-failure
+targets/esp32-p4/scripts/test-weather-parity.sh
+python3 targets/esp32-p4/tests/test_message_ack.py
+targets/esp32-p4/scripts/build.sh
+```
+
+Retire threshold-only checks with their retired implementation; retain useful
+forecast/location and other regression checks. Report actual test counts rather
+than assuming the current 44-case total remains unchanged. Check build/flash
+capacity, NVS record/page budget, request/parse stack use, internal RAM/PSRAM and
+cleanup under repeated updates and failures. Review source additions/renames
+against the approved tree and any explicit permissions before closing a slice.
+
+### Flash and unattended device acceptance after release
+
+Use the existing flash/monitor/OpenOCD and ESP-IDF/LVGL facilities. Select the
+actual attached serial port; use `targets/esp32-p4/scripts/flash.sh <serial-port>`
+with the required compatible images, preserving NVS and the sound recordings.
+Verify the written, booted and running image identities. Do not erase/reseed user
+settings to make tests pass, or claim a flashed image from a successful build.
+
+- Verify a real NWS HTTPS response for the saved coordinates, startup status,
+  last-success reporting and ordinary one-minute checks with forecast/Radar
+  work active. A legitimate empty result is a valid live-network case; it does
+  not test the active-alert paths. Test disconnect/reconnect and powered restarts
+  while preserving the configured weather provider and saved location.
+- Feed controlled CAP cases through the actual parser/owner/audio/UI paths for
+  active, new, updated, ended, canceled, dismissed and restored events; failure
+  and capacity cases; old-location rejection; priority ordering; all footer and
+  count/headline states. Mark injected data/actions as controlled tests, not
+  local NWS warnings or physical finger input. Do not change the user's saved
+  location just to find a current warning, and add no production test menu.
+- Run one uninterrupted combined workload for at least 30 minutes, including
+  repeated one-minute NWS opportunities, the real ten-minute same-event sound
+  separation, watch and warning completion/early dismissal, Sound Machine
+  interruption/resumption and timer expiry, preview preemption, a scheduled
+  wake alarm and ordinary clock-hand, forecast, Radar and Day/Night activity.
+  Use controlled events when live events do not provide those transitions.
+  Use shorter focused runs for faults that require debugger pauses; do not
+  count paused time as uninterrupted playback or timing evidence.
+- Compare UI/clock progress, alarm responsiveness, audio worker completion and
+  underrun/error data, task stack margins, minimum/remaining internal RAM and
+  PSRAM, allocation recovery, resets and watchdogs against the baseline. Inspect
+  actual LVGL bounds/framebuffer output for every changed menu family and both
+  clock faces. Capture panel/framebuffer and software observations separately.
+- Remove temporary probes, overrides, data and task-owned processes. Restore
+  temporary user choices and the normal production image; verify its identity,
+  startup, saved settings, live forecast/NWS/Radar operation and normal UI/audio
+  status. Keep legitimate active alert/dismissal records; do not replace them
+  with test events. Update this entry and Current work with results and limits.
+
+Unattended injected input and framebuffer inspection do not establish physical
+touch accuracy, acoustic character/loudness or continuity, panel readability,
+or persistence through complete power removal. Record those limits explicitly;
+powered restart, software audio completion and controlled NVS faults must not be
+reported as physical power-cut or listening checks. Report credible unresolved
+failures against the relevant acceptance row rather than marking the whole
+sprint complete from build or device counters alone.
+
+### YAGNI and MECE review
+
+The selected starting design reuses the existing weather and audio workers,
+request facilities, direct NVS operations and UI owners. It expands the agreed
+alert capability and applies only the approved visual changes. Its tradeoff is
+careful short-lock and deadline coordination inside existing owners, which the
+blocked-I/O and combined-load tests must establish; avoiding new files alone is
+not proof that the design is simple. Do not add a new worker or framework merely
+to organize the feature, and do not cram in duplicated state to avoid explaining
+a necessary boundary.
+
+One owner holds each of live events/dismissal state, applied preferences, audio
+playback/timer state and active navigation. UI consumes snapshots and submits
+actions. Share catalog/priority data instead of separate service and UI lists.
+Keep settings saves and alert operating saves distinct. Review every retained
+module, task, queue, record and helper for a concrete current use, and remove
+superseded storm mechanisms once replaced. Check this document and architecture
+for overlapping requirements and stale completion claims as well as reviewing
+code. No new abstraction, compatibility adapter, alert history, general job or
+persistence framework is selected. This planning review does not establish the
+eventual implementation's correctness or board performance.
+
+Preparation used read-only gpt-6.1-sol/high NWS coverage and
+gpt-6.1-sol/medium UI inventory reviews. Both reviewed the completed draft and
+identified no consequential coverage omission or required correction. This is
+a planning review, not implementation verification. Only the work document is
+changed by preparing this sprint. Firmware, official mockups, build outputs and the device
+are unchanged by preparation; the sprint has not been dispatched to another chat.
+
+## Obsolete weather generator removal — October 18, 2026
+
+Closed the October 18 adversarial review's minor artwork-generator finding.
+Removed `targets/esp32-p4/scripts/generate-weather-icon-assets.sh`, whose 250px
+ARGB8888 output could overwrite the current images without updating their crop
+metadata. The target guide identifies the existing
+`generate-screen-parity-assets.sh --weather-only` command as the sole weather
+image/placement generator. No replacement helper or firmware behavior change
+was introduced.
+
+Verification: the documented command regenerated all 18 weather pictures with
+CairoSVG 2.8.2; hashes of all 64 asset files remained identical. Reference,
+shell-syntax and whitespace checks pass. The ESP-IDF 5.5.5 firmware build passes
+with 23% of the application partition free. Existing application changes and
+generated assets are preserved. No new source paths, flash or board tests were
+needed; the temporary dependency environment was removed. Local check logs
+remain under `.reviews/main/obsolete-weather-generator-2026-10-18/`.
+
+## Current work
+
+Reconciled October 18, 2026.
 
 This is the current work list. Dated entries above retain the observations and
 limits at their own checkpoints; their old remaining-work statements do not
@@ -5230,14 +6721,54 @@ and the recorded combined workload. Saved preferences are restored. These close
 the corresponding previously untested attached-device cases; battery retention
 through real main-power removal and the stated physical/fault limits remain open.
 
-The current source checkpoint is `cd6541f` (Radar, one-time alarms and reviewed
-display updates), including the completed drawing-efficiency and alarm-control
-slices above. The subsequent attached-RTC pass changes only this work record.
-The documentation refresh updates the guides and current list without changing
-that firmware checkpoint.
+The October 18 checkpoint follows `68c4497` (documentation and attached-RTC
+verification) and firmware checkpoint `cd6541f`. The October 17 Conditions
+removal is implemented and software/build verified in its
+[removal entry](#conditions-screen-removal--authorized-october-17-2026). It is
+included in the corrected normal firmware flashed and autonomously checked in
+the completed [icon sprint](#sprint-trimmed-400px-weather-icons--authorized-october-18-2026),
+along with the 400px weather artwork, approved SVG restoration and RGB565A8 hands.
+The bounded results and observation limits are recorded there.
+Earlier dated statements retaining that page are superseded by the removal decision.
+The subsequent [512px smoothed Radar sprint](#sprint-512px-radar-tiles-and-provider-smoothing--prepared-october-18-2026)
+is complete: source/software checks, matched controls, full-frame checks and
+uninterrupted combined load pass within their recorded limits. Normal firmware
+is restored, saved values are unchanged, and temporary probes/processes/outputs
+are removed. Physical viewing, touch and acoustic continuity are not inferred
+from its software/device counters.
+
+The [obsolete weather generator cleanup](#obsolete-weather-generator-removal--october-18-2026)
+closes the later review's minor conflicting-writer finding. Regeneration preserves
+all asset bytes and the firmware build passes. These completed slices and the
+approved design records below are included in this checkpoint; NWS/menu firmware
+implementation remains pending.
+
+The later [NWS alerts decision record](#nws-alerts-decision-record--october-17-2026)
+records the approved replacement direction, and the
+[official mockup integration](#official-nws-alert-mockup-integration--october-17-2026)
+is complete. Neither checkpoint implements the firmware replacement.
+Storm preservation statements in the Conditions-removal checkpoint describe
+what that earlier slice retained; the architecture now owns the approved NWS
+replacement and fixed weather-page order awaiting firmware implementation.
 
 ### Approved work still unfinished
 
+- **NWS alerts and all approved screen/menu changes:** the
+  [prepared sprint](#sprint-nws-alerts-and-approved-screenmenu-parity--prepared-october-18-2026)
+  covers retrieval, event tracking, operating persistence, sounds, reviewed
+  clocks/list/details/settings and every later approved Wi-Fi/shared-menu
+  change, including the selected shorter-arrow time editors with large digits.
+  It includes behavior tests, firmware build, flash and unattended device
+  acceptance after release. The sprint is held for review, not dispatched or
+  released; preparation changed documentation only. Firmware implementation
+  remains pending. Product rules remain in
+  [architecture](architecture.md#nws-watches-and-warnings) and the current
+  [official visual reference](../mockups/alarm-design.html); the completed
+  [NWS](#official-nws-mockup-follow-up--october-18-2026),
+  [Wi-Fi](#wi-fi-mockup-alignment--october-18-2026) and
+  [shared-menu](#shared-menu-appearance--october-18-2026) browser/source checks
+  establish mockup integration, not firmware or board completion. No additional
+  product decision currently blocks the bounded implementation work.
 - **Sound Machine verification:** implementation, source-equation restoration,
   recording/noise balance and the prompted short listening checks are complete.
   The [October 14 accounting](../.reviews/sound-machine-sprint-2026-10-13/board/timing-closure.md)
@@ -5289,11 +6820,10 @@ that firmware checkpoint.
   Device edits and independent restart; and alarm/editor restoration. The
   immediate switch is now in Alarm Settings; Settings entry instead contains
   Sound Machine. Do not reopen the retired Settings-entry switch check. Preserve passed
-  Display Back/Cancel/live Save, analog caption/tap, Conditions `3 PM` / `15:00`
-  updates, new Weather checks and Messaging observations; do not repeat them just
-  to extend the list. Conditions is retained code/reference without a device
-  route, so its unobserved physical states are not tasks to test through current
-  navigation. Native checks do not establish exact panel pixels or touch.
+  Display Back/Cancel/live Save, analog caption/tap, Weather checks and Messaging
+  observations; do not repeat them just to extend the list. The Conditions page
+  and its dedicated checks are retired by the [October 17 removal](#conditions-screen-removal--authorized-october-17-2026). Native
+  checks do not establish exact panel pixels or touch.
 - **Night Shift:** the populated Solar page, draft preview/Cancel, zero-offset
   Save/restart and sunset activation were observed. Remaining checks concern
   sunrise, precise transition timing, nonzero saved offsets, configured fades
@@ -5331,19 +6861,12 @@ that firmware checkpoint.
 
 ### Deferred or unapproved work
 
-- **Weather icon storage — deferred consideration, October 16, 2026.**
-  Consider generating all 18 weather icons from their original artwork at
-  **200×200 with 16-bit color plus 8-bit transparency**, then scaling them for
-  each display. The calculated saving against the existing linked images is
-  2,030,000 bytes (about 1.94 MiB); this is not a generated-build measurement.
-  Compare appearance and drawing cost on Analog, including the separate
-  400×400 review mockup, and the Forecast screen's existing 364×364 picture.
-  An exact 2× scale does not establish a speed or image-quality improvement.
-  Trimming transparent outer padding with generated X/Y offsets, and image
-  compression, remain alternatives to evaluate if needed. The user requested
-  a reminder for later, not implementation. Preserve approved display sizes,
-  positions and artwork; no asset, format, cropping, cache, firmware or official
-  mockup change is authorized by this entry.
+- **Alternative weather-image formats:** indexed conversion and the single-color
+  A8 hybrid are not selected or authorized. The direct trimmed RGB565A8 path
+  supersedes the earlier storage proposal and is tracked in the
+  [completed icon sprint](#sprint-trimmed-400px-weather-icons--authorized-october-18-2026).
+  Earlier measurements and the five-icon board reproduction remain supporting
+  evidence linked there, rather than a separate unfinished implementation plan.
 - Visual Crossing and mapping implementation is complete for its
   [bounded sprint](#sprint-visual-crossing-and-approved-weather-mappings--authorized-october-13-2026).
   Device credit placement remains deferred. The README now credits the actual

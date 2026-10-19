@@ -4327,24 +4327,38 @@ TEST_IMAGE(analog_minute_hand);
 TEST_IMAGE(analog_second_hand);
 TEST_IMAGE(analog_stage_day);
 TEST_IMAGE(analog_stage_night);
-TEST_IMAGE(conditions_edge_indicator);
-TEST_IMAGE(conditions_icon_pressure);
-TEST_IMAGE(conditions_icon_rain);
-TEST_IMAGE(conditions_icon_snow);
-TEST_IMAGE(conditions_icon_wind);
-TEST_IMAGE(conditions_wind_arrow);
 TEST_IMAGE(digital_stage_day);
 TEST_IMAGE(digital_stage_night);
 TEST_IMAGE(forecast_tomorrow_frame_day);
 TEST_IMAGE(forecast_tomorrow_frame_night);
 TEST_IMAGE(round_stage_day);
 TEST_IMAGE(round_stage_night);
-TEST_IMAGE(weather_icon_clear_day);
-TEST_IMAGE(test_forecast_cloudy);
-TEST_IMAGE(test_forecast_rain);
-TEST_IMAGE(test_forecast_snow);
-TEST_IMAGE(test_forecast_fog);
-TEST_IMAGE(test_forecast_thunder);
+/* Deliberately different crop origins and bounds exercise production placement.
+ * These solid test shapes are not the weather artwork or a visual-quality test. */
+static uint32_t weather_test_pixels[400 * 400];
+#define TEST_WEATHER_IMAGE(name, width, height) const lv_image_dsc_t name = { \
+  .header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, \
+    .w = width, .h = height, .stride = width * 4}, \
+  .data_size = width * height * 4, .data = (const uint8_t *)weather_test_pixels }
+TEST_WEATHER_IMAGE(weather_icon_clear_day, 286, 287);
+TEST_WEATHER_IMAGE(test_forecast_cloudy, 170, 200);
+TEST_WEATHER_IMAGE(test_forecast_rain, 310, 230);
+TEST_WEATHER_IMAGE(test_forecast_snow, 220, 300);
+TEST_WEATHER_IMAGE(test_forecast_fog, 340, 120);
+TEST_WEATHER_IMAGE(test_forecast_thunder, 260, 330);
+
+const weather_icon_geometry_t *weather_icon_geometry_for_image(const lv_image_dsc_t *image)
+{
+  static const weather_icon_geometry_t geometry[] = {
+    {400, 57, 56}, {400, 140, 180}, {400, 40, 100},
+    {400, 95, 60}, {400, 30, 180}, {400, 65, 25}
+  };
+  const lv_image_dsc_t *const images[] = {&weather_icon_clear_day, &test_forecast_cloudy,
+    &test_forecast_rain, &test_forecast_snow, &test_forecast_fog, &test_forecast_thunder};
+  for (unsigned i = 0; i < sizeof(images) / sizeof(*images); ++i)
+    if (image == images[i]) return &geometry[i];
+  return NULL;
+}
 const lv_image_dsc_t *weather_icon_image_for_name(const char *name)
 {
   if (name && !strcmp(name, "cloudy")) return &test_forecast_cloudy;
@@ -4459,7 +4473,7 @@ static unsigned visible_image_count(lv_obj_t *root, const void *source)
 static void assert_home_edges(void)
 {
   assert(visible_image_count(lv_screen_active(), &analog_edge_indicator) == 1);
-  assert(visible_image_count(lv_screen_active(), &conditions_edge_indicator) == 1);
+  assert(visible_image_count(lv_screen_active(), &weather_edge_indicator) == 1);
 }
 static lv_obj_t *label(const char *text)
 { lv_obj_t *found = find_visible_label(lv_screen_active(), text);
@@ -4513,6 +4527,85 @@ static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
         pixels + (y - area->y1) * row_bytes, row_bytes);
   }
   lv_display_flush_ready(display);
+}
+
+static void assert_weather_image_geometry(lv_obj_t *image, const lv_image_dsc_t *source, int size)
+{
+  const weather_icon_geometry_t *geometry = weather_icon_geometry_for_image(source);
+  assert(geometry && lv_image_get_src(image) == source);
+  assert(lv_obj_get_width(image) == size && lv_obj_get_height(image) == size);
+  assert(lv_image_get_inner_align(image) == LV_IMAGE_ALIGN_TOP_LEFT);
+  assert(lv_image_get_scale(image) == size * LV_SCALE_NONE / geometry->canvas_size);
+  assert(lv_image_get_offset_x(image) == geometry->crop_x);
+  assert(lv_image_get_offset_y(image) == geometry->crop_y);
+  lv_point_t pivot;
+  lv_image_get_pivot(image, &pivot);
+  assert(pivot.x == -geometry->crop_x && pivot.y == -geometry->crop_y);
+}
+
+static void test_weather_crop_placement(void)
+{
+  const int sizes[] = {400, 200, 364, 90, 75};
+  const lv_image_dsc_t *const sources[] = {&weather_icon_clear_day, &test_forecast_cloudy,
+    &test_forecast_rain, NULL, &weather_icon_clear_day};
+  lv_display_t *display = lv_display_get_default();
+  lv_color_format_t previous_format = lv_display_get_color_format(display);
+  lv_display_set_color_format(display, LV_COLOR_FORMAT_XRGB8888);
+  uint32_t *frame = calloc(800 * 800, sizeof(*frame));
+  uint32_t *incremental = malloc(800 * 800 * sizeof(*incremental));
+  assert(frame && incremental);
+  radar_test_pixels = frame;
+  lv_obj_t *background = lv_obj_create(lv_screen_active());
+  wac_ui_clear_container_chrome(background);
+  lv_obj_set_size(background, 800, 800);
+  lv_obj_set_style_bg_color(background, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(background, LV_OPA_COVER, 0);
+  lv_obj_t *image = lv_image_create(background);
+  lv_obj_set_pos(image, 120, 120);
+  for (unsigned size_index = 0; size_index < sizeof(sizes) / sizeof(*sizes); ++size_index) {
+    for (unsigned night = 0; night < 2; ++night) {
+      lv_obj_set_style_opa(image, night ? 92 : LV_OPA_COVER, 0);
+      wac_ui_apply_image_night_tint(image, night, lv_color_hex(0xb06b6b), LV_OPA_40);
+      for (unsigned source_index = 0; source_index < sizeof(sources) / sizeof(*sources); ++source_index) {
+        const lv_image_dsc_t *source = sources[source_index];
+        /* Reset through NULL because each size is a separately built layout. */
+        if (source_index == 0) wac_ui_set_weather_image(image, NULL, sizes[size_index]);
+        assert(wac_ui_set_weather_image(image, source, sizes[size_index]));
+        lv_obj_update_layout(background);
+        if (source) {
+          assert_weather_image_geometry(image, source, sizes[size_index]);
+          assert(!wac_ui_set_weather_image(image, source, sizes[size_index]));
+        }
+        lv_refr_now(display);
+        memcpy(incremental, frame, 800 * 800 * sizeof(*frame));
+        /* A source/crop change must erase its old position completely. Compare
+         * the actual partial refresh with a fresh full-screen render. */
+        lv_obj_invalidate(background);
+        lv_refr_now(display);
+        assert(!memcmp(frame, incremental, 800 * 800 * sizeof(*frame)));
+        int left = 800, top = 800, right = -1, bottom = -1;
+        for (int y = 0; y < 800; ++y) for (int x = 0; x < 800; ++x) {
+          if ((frame[y * 800 + x] & 0xffffff) == 0) continue;
+          if (x < left) left = x;
+          if (x > right) right = x;
+          if (y < top) top = y;
+          if (y > bottom) bottom = y;
+        }
+        if (!source) { assert(right == -1 && bottom == -1); continue; }
+        const weather_icon_geometry_t *geometry = weather_icon_geometry_for_image(source);
+        int scale = sizes[size_index] * LV_SCALE_NONE / geometry->canvas_size;
+        assert(abs(left - (120 + geometry->crop_x * scale / LV_SCALE_NONE)) <= 2);
+        assert(abs(top - (120 + geometry->crop_y * scale / LV_SCALE_NONE)) <= 2);
+        assert(abs(right - (120 + (geometry->crop_x + source->header.w) * scale / LV_SCALE_NONE - 1)) <= 2);
+        assert(abs(bottom - (120 + (geometry->crop_y + source->header.h) * scale / LV_SCALE_NONE - 1)) <= 2);
+      }
+    }
+  }
+  radar_test_pixels = NULL;
+  lv_obj_delete(background);
+  lv_display_set_color_format(display, previous_format);
+  free(incremental);
+  free(frame);
 }
 
 static lv_indev_data_t pointer_data;
@@ -4606,13 +4699,13 @@ static void assert_forecast_pairing(const app_weather_snapshot_t *weather,
     for (char *p = upper; *p; ++p) if (*p >= 'a' && *p <= 'z') *p -= 'a' - 'A';
     lv_obj_t *item = lv_obj_get_parent(label(high));
     assert(find_label(item, upper));
-    assert(lv_image_get_src(forecast_image(item, 75))
-      == weather_icon_image_for_name(weather->forecast[i].icon_name));
+    assert_weather_image_geometry(forecast_image(item, 75),
+      weather_icon_image_for_name(weather->forecast[i].icon_name), 75);
     snprintf(range, sizeof(range), "%d° / %d°", weather->forecast[i].high, weather->forecast[i].low);
     lv_obj_t *row = lv_obj_get_parent(label(range));
     assert(direct_label_count(row, i == 0 ? caption : weekdays[i]) == 1);
-    assert(lv_image_get_src(forecast_image(row, i == 0 ? 364 : 90))
-      == weather_icon_image_for_name(weather->forecast[i].icon_name));
+    assert_weather_image_geometry(forecast_image(row, i == 0 ? 364 : 90),
+      weather_icon_image_for_name(weather->forecast[i].icon_name), i == 0 ? 364 : 90);
   }
 }
 
@@ -4742,13 +4835,12 @@ static void assert_forecast_artwork(lv_obj_t *root, bool loaded, unsigned *count
     assert_forecast_artwork(lv_obj_get_child(root, i), loaded, count);
 }
 
-static void assert_data_notice(const char *text, bool conditions)
+static void assert_data_notice(const char *text)
 {
   lv_obj_t *notice = find_visible_label(lv_screen_active(), text);
-  if (!notice) fprintf(stderr, "Missing %s weather notice: %s\n", conditions ? "Conditions" : "Forecast", text);
+  if (!notice) fprintf(stderr, "Missing Forecast weather notice: %s\n", text);
   assert(notice);
-  menu_box(notice, conditions ? 150 : 180, conditions ? 680 : 120,
-           conditions ? 500 : 440, -1);
+  menu_box(notice, 180, 120, 440, -1);
   assert(lv_obj_get_style_text_font(notice, 0) == &lv_font_montserrat_22);
   assert(lv_obj_get_style_text_opa(notice, 0) == LV_OPA_COVER);
   assert(lv_obj_get_style_opa(notice, 0) == LV_OPA_COVER);
@@ -4757,7 +4849,7 @@ static void assert_data_notice(const char *text, bool conditions)
   menu_color(notice, 0xa6b6cf, false);
 }
 
-static unsigned assert_section_dividers(lv_obj_t *root, bool night, bool digital)
+static unsigned assert_clock_dividers(lv_obj_t *root, bool night)
 {
   /* Check this screen's group, including its deliberately hidden Night
    * dividers. Other hidden whole screens have their own style checks. */
@@ -4768,33 +4860,20 @@ static unsigned assert_section_dividers(lv_obj_t *root, bool night, bool digital
       && lv_obj_get_style_bg_opa(root, 0) != LV_OPA_TRANSP) {
     lv_area_t box;
     lv_obj_get_coords(root, &box);
-    bool candidate = digital ? lv_obj_get_width(root) == 500
-      : (box.y1 == 500 && lv_obj_get_width(lv_obj_get_parent(root)) == 440);
+    bool candidate = lv_obj_get_width(root) == 500;
     if (candidate) {
       ++count;
       assert(lv_color_eq(lv_obj_get_style_bg_color(root, 0),
                         lv_color_hex(night ? 0xe1b6b6 : 0x93d1ff)));
       assert(lv_obj_get_style_bg_opa(root, 0) == 89);
-      if (digital) {
-        assert(box.x1 == 150 && (box.y1 == 310 || box.y1 == 496));
-        assert(visible(root) == !night);
-      } else {
-        lv_obj_t *row = lv_obj_get_parent(root);
-        menu_box(row, 180, 490, 440, -1);
-        assert(lv_obj_get_style_pad_column(row, 0) == 14);
-        assert(lv_obj_get_width(lv_obj_get_child(row, 0))
-          == lv_obj_get_width(lv_obj_get_child(row, 2)));
-      }
+      assert(box.x1 == 150 && (box.y1 == 310 || box.y1 == 496));
+      assert(visible(root) == !night);
     }
   }
   for (uint32_t i = 0; i < lv_obj_get_child_count(root); ++i)
-    count += assert_section_dividers(lv_obj_get_child(root, i), night, digital);
+    count += assert_clock_dividers(lv_obj_get_child(root, i), night);
   return count;
 }
-
-static void conditions_arc_objects(lv_obj_t **headline, lv_obj_t **detail);
-static void assert_conditions_arc_text(lv_obj_t *headline, lv_obj_t *detail,
-  const char *expected_headline, const char *expected_detail);
 
 static void test_weather_screen_transitions(lv_indev_t *pointer)
 {
@@ -4875,19 +4954,12 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
     runtime.night_active = false;
 
     runtime.weather.valid = true;
-    runtime.weather.has_conditions = true;
     runtime.weather.temp = 63;
     runtime.weather.high = 71;
     runtime.weather.low = 41;
     runtime.weather.updated_at = 0; /* Download occurred before reliable network time. */
     strcpy(runtime.weather.icon_name, "cloudy");
     strcpy(runtime.weather.summary, "Cloudy");
-    strcpy(runtime.weather.conditions.headline, "Calm and dry");
-    strcpy(runtime.weather.conditions_alternate_headline, "Calm and dry");
-    runtime.weather.conditions.has_speed = true;
-    runtime.weather.conditions.speed = 8;
-    strcpy(runtime.weather.conditions.wind_unit, "mph");
-    strcpy(runtime.weather.conditions.change_label, "Conditions steady");
     const char *const dates[] = {"2026-10-10", "2026-10-11", "2026-10-12", "2026-10-13", "2026-10-14"};
     set_forecast_dates(&runtime.weather, dates);
     for (unsigned i = 0; i < APP_FORECAST_DAYS; ++i) {
@@ -4906,7 +4978,7 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(!find_visible_label(lv_screen_active(), "Weather data stale"));
     swipe(pointer, 300, 350, 600, 350);
-    assert_data_notice("Weather data stale", false);
+    assert_data_notice("Weather data stale");
     assert(find_visible_label(lv_screen_active(), "71° / 41°"));
     lv_obj_t *forecast = lv_obj_get_parent(label("71° / 41°"));
     unsigned icons = 0;
@@ -4952,7 +5024,7 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
     assert(find_visible_label(lv_screen_active(), "Weather data stale"));
     assert(find_visible_label(lv_screen_active(), "63°"));
     swipe(pointer, 600, 200, 300, 200);
-    assert_data_notice("Weather data stale", false);
+    assert_data_notice("Weather data stale");
     runtime.weather.stale = false;
     runtime.weather.updated_at += 600;
 
@@ -4973,13 +5045,13 @@ static void test_weather_screen_transitions(lv_indev_t *pointer)
       assert(lv_obj_get_style_text_font(label("AM"), 0) == &lv_font_montserrat_24);
       lv_obj_get_coords(label("Cloudy"), &box);
       assert(box.x1 == 500 && lv_obj_get_width(label("Cloudy")) == 270);
-      assert(assert_section_dividers(lv_screen_active(), false, true) == 2);
+      assert(assert_clock_dividers(lv_screen_active(), false) == 2);
     }
     runtime.night_active = true;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(!find_visible_label(lv_screen_active(), "63°"));
     assert(!find_visible_label(lv_screen_active(), "H: 71°  L: 41°"));
-    if (!analog) assert(assert_section_dividers(lv_screen_active(), true, true) == 2);
+    if (!analog) assert(assert_clock_dividers(lv_screen_active(), true) == 2);
     runtime.night_active = false;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(find_visible_label(lv_screen_active(), "63°"));
@@ -5064,14 +5136,27 @@ static void test_normal_clock_surfaces(lv_indev_t *pointer)
     runtime.unread_message_count = 1;
     runtime.has_important_message = true;
     runtime.weather.valid = true;
-    runtime.weather.has_conditions = true;
-    runtime.weather.conditions.alert = true;
-    strcpy(runtime.weather.conditions.headline, "Strong winds");
-    strcpy(runtime.weather.conditions_alternate_headline, "Strong winds");
+    runtime.weather.storm_alert = true;
     snprintf(runtime.weather.icon_name, sizeof(runtime.weather.icon_name), "clear-day");
     assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
     assert_home_edges();
     if (analog) assert_analog_tick_geometry(false);
+    lv_obj_t *current_icon = forecast_image(lv_screen_active(), analog ? 400 : 200);
+    assert(current_icon && visible(current_icon));
+    assert_weather_image_geometry(current_icon, &weather_icon_clear_day, analog ? 400 : 200);
+    lv_area_t icon_before, icon_after;
+    lv_obj_get_coords(current_icon, &icon_before);
+    if (analog) {
+      assert(icon_before.x1 == 200 && icon_before.y1 == 162);
+      assert(lv_obj_get_style_opa(current_icon, 0) == 92);
+    }
+    strcpy(runtime.weather.icon_name, "cloudy");
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+    assert_weather_image_geometry(current_icon, &test_forecast_cloudy, analog ? 400 : 200);
+    lv_obj_get_coords(current_icon, &icon_after);
+    assert(!memcmp(&icon_before, &icon_after, sizeof(icon_before)));
+    strcpy(runtime.weather.icon_name, "clear-day");
+    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(find_visible_label(lv_screen_active(), "Friday"));
     assert(find_visible_label(lv_screen_active(), "Oct 9"));
 
@@ -6882,31 +6967,14 @@ static void test_display_applies_home_and_preserves_navigation(lv_indev_t *point
   }
 }
 
-/* Illustrative decoded payloads, including their original format and the
- * opposite-format captions. These exercise actual Display/LVGL behavior;
- * weather decoding is checked separately with controlled HTTP responses. */
-static void timed_conditions_fixture(app_weather_snapshot_t *weather, bool time_24h)
+/* Illustrative decoded weather for actual Display/LVGL checks.
+ * Weather decoding is checked separately with controlled HTTP responses. */
+static void weather_fixture(app_weather_snapshot_t *weather)
 {
-  *weather = (app_weather_snapshot_t){.valid = true, .has_conditions = true,
-    .conditions_time_24h = time_24h, .updated_at = 1791533160, .temp = 63, .high = 71, .low = 41};
+  *weather = (app_weather_snapshot_t){.valid = true, .storm_alert = true,
+    .updated_at = 1791533160, .temp = 63, .high = 71, .low = 41};
   strcpy(weather->icon_name, "cloudy");
   strcpy(weather->summary, "Cloudy");
-  strcpy(weather->conditions.headline, time_24h ? "Gusts up to 58 mph until 20:00" : "Gusts up to 58 mph until 8 PM");
-  strcpy(weather->conditions.detail, time_24h ? "Heavy rain until 21:00" : "Heavy rain until 9 PM");
-  strcpy(weather->conditions_alternate_headline, time_24h ? "Gusts up to 58 mph until 8 PM" : "Gusts up to 58 mph until 20:00");
-  strcpy(weather->conditions_alternate_detail, time_24h ? "Heavy rain until 9 PM" : "Heavy rain until 21:00");
-  weather->conditions.has_detail = weather->conditions.alert = true;
-  weather->conditions.alert_count = 2;
-  weather->conditions.alerts[0].kind = STORM_ALERT_GUSTS;
-  weather->conditions.alerts[1].kind = STORM_ALERT_PRECIP;
-  weather->conditions.has_speed = weather->conditions.has_gust = true;
-  weather->conditions.speed = 8;
-  weather->conditions.gust = 58;
-  strcpy(weather->conditions.wind_unit, "mph");
-  strcpy(weather->conditions.change_label, "Conditions changing");
-  strcpy(weather->conditions.outlook_status, "Gusty");
-  strcpy(weather->conditions.pressure_status, "Falling");
-  strcpy(weather->conditions.precip_status, "0.6 in");
   const char *const dates[] = {"2026-10-10", "2026-10-11", "2026-10-12", "2026-10-13", "2026-10-14"};
   set_forecast_dates(weather, dates);
   for (unsigned i = 0; i < APP_FORECAST_DAYS; ++i) {
@@ -6914,64 +6982,6 @@ static void timed_conditions_fixture(app_weather_snapshot_t *weather, bool time_
     weather->forecast[i].low = 41 + i;
     strcpy(weather->forecast[i].icon_name, "cloudy");
   }
-}
-
-static void conditions_arc_objects(lv_obj_t **headline, lv_obj_t **detail)
-{
-  lv_obj_t *pressure = find_label(lv_screen_active(), "PRESSURE");
-  assert(pressure);
-  lv_obj_t *face = lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(pressure)));
-  *headline = lv_obj_get_child(face, 0);
-  *detail = lv_obj_get_child(face, 1);
-  assert(lv_obj_get_user_data(*headline) && lv_obj_get_user_data(*detail));
-}
-
-static void assert_conditions_arc_text(lv_obj_t *headline, lv_obj_t *detail,
-  const char *expected_headline, const char *expected_detail)
-{
-  /* The production draw callback reads this leading text array from each
-   * object's existing user data. No production inspection/reset hook is used. */
-  assert(!strcmp((const char *)lv_obj_get_user_data(headline), expected_headline));
-  assert(!strcmp((const char *)lv_obj_get_user_data(detail), expected_detail));
-}
-
-/* These fabricated download/clock snapshots verify elapsed time selection,
- * independently of the provider observation time and without live requests. */
-static void test_retained_conditions_renderer(void)
-{
-  /* Constructed snapshots exercise the retained renderer directly. Production
-   * startup must never build these objects or expose their route. */
-  device_config_t config;
-  app_runtime_state_t runtime;
-  alarm_fixture(&config, &runtime);
-  assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
-  assert(!find_label(lv_screen_active(), "PRESSURE"));
-  wac_weather_build_conditions(lv_screen_active());
-  lv_obj_t *headline, *detail;
-  conditions_arc_objects(&headline, &detail);
-  lv_obj_t *fixture = lv_obj_get_parent(lv_obj_get_parent(headline));
-  lv_obj_remove_flag(fixture, LV_OBJ_FLAG_HIDDEN);
-  assert_conditions_arc_text(headline, detail, "Waiting for weather…", "");
-  assert(!visible(find_image_source(fixture, &conditions_wind_arrow)));
-  timed_conditions_fixture(&runtime.weather, false);
-  for (unsigned night = 0; night < 2; ++night) {
-    wac_weather_update(&runtime.weather, NULL, false);
-    wac_weather_apply_night(&runtime.weather, false, night);
-    assert_conditions_arc_text(headline, detail, runtime.weather.conditions.headline,
-      runtime.weather.conditions.detail);
-    assert(find_visible_label(fixture, "8"));
-    assert(find_visible_label(fixture, "gusts to 58 mph"));
-    assert(find_visible_label(fixture, "Gusty"));
-    assert(find_visible_label(fixture, "Falling"));
-    assert(find_visible_label(fixture, "0.6 in"));
-    assert(assert_section_dividers(fixture, night, false) == 2);
-    menu_color(headline, night ? 0xec9682 : 0xffc466, false);
-  }
-  runtime.weather.stale = true;
-  wac_weather_apply_night(&runtime.weather, false, false);
-  wac_weather_update_status(&runtime.weather, false, WAC_WEATHER_SURFACE_CONDITIONS,
-    "Weather updated 2h ago");
-  assert_data_notice("Weather updated 2h ago", true);
 }
 
 static void test_retained_weather_age(lv_indev_t *pointer)
@@ -7006,9 +7016,9 @@ static void test_retained_weather_age(lv_indev_t *pointer)
     runtime.clock.utc_now = local_epoch(2026, 10, 9, 7, 6);
     runtime.clock.usable = true;
     runtime.clock.source = WAC_TIME_SOURCE_NETWORK;
-    timed_conditions_fixture(&runtime.weather, false);
+    weather_fixture(&runtime.weather);
     runtime.weather.stale = true;
-    runtime.weather.conditions.alert = false; /* Keep the normal Forecast-first navigation. */
+    runtime.weather.storm_alert = false; /* Keep the normal Forecast-first navigation. */
     runtime.weather.observed_at = runtime.clock.utc_now - 864000;
     assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
@@ -7023,7 +7033,7 @@ static void test_retained_weather_age(lv_indev_t *pointer)
         assert(lv_obj_get_style_text_font(notice, 0) == &lv_font_montserrat_22);
       } else assert(!find_visible_label(lv_screen_active(), cases[i].notice));
       swipe(pointer, 600, 200, 300, 200);
-      assert_data_notice("Weather data stale", false);
+      assert_data_notice("Weather data stale");
       if (strcmp(cases[i].notice, "Weather data stale"))
         assert(!find_visible_label(lv_screen_active(), cases[i].notice));
       swipe(pointer, 600, 200, 300, 200);
@@ -7038,115 +7048,6 @@ static void test_retained_weather_age(lv_indev_t *pointer)
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
     assert(!find_visible_label(lv_screen_active(), "Weather data stale"));
     assert(!find_visible_label(lv_screen_active(), "Weather updated 2h ago"));
-  }
-}
-
-static void test_conditions_saved_display_format(lv_indev_t *pointer)
-{
-  for (unsigned original_24h = 0; original_24h < 2; ++original_24h) {
-    device_config_t config;
-    app_runtime_state_t runtime;
-    alarm_fixture(&config, &runtime);
-    device_config_t baseline;
-    assert(device_config_copy(&baseline) == ESP_OK);
-    strcpy(config.location, "Cincinnati, Ohio, US");
-    strcpy(config.latitude, "39.1031"); strcpy(config.longitude, "-84.5120");
-    strcpy(config.timezone, "America/New_York"); strcpy(config.wifi_ssid, "Saved network");
-    strcpy(config.time_format, original_24h ? "24" : "12");
-    assert(device_config_save_weather(&baseline, &config) == ESP_OK);
-    assert(device_config_save_device(&baseline, &config) == ESP_OK);
-    assert(device_config_save_display(&baseline, &config) == ESP_OK);
-    assert(device_config_copy(&config) == ESP_OK);
-    assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
-    wac_weather_build_conditions(lv_screen_active());
-    lv_obj_t *headline, *detail;
-    conditions_arc_objects(&headline, &detail);
-    assert_conditions_arc_text(headline, detail, "Waiting for weather…", "");
-    timed_conditions_fixture(&runtime.weather, original_24h);
-    runtime.weather.updated_at = 0; /* This fixture has no reliable download time. */
-    /* Retained weather after a failed refresh is a normal reason to need the
-     * new format without another download. No live failure is being claimed. */
-    runtime.weather.stale = true;
-    app_weather_snapshot_t supplied = runtime.weather;
-    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert_conditions_arc_text(headline, detail, supplied.conditions.headline, supplied.conditions.detail);
-    fake_nvs_clear_activity();
-    swipe(pointer, 600, 200, 600, 400);
-    click("Display Settings"); click("Time Format");
-    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert_conditions_arc_text(headline, detail, supplied.conditions.headline, supplied.conditions.detail);
-    click("Cancel");
-    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
-    assert_conditions_arc_text(headline, detail, supplied.conditions.headline, supplied.conditions.detail);
-    click("Display Settings"); click("Time Format");
-    allow_settings_task = true;
-    pointer_tap(pointer, visible_button("Save"));
-    assert(pending_settings_task && fake_nvs_calls(FAKE_SET) == 0);
-    assert_conditions_arc_text(headline, detail, supplied.conditions.headline, supplied.conditions.detail);
-    complete_settings_save(&config, &runtime);
-    assert(!strcmp(config.time_format, original_24h ? "12" : "24"));
-    assert_conditions_arc_text(headline, detail, supplied.conditions_alternate_headline, supplied.conditions_alternate_detail);
-    assert(fake_nvs_calls(FAKE_SET) == 5 && fake_nvs_calls(FAKE_COMMIT) == 1);
-    assert(settings_restart_count == 0 && !pending_settings_task);
-    click("Back to Clock");
-    swipe(pointer, 600, 200, 300, 200);
-    /* Retained objects are exercised directly, outside production navigation. */
-    lv_obj_t *fixture = lv_obj_get_parent(lv_obj_get_parent(headline));
-    lv_obj_remove_flag(fixture, LV_OBJ_FLAG_HIDDEN);
-    assert(visible(headline) && visible(detail));
-    assert(find_visible_label(lv_screen_active(), "8"));
-    assert(find_visible_label(lv_screen_active(), "gusts to 58 mph"));
-    assert(find_visible_label(lv_screen_active(), "Gusty"));
-    assert(find_visible_label(lv_screen_active(), "Falling"));
-    assert(find_visible_label(lv_screen_active(), "0.6 in"));
-    assert(lv_color_eq(lv_obj_get_style_text_color(headline, 0), lv_color_hex(0xffc466)));
-    lv_obj_add_flag(fixture, LV_OBJ_FLAG_HIDDEN);
-    fake_nvs_clear_activity();
-    /* A previously started download publishes its old preferred format after
-     * Save. The current saved choice still selects the opposite captions. */
-    runtime.weather.updated_at = 0;
-    for (unsigned night = 0; night < 2; ++night) {
-      runtime.night_active = night;
-      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-      assert_conditions_arc_text(headline, detail, supplied.conditions_alternate_headline, supplied.conditions_alternate_detail);
-      assert(lv_color_eq(lv_obj_get_style_text_color(headline, 0), lv_color_hex(night ? 0xec9682 : 0xffc466)));
-      assert(find_visible_label(lv_screen_active(), "Radar unavailable."));
-    }
-    /* A missing publication also retains the displayed payload, including its
-     * format alternatives; drawing must not write settings or start work. */
-    runtime.weather.valid = false;
-    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert_conditions_arc_text(headline, detail, supplied.conditions_alternate_headline, supplied.conditions_alternate_detail);
-    runtime.weather.valid = true;
-    runtime.weather.conditions.has_detail = false;
-    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert_conditions_arc_text(headline, detail, supplied.conditions_alternate_headline, "");
-    runtime.weather.conditions.has_detail = true;
-    assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
-    assert(!pending_settings_task && settings_restart_count == 0);
-    runtime.night_active = false;
-    swipe(pointer, 300, 350, 600, 350);
-    swipe(pointer, 600, 200, 600, 400);
-    click("Display Settings"); click("Time Format");
-    allow_settings_task = true; pointer_tap(pointer, visible_button("Save"));
-    complete_settings_save(&config, &runtime);
-    assert(!strcmp(config.time_format, original_24h ? "24" : "12"));
-    assert_conditions_arc_text(headline, detail, supplied.conditions.headline, supplied.conditions.detail);
-    fake_nvs_clear_activity();
-    runtime.weather.conditions.has_detail = false;
-    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert_conditions_arc_text(headline, detail, supplied.conditions.headline, "");
-    runtime.weather.has_conditions = false;
-    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert_conditions_arc_text(headline, detail, "Weather unavailable", "");
-    assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
-    assert(!pending_settings_task && settings_restart_count == 0);
-    assert(!memcmp(runtime.weather.conditions.headline, supplied.conditions.headline, STORM_TEXT_LEN));
-    assert(!memcmp(runtime.weather.conditions.detail, supplied.conditions.detail, STORM_TEXT_LEN));
-    assert(!memcmp(runtime.weather.forecast, supplied.forecast, sizeof(supplied.forecast)));
-    assert(runtime.weather.conditions.alert && runtime.weather.conditions.alert_count == 2);
-    wac_ui_settings_close();
   }
 }
 
@@ -7168,11 +7069,8 @@ static void test_display_completion_under_alarm_and_replacement(lv_indev_t *poin
     assert(device_config_save_alarm(&baseline, &config) == ESP_OK);
     assert(device_config_copy(&config) == ESP_OK);
     fake_nvs_clear_activity();
-    timed_conditions_fixture(&runtime.weather, false);
+    weather_fixture(&runtime.weather);
     assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
-    wac_weather_build_conditions(lv_screen_active());
-    lv_obj_t *headline, *detail;
-    conditions_arc_objects(&headline, &detail);
     swipe(pointer, 600, 200, 600, 400);
     click("Display Settings"); click("Home Screen"); click("Time Format");
     allow_settings_task = true; click("Save");
@@ -7195,8 +7093,6 @@ static void test_display_completion_under_alarm_and_replacement(lv_indev_t *poin
     /* The original route completes after the clock/alarm has chosen a newer destination. */
     complete_settings_save(&config, &runtime);
     assert(!strcmp(config.default_clock_face, "digital") && !strcmp(config.time_format, "24"));
-    assert_conditions_arc_text(headline, detail, runtime.weather.conditions_alternate_headline,
-      runtime.weather.conditions_alternate_detail);
     assert(settings_restart_count == 0);
     if (!replace) {
       assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
@@ -7671,7 +7567,6 @@ static void test_radar_page(lv_indev_t *pointer)
   strcpy(config.time_format, "12");
   assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
   assert(!find_label(lv_screen_active(), "PRESSURE"));
-  assert(!find_image_source(lv_screen_active(), &conditions_wind_arrow));
   lv_obj_t *view = radar_view();
   lv_obj_t *map = lv_obj_get_child(view, 0);
   lv_obj_t *marker = lv_obj_get_child(view, -1);
@@ -7685,8 +7580,8 @@ static void test_radar_page(lv_indev_t *pointer)
   assert(!find_visible_label(lv_screen_active(), "RainViewer · USGS"));
   swipe(pointer, 600, 200, 300, 200); /* Normal row: Forecast then Radar. */
   assert(find_visible_label(lv_screen_active(), "Waiting for weather…"));
-  runtime.weather.valid = runtime.weather.has_conditions = true;
-  runtime.weather.conditions.alert = true; /* Mid-visit alert keeps this order. */
+  runtime.weather.valid = true;
+  runtime.weather.storm_alert = true; /* Mid-visit alert keeps this order. */
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   swipe(pointer, 600, 200, 300, 200);
   assert(find_visible_label(view, "Radar unavailable."));
@@ -7699,7 +7594,7 @@ static void test_radar_page(lv_indev_t *pointer)
   assert(find_visible_label(lv_screen_active(), "Friday"));
   swipe(pointer, 600, 200, 300, 200); /* Alert applies on the next visit. */
   assert(visible(view));
-  runtime.weather.conditions.alert = false;
+  runtime.weather.storm_alert = false;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   swipe(pointer, 600, 200, 300, 200); /* Clearing mid-visit keeps Radar first. */
   assert(!visible(view));
@@ -7857,12 +7752,12 @@ static void test_radar_country_eligibility(lv_indev_t *pointer)
     alarm_fixture(&config, &runtime);
     strcpy(config.location, disabled[i].label);
     config.location_ready = disabled[i].ready;
-    runtime.weather.valid = runtime.weather.has_conditions = true;
-    runtime.weather.conditions.alert = true;
+    runtime.weather.valid = true;
+    runtime.weather.storm_alert = true;
     assert(app_ui_show_boot_screen(&config, &runtime, false) == ESP_OK);
     assert(!find_label(lv_screen_active(), "Radar unavailable."));
     assert(!find_label(lv_screen_active(), "RainViewer · USGS"));
-    assert(visible_image_count(lv_screen_active(), &conditions_edge_indicator) == 1);
+    assert(visible_image_count(lv_screen_active(), &weather_edge_indicator) == 1);
     swipe(pointer, 600, 200, 300, 200); /* An alert's sole destination is Forecast. */
     assert(find_visible_label(lv_screen_active(), "--"));
     swipe(pointer, 600, 200, 300, 200); /* No empty or unavailable second page. */
@@ -7876,8 +7771,8 @@ static void test_radar_country_eligibility(lv_indev_t *pointer)
   alarm_fixture(&config, &runtime);
   strcpy(config.location, "Cincinnati, Ohio, us ");
   strcpy(config.latitude, "39.1031"); strcpy(config.longitude, "-84.5120");
-  runtime.weather.valid = runtime.weather.has_conditions = true;
-  runtime.weather.conditions.alert = true;
+  runtime.weather.valid = true;
+  runtime.weather.storm_alert = true;
   uint8_t *pixels = calloc(APP_RADAR_WIDTH * APP_RADAR_HEIGHT, 4);
   assert(pixels);
   runtime.radar = (app_radar_snapshot_t){.valid = true, .generation = 1,
@@ -8022,7 +7917,7 @@ static void test_unchanged_render_updates(void)
   strcpy(config.location, "Cincinnati, Ohio, US");
   strcpy(config.latitude, "39.1031");
   strcpy(config.longitude, "-84.5120");
-  timed_conditions_fixture(&runtime.weather, false);
+  weather_fixture(&runtime.weather);
   assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
   lv_display_t *display = lv_display_get_default();
   lv_display_add_event_cb(display, count_ui_invalidations, LV_EVENT_INVALIDATE_AREA, NULL);
@@ -8061,7 +7956,7 @@ static void test_unchanged_render_updates(void)
     assert(icon && lv_obj_get_style_opa(icon, 0) == (night ? LV_OPA_80 : LV_OPA_COVER));
     ui_invalidations = 0;
     wac_weather_apply_night(&runtime.weather, false, night);
-    wac_weather_update(&runtime.weather, &calendar, false);
+    wac_weather_update(&runtime.weather, &calendar);
     assert(ui_invalidations == 0);
     runtime.weather.valid = false;
     wac_weather_apply_night(&runtime.weather, false, night);
@@ -8072,13 +7967,13 @@ static void test_unchanged_render_updates(void)
     assert(lv_obj_get_style_opa(icon, 0) == (night ? LV_OPA_80 : LV_OPA_COVER));
     assert(!find_visible_label(lv_screen_active(), "Waiting for weather…"));
     runtime.weather.stale = true;
-    wac_weather_update_status(&runtime.weather, night, WAC_WEATHER_SURFACE_FORECAST, "");
+    wac_weather_update_status(&runtime.weather, night, WAC_WEATHER_SURFACE_FORECAST);
     ui_invalidations = 0;
-    wac_weather_update_status(&runtime.weather, night, WAC_WEATHER_SURFACE_FORECAST, "");
+    wac_weather_update_status(&runtime.weather, night, WAC_WEATHER_SURFACE_FORECAST);
     assert(ui_invalidations == 0);
     runtime.weather.stale = false;
 
-    wac_weather_update_status(&runtime.weather, night, WAC_WEATHER_SURFACE_FORECAST, "");
+    wac_weather_update_status(&runtime.weather, night, WAC_WEATHER_SURFACE_FORECAST);
     wac_weather_set_visible(false, false, true);
     lv_obj_t *title = find_visible_label(lv_screen_active(), "Message");
     assert(title);
@@ -8145,12 +8040,9 @@ static void test_indicator_pulses(void)
   /* Illustrative service snapshots exercise the ordinary one-second refresh;
    * they do not perform message polling or fetch real weather. */
   runtime.weather.valid = true;
-  runtime.weather.has_conditions = true;
   runtime.weather.updated_at = runtime.clock.utc_now;
   strcpy(runtime.weather.icon_name, "cloudy");
-  runtime.weather.conditions.alert = true;
-  strcpy(runtime.weather.conditions.headline, "Strong winds");
-  strcpy(runtime.weather.conditions_alternate_headline, "Strong winds");
+  runtime.weather.storm_alert = true;
   assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
 
   lv_obj_t *edges[4]; /* Both clock faces: messages first, weather second. */
@@ -8158,7 +8050,7 @@ static void test_indicator_pulses(void)
   find_edge_indicators(lv_screen_active(), &analog_edge_indicator, edges, &count);
   assert(count == 2);
   count = 0;
-  find_edge_indicators(lv_screen_active(), &conditions_edge_indicator, edges + 2, &count);
+  find_edge_indicators(lv_screen_active(), &weather_edge_indicator, edges + 2, &count);
   assert(count == 2);
   lv_opa_t previous[4], low[4], high[4];
   unsigned rises[4] = {0}, falls[4] = {0};
@@ -8232,7 +8124,7 @@ static void test_indicator_pulses(void)
 
   runtime.unread_message_count = 0;
   runtime.message.available = false;
-  runtime.weather.conditions.alert = false;
+  runtime.weather.storm_alert = false;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   for (unsigned i = 0; i < 4; ++i) {
     assert(lv_obj_has_flag(edges[i], LV_OBJ_FLAG_HIDDEN));
@@ -8247,7 +8139,7 @@ static void test_indicator_pulses(void)
   runtime.unread_message_count = 1;
   runtime.has_important_message = true;
   runtime.message.available = true;
-  runtime.weather.conditions.alert = true;
+  runtime.weather.storm_alert = true;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
   for (unsigned i = 0; i < 4; ++i) {
     assert(!lv_obj_has_flag(edges[i], LV_OBJ_FLAG_HIDDEN));
@@ -8266,6 +8158,8 @@ int main(int argc, char **argv)
   tzset();
   lv_init();
   menu_keyboard_assets();
+  for (unsigned i = 0; i < sizeof(weather_test_pixels) / sizeof(*weather_test_pixels); ++i)
+    weather_test_pixels[i] = 0xffcc7733;
   lv_display_t *display = lv_display_create(800, 800);
   _Alignas(4) static uint8_t buffer[800 * 32 * 4];
   lv_display_set_buffers(display, buffer, NULL, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
@@ -8274,14 +8168,12 @@ int main(int argc, char **argv)
   lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(pointer, read_pointer);
   if (argc == 2) {
-    if (!strcmp(argv[1], "conditions_format")) test_conditions_saved_display_format(pointer);
-    else {
-      assert(!strcmp(argv[1], "weather_hidden_restart"));
-      test_weather_restart_while_alarm_hides_editor(pointer);
-    }
+    assert(!strcmp(argv[1], "weather_hidden_restart"));
+    test_weather_restart_while_alarm_hides_editor(pointer);
   } else {
     assert(argc == 1);
-    test_retained_conditions_renderer();
+    test_weather_crop_placement();
+    puts("Weather crop checks passed: five logical sizes, source changes, tint/opacity, partial redraw versus full redraw (substitute shapes only).");
     test_provider_forecast_dates(pointer);
     test_weather_screen_transitions(pointer);
     test_retained_weather_age(pointer);
@@ -8300,7 +8192,6 @@ int main(int argc, char **argv)
     test_alarm_navigation_preemption_and_completion(pointer);
     test_brightness_alarm_restore(pointer);
     test_display_applies_home_and_preserves_navigation(pointer);
-    test_conditions_saved_display_format(pointer);
     test_display_completion_under_alarm_and_replacement(pointer);
     test_weather_provider_alarm_resume(pointer);
     test_alarm_preempts_pending_settings(pointer);

@@ -14,7 +14,6 @@ FACE_CY = CENTER + STAGE_Y_TRIM
 FACE_RADIUS = 390
 FORECAST_FRAME_SIZE = 500
 FORECAST_FRAME_CENTER = FORECAST_FRAME_SIZE // 2
-WEATHER_ICON_SIZE = 250
 WEATHER_ICON_VARIANTS = (
     "freezing_rain",
     "hail",
@@ -243,49 +242,52 @@ def build_settings_icon(variant: str, size: int = 24) -> str:
 
 
 def build_weather_icon(variant: str) -> str:
-    """Return approved weather artwork that is absent from the existing icon set."""
+    """Return the exact approved SVG artwork for the five additional conditions."""
     if variant not in WEATHER_ICON_VARIANTS:
         raise ValueError(f"Unsupported weather icon: {variant}")
 
-    shared = f'width="{WEATHER_ICON_SIZE}" height="{WEATHER_ICON_SIZE}" viewBox="0 0 250 250"'
-    cloud = (
-        '<path fill="#bfc3c9" transform="translate(125 70) scale(.85 .75) translate(-125 -70)" '
-        'd="M77 130c-25 0-43-18-43-42 0-22 17-40 39-41 C81 25 101 12 124 12c28 0 49 20 51 48 '
-        '23-3 42 13 44 36 3 19-11 34-31 34z"/>'
-    )
-
+    # Preserve the approved vector text, including its original viewBox and paths.
     if variant == "freezing_rain":
-        icicles = (
-            '<path fill="#5590cc" d="M77 108h16l-8 31-17 28 4-27zm43 0h15l-7 46-8 14-7-14zm44 0h16l15 31 4 27-19-28z"/>'
-        )
-        inner = cloud + icicles
-    elif variant == "hail":
-        inner = cloud + ''.join(
-            f'<circle cx="{x}" cy="{y}" r="11" fill="#fff"/>'
-            for x, y in ((75, 166), (125, 183), (175, 166))
-        )
-    elif variant == "ice":
-        inner = '''
-  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="14">
-    <path d="M125 60v130M68 92l114 66M68 158l114-66"/>
-  </g>'''
-    elif variant == "wind":
-        inner = '''
-  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="13">
-    <path d="M75 87h69c12 0 17-9 11-16-5-6-14-5-17 2"/>
-    <path d="M55 125h140"/>
-    <path d="M71 163h74c12 0 17 10 11 17-5 6-14 5-17-2"/>
-  </g>'''
-    else:  # tornado
-        inner = '''
-  <g fill="#aeb4bc" transform="translate(125 125) scale(.75 .8) translate(-125 -125)">
-    <path d="M29 44c57 15 135 15 192 0l-12 24c-48 12-120 12-168 0z"/>
-    <path d="M48 91c43 13 111 13 154 0l-12 23c-36 10-94 10-130 0z"/>
-    <path d="M70 137c31 11 79 11 110 0l-13 23c-24 8-60 8-84 0z"/>
-    <path d="M94 183c17 7 45 7 62 0l-13 21c-10 5-26 5-36 0z"/>
-  </g>'''
-
-    return f'<svg xmlns="http://www.w3.org/2000/svg" {shared}>{inner}</svg>'
+        return """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<path fill="#c0c0c0" d="M681.7,363.7c46.3-2.9,90.6,21.7,108.5,65,30.1,72.8-26.7,147.9-102.9,148h-339.1c-56.1-1.4-103.2-38.4-114.1-93.9-15.5-78.6,47.1-152.4,127.1-148.1,1.9.1,7.3.4,8.6-.5,10.2-33.6,28.1-65.1,55.5-87.5,54.1-44.2,132.4-48.7,189.8-7.8,40.1,28.6,64.8,75.5,66.7,124.8Z"/>
+<path fill="#6699cc" transform="rotate(12 362 680)" d="M333 616H391L384 650L376 692L362 758L347 693L340 652Z"/>
+<path fill="#6699cc" transform="rotate(12 507 680)" d="M478 616H536L529 650L521 692L507 746L492 693L485 652Z"/>
+<path fill="#6699cc" transform="rotate(12 647 680)" d="M618 616H676L669 650L661 692L647 758L632 693L625 652Z"/>
+</svg>
+"""
+    if variant == "hail":
+        return """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<path fill="#c0c0c0" d="M427.7,542.3c-38.9-2.3-80.9,6.3-117.7-8.8-35.6-14.7-64.2-49-70.9-87.1-14.2-81,53.1-151,133.5-147.2,14.5-51.8,52.6-96.5,103.6-114.9,71.9-26,151.9-2.2,195.9,60.1,18.6,26.3,28.7,56.8,31.6,88.9,91.1-2.7,140.7,105,78.5,173-47.7,52.2-118.3,32.1-181,36h-173.5Z"/>
+<circle cx="358" cy="638" r="34" fill="#ffffff"/>
+<circle cx="511" cy="638" r="34" fill="#ffffff"/>
+<circle cx="664" cy="638" r="34" fill="#ffffff"/>
+<circle cx="434" cy="742" r="34" fill="#ffffff"/>
+<circle cx="588" cy="742" r="34" fill="#ffffff"/>
+</svg>
+"""
+    if variant == "ice":
+        return """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <path fill="#ffffff" transform="translate(512 512) scale(3.8) translate(-702 -655)" d="M713.6,632.2l42-23.5c11.4-2.4,19.5,8,13,18-11.5,8.5-25.1,14.1-36.9,22.1-1.1.8-6.3,3.7-5.1,5.4l42.5,24c8,7,2.4,19.8-8,19.8-10.4,0-36.1-21.1-47.5-24.8-.3,7.8.3,15.7,0,23.5-.3,7.9-.2,19.6-1,27-1.5,13.1-22,8.5-22,2v-52.5l-44.7,24.8c-9.4,1.8-19-7.4-13.7-16.7,4.4-7.7,37.7-21.8,46.4-28.1l-42.5-25.9c-7.7-10.3,2.1-22.5,13.8-17.8l40.7,22.8v-48.5c0-4.4,7.5-8.5,11.5-8.5s11.5,4.4,11.5,8.5v48.5Z"/>
+</svg>
+"""
+    if variant == "wind":
+        return """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <g fill="none" stroke="#ffffff" stroke-width="46" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M244 410H536C580 410 612 378 612 337C612 296 584 270 546 270C510 270 484 296 484 325"/>
+    <path d="M244 511H710C756 511 789 483 789 438C789 393 757 366 722 366C690 366 663 388 663 417"/>
+    <path d="M304 615H605C651 615 676 646 676 679C676 719 648 746 612 746C579 746 552 724 552 696"/>
+  </g>
+</svg>
+"""
+    return """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <g fill="#c0c0c0" transform="translate(-128 -636) scale(1.25 1.75)">
+    <path d="M300 482C421 508 592 505 729 472L696 530C586 556 439 556 334 537Z"/>
+    <path d="M362 585C468 605 574 602 660 579L629 637C545 658 475 659 402 646Z"/>
+    <path d="M430 693C489 706 550 702 597 688L571 737C528 753 492 754 458 744Z"/>
+    <path d="M483 789Q525 799 564 779L543 818Q518 832 504 820Z"/>
+  </g>
+</svg>
+"""
 
 
 def build_svg(variant: str, mode: str) -> str:

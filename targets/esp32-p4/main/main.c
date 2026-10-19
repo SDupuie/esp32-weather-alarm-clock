@@ -350,7 +350,7 @@ static void ui_heartbeat_task(void *arg)
       wake_tick = xTaskGetTickCount();
 
     /* Static, not on this task's stack: the runtime state carries the
-     * full weather snapshot including the conditions summary. Only this
+     * full weather snapshot including the storm indicator. Only this
      * task touches it. */
     static app_runtime_state_t runtime_snapshot;
     device_config_t config;

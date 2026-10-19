@@ -4,7 +4,7 @@ These JSON files provide inputs and expected results for the native C checks:
 
 - `forecast-representative-cases.json`: representative daytime forecast icons.
 - `location-resolution-cases.json`: location parsing and candidate ranking.
-- `storm-conditions-cases.json`: weather outlook, measurements, fixed storm-warning limits and imperial/metric gust-boundary cases.
+- `storm-conditions-cases.json`: 27 shared storm-alert cases covering current/upcoming wind, gusts, heavy precipitation, thunder, missing data and imperial/metric gust boundaries; pressure alone does not alert. The fixed rules are owned by [storm detection](../../docs/architecture.md#storm-detection).
 - `weather-open-meteo.json` and `weather-visual-crossing.json`: sanitized provider responses consumed by the native weather-service checks. Constructed cases in that test supplement these captures; they do not establish that rare conditions occur in provider traffic.
 
 The checks compile the ESP32-P4 calculations and compare their results with these

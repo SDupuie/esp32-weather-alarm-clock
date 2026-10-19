@@ -330,10 +330,10 @@ static bool normalize_om(cJSON *hourly)
  * rain/showers quantities; its explicit facts provide those subtype counters. */
 static cJSON *normalize_vc_hourly(const device_config_t *config, const cJSON *root)
 {
-  static const char *names[] = {"time","epoch","condition_flags","sky", "precipitation_probability","precipitation","rain","showers","snowfall","cloud_cover","pressure_msl","wind_speed_10m","wind_gusts_10m","temperature_2m"};
-  cJSON *result=cJSON_CreateObject(), *columns[14];
+  static const char *names[] = {"time","epoch","condition_flags","sky", "precipitation_probability","precipitation","rain","showers","snowfall","cloud_cover","wind_speed_10m","wind_gusts_10m"};
+  cJSON *result=cJSON_CreateObject(), *columns[12];
   if (!result) return NULL;
-  for (int i=0;i<14;++i) { columns[i]=cJSON_AddArrayToObject(result,names[i]); if (!columns[i]) goto fail; }
+  for (int i=0;i<12;++i) { columns[i]=cJSON_AddArrayToObject(result,names[i]); if (!columns[i]) goto fail; }
   int count=0; const cJSON *days=field(root,"days");
   double precip_factor=metric(config)?1:25.4, snow_factor=metric(config)?1:2.54, wind_factor=metric(config)?1:1.609344;
   for (int d=0; d<cJSON_GetArraySize(days); ++d) {
@@ -349,10 +349,9 @@ static cJSON *normalize_vc_hourly(const device_config_t *config, const cJSON *ro
       weather_condition_facts_t facts=weather_facts_from_visual_crossing(record,snow);
       double values[]={number(field(record,"datetimeEpoch")),facts.flags,facts.sky,
         number(field(record,"precipprob")),number(field(record,"precip"))*precip_factor,
-        NAN,NAN,snow,number(field(record,"cloudcover")),number(field(record,"pressure")),
-        number(field(record,"windspeed"))*wind_factor,number(field(record,"windgust"))*wind_factor,
-        number(field(record,"temp"))};
-      for (int i=1;i<14;++i) if (!append_number(columns[i],values[i-1])) goto fail;
+        NAN,NAN,snow,number(field(record,"cloudcover")),
+        number(field(record,"windspeed"))*wind_factor,number(field(record,"windgust"))*wind_factor};
+      for (int i=1;i<12;++i) if (!append_number(columns[i],values[i-1])) goto fail;
     }
   }
   return result;
@@ -370,9 +369,7 @@ static cJSON *normalize_vc_current(const device_config_t *config, const cJSON *r
       !cJSON_AddStringToObject(result,"time",timestamp) ||
       !put_number(result,"epoch",number(field(current,"datetimeEpoch"))) ||
       !put_number(result,"condition_flags",facts.flags) ||
-      !put_number(result,"temperature",number(field(current,"temp"))) ||
-      !put_number(result,"windspeed",number(field(current,"windspeed"))*(metric(config)?1:1.609344)) ||
-      !put_number(result,"winddirection",number(field(current,"winddir")))) {
+      !put_number(result,"windspeed",number(field(current,"windspeed"))*(metric(config)?1:1.609344))) {
     cJSON_Delete(result); return NULL;
   }
   return result;
@@ -395,17 +392,6 @@ static bool vc_is_day(const cJSON *root,const cJSON *current)
   }
   return true; /* No variant is invented when no source day/night evidence exists. */
 }
-static void build_conditions(const device_config_t *config,const cJSON *current,
-                             const cJSON *hourly,const cJSON *daily,app_weather_snapshot_t *out)
-{
-  storm_conditions_config_t cc={.metric=metric(config),.time_24h=strcmp(config->time_format,"24")!=0};
-  if (storm_conditions_build(&cc,current,hourly,daily,&out->conditions)) {
-    snprintf(out->conditions_alternate_headline,sizeof(out->conditions_alternate_headline),"%s",out->conditions.headline);
-    if (out->conditions.has_detail) snprintf(out->conditions_alternate_detail,sizeof(out->conditions_alternate_detail),"%s",out->conditions.detail);
-  }
-  cc.time_24h=!cc.time_24h; out->conditions_time_24h=cc.time_24h;
-  out->has_conditions=storm_conditions_build(&cc,current,hourly,daily,&out->conditions);
-}
 static esp_err_t decode(const device_config_t *config,cJSON *root,app_weather_snapshot_t *out)
 {
   bool vc=config->weather_provider==DEVICE_CONFIG_WEATHER_VISUAL_CROSSING;
@@ -416,11 +402,8 @@ static esp_err_t decode(const device_config_t *config,cJSON *root,app_weather_sn
   if (vc) {
     double epoch=number(field(current,"datetimeEpoch"));
     if (!isfinite(epoch) || epoch<0 || epoch>4102444800.0) return ESP_FAIL;
-    hourly=normalize_vc_hourly(config,root); daily=cJSON_CreateObject();
-    if (!hourly||!daily) { cJSON_Delete(hourly); cJSON_Delete(daily); return ESP_ERR_NO_MEM; }
-    cJSON *highs=cJSON_AddArrayToObject(daily,"temperature_2m_max");
-    if (!highs) goto allocation_failure;
-    for (int i=0;i<6;++i) if (!append_number(highs,number(field(at(days,i),"tempmax")))) goto allocation_failure;
+    hourly=normalize_vc_hourly(config,root);
+    if (!hourly) return ESP_ERR_NO_MEM;
   } else if (!cJSON_IsObject(daily)||!normalize_om(hourly)) return ESP_FAIL;
   /* Required upcoming high/low pairs are checked before publishing any field. */
   for (int i=1;i<=APP_FORECAST_DAYS;++i) {
@@ -467,19 +450,19 @@ static esp_err_t decode(const device_config_t *config,cJSON *root,app_weather_sn
   out->thundersnow=picture==WEATHER_PICTURE_THUNDERSNOW;
   snprintf(out->summary,sizeof(out->summary),"%s",weather_caption_for_facts(&facts,out->is_day));
   snprintf(out->icon_name,sizeof(out->icon_name),"%s",weather_icon_name_for_picture(picture,out->is_day));
-  build_conditions(config,current,hourly,daily,out);
+  out->storm_alert=storm_conditions_alert(metric(config),current,hourly);
   out->valid=true; out->updated_at=time(NULL);
-  if (vc) { cJSON_Delete(hourly); cJSON_Delete(daily); cJSON_Delete(normalized_current); }
+  if (vc) { cJSON_Delete(hourly); cJSON_Delete(normalized_current); }
   return ESP_OK;
 allocation_failure:
-  if (vc) { cJSON_Delete(hourly); cJSON_Delete(daily); cJSON_Delete(normalized_current); }
+  if (vc) { cJSON_Delete(hourly); cJSON_Delete(normalized_current); }
   return ESP_ERR_NO_MEM;
 invalid:
-  if (vc) { cJSON_Delete(hourly); cJSON_Delete(daily); }
+  if (vc) { cJSON_Delete(hourly); }
   return ESP_FAIL;
 }
 
-/* Keep request scratch out of the decoding/Conditions call stack. The target
+/* Keep request scratch out of the decoding call stack. The target
  * compiler must preserve this boundary: HTTP finishes before JSON is parsed. */
 static __attribute__((noinline)) esp_err_t perform_request(
   const device_config_t *config,http_response_t *response,int *status)
@@ -494,7 +477,7 @@ static __attribute__((noinline)) esp_err_t perform_request(
   if (config->weather_provider==DEVICE_CONFIG_WEATHER_VISUAL_CROSSING) {
     snprintf(request.vc.path,sizeof(request.vc.path),"/VisualCrossingWebServices/rest/services/timeline/%s,%s/next6days",config->latitude,config->longitude);
     int length=snprintf(request.vc.query,sizeof(request.vc.query),"unitGroup=%s&include=current,days,hours&lang=id&iconSet=icons2&contentType=json"
-      "&elements=datetime,datetimeEpoch,tzoffset,temp,tempmax,tempmin,windspeed,windgust,winddir,pressure,precip,precipprob,preciptype,snow,cloudcover,conditions,icon,sunrise,sunset,sunriseEpoch,sunsetEpoch&key=",
+      "&elements=datetime,datetimeEpoch,tzoffset,temp,tempmax,tempmin,windspeed,windgust,precip,precipprob,preciptype,snow,cloudcover,conditions,icon,sunrise,sunset,sunriseEpoch,sunsetEpoch&key=",
       metric(config)?"metric":"us");
     if (length<0 || (size_t)length>=sizeof(request.vc.query)) return ESP_ERR_INVALID_SIZE;
     encode(config->weather_api_key,request.vc.query+length,sizeof(request.vc.query)-(size_t)length);
@@ -503,7 +486,7 @@ static __attribute__((noinline)) esp_err_t perform_request(
   } else {
     encode(config->timezone,request.om.timezone,sizeof(request.om.timezone));
     snprintf(request.om.url,sizeof(request.om.url),"https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s&current_weather=true"
-      "&current=rain,showers,snowfall&hourly=weathercode,precipitation_probability,precipitation,rain,showers,snowfall,cloud_cover,pressure_msl,wind_speed_10m,wind_gusts_10m,temperature_2m"
+      "&current=rain,showers,snowfall&hourly=weathercode,precipitation_probability,precipitation,rain,showers,snowfall,cloud_cover,wind_speed_10m,wind_gusts_10m"
       "&daily=temperature_2m_max,temperature_2m_min,weathercode&temperature_unit=%s&wind_speed_unit=kmh&timezone=%s&forecast_days=6",
       config->latitude,config->longitude,metric(config)?"celsius":"fahrenheit",request.om.timezone[0]?request.om.timezone:"UTC");
     http_config.url=request.om.url;
@@ -560,6 +543,7 @@ esp_err_t weather_client_fetch(const device_config_t *config,app_weather_snapsho
 #define RADAR_PIXELS ((size_t)APP_RADAR_WIDTH * APP_RADAR_HEIGHT)
 #define RADAR_GROUND_M 120700.8
 #define RADAR_ZOOM 7
+#define RADAR_TILE_PIXELS 512
 #define RADAR_WORLD_PIXELS 32768.0
 #define RADAR_WORLD_METERS 40075016.68557849
 #define RADAR_BASE_RESPONSE_MAX (3 * 1024 * 1024)
@@ -695,8 +679,8 @@ static esp_err_t radar_decode_png(const http_response_t *response, bool backgrou
   unsigned width=0, height=0;
   unsigned error = lodepng_inspect(&width, &height, &state,
     (const unsigned char *)response->data, response->length);
-  unsigned expected_width=background ? APP_RADAR_WIDTH : 256;
-  unsigned expected_height=background ? APP_RADAR_HEIGHT : 256;
+  unsigned expected_width=background ? APP_RADAR_WIDTH : RADAR_TILE_PIXELS;
+  unsigned expected_height=background ? APP_RADAR_HEIGHT : RADAR_TILE_PIXELS;
   if (!error && (width!=expected_width || height!=expected_height || state.info_png.color.bitdepth>8)) error=93;
   state.decoder.read_text_chunks = 0;
   state.decoder.remember_unknown_chunks = 0;
@@ -720,7 +704,8 @@ static esp_err_t radar_decode_png(const http_response_t *response, bool backgrou
 
 /* RainViewer's published Universal Blue rain table, rows -32..95 only.
  * The following snow rows are intentionally excluded (snow coloring is off).
- * Packed RGBA values retain source alpha; repeated colors use the first/lower
+ * Packed RGBA values document table alpha; RGB matching retains received alpha.
+ * Repeated colors use the first/lower
  * represented strength in their band, rather than inventing exact dBZ. */
 static const uint32_t radar_source_rgba[128] = {
   0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
@@ -760,8 +745,8 @@ static void radar_color(int dbz, uint8_t rgb[3])
 static bool radar_map_pixel(uint8_t rgba[4])
 {
   if (!rgba[3]) return true; /* A transparent valid tile means no echoes. */
-  uint32_t source=((uint32_t)rgba[0]<<24)|((uint32_t)rgba[1]<<16)|((uint32_t)rgba[2]<<8)|rgba[3];
-  for (unsigned i=0; i<128; ++i) if (radar_source_rgba[i] == source) {
+  uint32_t source=((uint32_t)rgba[0]<<24)|((uint32_t)rgba[1]<<16)|((uint32_t)rgba[2]<<8);
+  for (unsigned i=0; i<128; ++i) if ((radar_source_rgba[i]&255) && (radar_source_rgba[i]&0xFFFFFF00u) == source) {
     radar_color((int)i-32, rgba);
     return true;
   }
@@ -796,29 +781,30 @@ static esp_err_t radar_tile(void)
 {
   const radar_geometry_t *geometry=&radar.geometry;
   char url[384];
-  snprintf(url,sizeof(url),"https://tilecache.rainviewer.com%s/256/7/%d/%d/2/0_0.png",radar.path,radar_wrapped_x(radar.tile_x),radar.tile_y);
+  snprintf(url,sizeof(url),"https://tilecache.rainviewer.com%s/512/7/%d/%d/2/1_0.png",radar.path,radar_wrapped_x(radar.tile_x),radar.tile_y);
   http_response_t response;
   esp_err_t err=radar_request(url,false,&response);
   lv_draw_buf_t *tile=NULL;
   if (err==ESP_OK) err=radar_decode_png(&response,false,&tile);
   free(response.data);
   if (err!=ESP_OK) return err;
-  /* Recolor original unsmoothed pixels before any output sampling. */
-  for (unsigned y=0; y<256 && err==ESP_OK; ++y)
-    for (unsigned x=0; x<256; ++x)
+  /* Validate and recolor the entire provider tile before output sampling. */
+  for (unsigned y=0; y<RADAR_TILE_PIXELS && err==ESP_OK; ++y)
+    for (unsigned x=0; x<RADAR_TILE_PIXELS; ++x)
       if (!radar_map_pixel(tile->data+y*tile->header.stride+x*4)) {
         err=ESP_ERR_INVALID_RESPONSE;
         break;
       }
   if (err==ESP_OK) {
-    /* The horizontal sample is identical on every row of this tile. */
+    /* Keep geography in 256-native pixels; scale before rounding so odd
+     * 512px source pixels are sampled. Horizontal samples repeat each row. */
     for (int x=0; x<APP_RADAR_WIDTH; ++x) {
-      int source_x=(int)floor(geometry->left+(x+0.5)*geometry->step)-radar.tile_x*256;
-      radar.source_x[x]=source_x<0 || source_x>=256 ? -1 : (int16_t)source_x;
+      int source_x=(int)floor((geometry->left+(x+0.5)*geometry->step-radar.tile_x*256)*2);
+      radar.source_x[x]=source_x<0 || source_x>=RADAR_TILE_PIXELS ? -1 : (int16_t)source_x;
     }
     for (int y=0; y<APP_RADAR_HEIGHT; ++y) {
-      int source_y=(int)floor(geometry->top+(y+0.5)*geometry->step)-radar.tile_y*256;
-      if (source_y<0 || source_y>=256) continue;
+      int source_y=(int)floor((geometry->top+(y+0.5)*geometry->step-radar.tile_y*256)*2);
+      if (source_y<0 || source_y>=RADAR_TILE_PIXELS) continue;
       for (int x=0; x<APP_RADAR_WIDTH; ++x) {
         int source_x=radar.source_x[x];
         if (source_x<0) continue;

@@ -8,7 +8,7 @@ usage and overlapping requests; they do not model ESP-IDF task-priority
 inheritance or scheduling. Board timing evidence belongs in the
 [work record](../../../docs/work.md).
 
-Use the [current work list](../../../docs/work.md#current-work--reconciled-october-16-2026)
+Use the [current work list](../../../docs/work.md#current-work)
 for completed board checks and remaining work. In particular, the
 [attached RTC checks](../../../docs/work.md#attached-rtc-unattended-checks--authorized-october-16-2026)
 use the real module through powered restarts and bounded offline operation.
@@ -24,7 +24,7 @@ Activate ESP-IDF 5.5.5 as described in the [target guide](../README.md#prepare-t
 targets/esp32-p4/scripts/test-weather-parity.sh
 ```
 
-The retained script name runs C forecast, location and conditions checks against
+The retained script name runs C forecast, location and storm-alert checks against
 fixtures in `shared/test-data/`. It also checks that provider search names retain
 state/country qualifiers before the provider's result limit. No Raspberry Pi or
 JavaScript suite is required. cJSON is read from `$IDF_PATH/components/json/cJSON`.
@@ -33,15 +33,17 @@ Weather fixtures exercise the [approved provider mappings and daily rules](../..
 including compound facts, unknown/no-picture inputs, current-only exclusions,
 the paired ordinary-rain gate, independent Hail reports and mixed-snow majority.
 The retained daily cold-weather guesses are checked separately from current
-classification, which requires reported snow evidence. Missing Conditions data
-must remain unavailable. Constructed rare-condition cases establish decoding
+classification, which requires reported snow evidence. Missing storm measurements
+must not invent an alert. Constructed rare-condition cases establish decoding
 behavior, not evidence that the provider returns those conditions in practice.
 
-Conditions cases exercise the fixed [weather-warning limits](../../../docs/architecture.md#conditions-contract),
-measurements, outlook and time formatting. The two gust-boundary cases supply
-the same 64 km/h gust: metric warns at its inclusive limit, while imperial stays
-below its limit. These test inputs preserve the existing difference between
-the unit-specific defaults; the fixture adapter accepts only units/time format.
+The 27 storm cases exercise the fixed [storm-warning limits](../../../docs/architecture.md#storm-detection),
+current and upcoming wind, gusts, heavy precipitation and thunder. They check
+missing measurements, unmatched hours and repeated local-hour identity; pressure
+alone does not create an alert. The two gust-boundary cases supply the same
+64 km/h gust: metric warns at its inclusive limit, while imperial stays below
+its limit. These test inputs preserve the existing difference between the
+unit-specific defaults; the fixture adapter accepts only the units choice.
 
 If the selected macOS compiler is broken, use the installed Command Line Tools
 compiler for this run:
@@ -60,8 +62,11 @@ ctest --test-dir /tmp/esp32-p4-native-tests --output-on-failure
 
 Managed dependencies must already be available from a normal firmware build.
 The UI targets use the existing managed LVGL library with a native configuration.
-The CMake suite contains settings, time, alarm-calendar, alarm-recovery, alarm-command, audio, Night Shift, solar-event, settings-control, UI-shell,
-weather-service, connectivity and touchscreen-recovery targets.
+The CMake suite registers 44 cases across settings, time, alarm-calendar,
+alarm-recovery, alarm-command, audio, Night Shift, solar-event, settings-control,
+UI-shell, weather-service, connectivity and touchscreen-recovery targets.
+This count describes the configured suite; completed runs belong in the
+[work record](../../../docs/work.md).
 
 The settings tests compile `main/device_config.c` with typed NVS substitutes and
 ordinary thread locks. They cover defaults, validation, editor changes merged
@@ -309,8 +314,11 @@ network-time traffic; board observations are recorded in the
 [work record](../../../docs/work.md).
 
 Radar checks in the same target use the bundled LVGL LodePNG decoder with
-constructed PNG/HTTP inputs. They check dimensions and response bounds, palette
-mapping before composition, 75-mile coverage at different latitudes, source
+constructed PNG/HTTP inputs. They check exact 512px smoothed Radar requests and
+dimensions separately from the 800px basemap, response bounds, RGB palette
+matching with retained received alpha, duplicate colors and unknown visible
+color rejection before composition. They also check odd 512px source pixels,
+partial-alpha tile seams and longitude wrapping, 75-mile coverage at different latitudes, source
 alignment, opaque map edges, the approved brighter map colors, unchanged frames,
 failed retries, offline stale marking and
 safe image replacement after display acknowledgment. Worker checks verify the
@@ -332,15 +340,25 @@ requests. Capture filenames are listed in `check_saved_radar_data` in the test.
 Actual provider samples and data-only previews are review evidence, not finished
 screen or physical-board verification.
 
+`/tmp/esp32-p4-native-tests/test_weather_service --radar-saved-tiles <capture-folder>`
+checks six retained 512px smoothed precipitation tiles through the actual request,
+decode, full-source recoloring, nearest sampling and blending path. It expects
+`z7-X-Y-512-smoothing1-snow0.png` for tile coordinates 27/46, 28/53, 24/50, 32/49,
+35/53 and 35/54. It makes no requests or metadata assumptions; the capture report
+records provider/frame identity. Its flat background and half-native-pixel
+sampling layout are constructed references, not matching USGS geography or a
+finished screen. Live source captures, host comparisons and board results are
+recorded separately in the [Radar sprint](../../../docs/work.md#sprint-512px-radar-tiles-and-provider-smoothing--prepared-october-18-2026).
+
 UI checks cover Forecast/Radar navigation, stable storm ordering, Day/Night,
 full-screen map and horizontal header fit, equal-width Light/Moderate/Heavy key
 sections with centered labels, an unshaded footer, and no added town-label objects,
 frame time and old/unavailable states, image-source retirement and alarm
 preemption. Non-U.S., missing-country and unfinished locations create no Radar
 objects or route; their storm destination is Forecast. Country changes remove
-even a hidden Radar image, and U.S. re-enablement restores navigation. A private
-test fixture still exercises the retained Conditions renderer, which has no
-production route. Native pixels and pointer events do not establish display
+even a hidden Radar image, and U.S. re-enablement restores navigation. Storm
+checks exercise the shared alert flag and clock-edge indicators. Native pixels
+and pointer events do not establish display
 quality, physical gestures or concurrent board performance.
 
 The settings-control target compiles production `main/ui/settings.c` with real LVGL
@@ -513,8 +531,13 @@ with distinct temperatures and icons through unavailable/corrected time,
 midnight and stale payloads, invalid dates, month/year/leap-day and daylight-saving
 boundaries. They check the normal weekday capitalization and truthful `Tomorrow`
 caption. Images use
-small substitutes, so these checks do not establish artwork rendering, complete
-visual parity or physical touch behavior. The main task's command queue is
+substitutes, so these checks do not establish real-artwork quality, complete
+visual parity or physical touch behavior. Crop-placement checks use differently
+shaped images at all five logical weather sizes, including crops larger than
+the displayed box. They verify original-canvas scale, offsets and pivot, retained
+Analog center, tint/opacity and that source changes leave no old pixels by
+comparing partial refreshes with full redraws. Actual RGB565A8 artwork and board
+checks belong in the [icon sprint](../../../docs/work.md#sprint-trimmed-400px-weather-icons--authorized-october-18-2026). The main task's command queue is
 reviewed from source and compiled by the firmware build; the actual network-time
 callback is exercised by the connectivity checks.
 
@@ -526,14 +549,11 @@ the 12-hour preference under saved 24-hour mode. Existing geometry, palettes,
 five-entry Display saves and no-restart behavior remain checked. These checks
 establish LVGL controls and settings behavior, not physical touch or pixels.
 
-Conditions time-format checks use a provider payload with a matching current
-hour, so the actual decoder produces time-bearing captions. They verify both
-12/24-hour versions from one request and unchanged weather decisions. UI checks
-retain that weather across Display draft/Cancel, successful saves in both
-directions, stale/failed-refresh states and a download using the earlier format.
-Rendering selects the applied preference without another request or restart.
-These are controlled decoder and LVGL checks, not physical provider or board
-observations.
+Storm decoder checks use a constructed provider payload with a matching current
+hour. They verify the alert with missing gust data when thunder remains, clearing
+on a successful replacement without a matching hour, and retention through a
+failed refresh. These are controlled decoder and worker checks, not physical
+provider or board observations.
 
 Clock checks cover both configured faces, analog hand rotation, midnight/noon,
 12/24-hour and leading-zero formats, and recovery through unavailable Day/Night
@@ -552,9 +572,9 @@ bounds, line widths, rounded ends, drawing margins and Day/Night styles. They
 also retain the non-clickable line objects. Real-art pixel comparisons and board
 redraw measurements for this change are recorded in the [work record](../../../docs/work.md).
 
-Notification checks cover initial waiting and failed retries on all four
-weather surfaces; retained age boundaries and missing, future or untrusted
-timestamps on the clock faces and Conditions; fixed Forecast stale wording
+Notification checks cover initial waiting and failed retries on both clock
+faces and Forecast; retained age boundaries and missing, future or untrusted
+timestamps on the clock faces; fixed Forecast stale wording
 directly above the primary day; Night visibility, notice positions and no
 duplicate footer. Removed backup/alarm technical captions stay absent while
 failed submissions, pending actions, live state and retry controls remain
@@ -613,10 +633,10 @@ clock faces, Day/Night transitions, hidden fallback artwork and restored live
 weather. Forecast keeps its date/temperature layout while all five pictures are
 invisible; actual font lookup verifies that the loading ellipses exist. Failed
 requests, retained weather through failed refreshes and later success check the
-Forecast/Conditions notice wording, boxes and styling, including immediate
+Forecast notice wording, boxes and styling, including immediate
 repositioning during pointer swipes and preserved home weather-failure notices.
-Checks also retain provider-date pairing, the declined Night typography and
-Conditions presentation, and verify the approved AM/PM, temperature, High/Low,
+Checks also retain provider-date pairing and the unchanged Night typography,
+and verify the approved AM/PM, temperature, High/Low,
 divider and Dismiss-button changes. Synthetic RTC/network snapshots check
 “Waiting for sync,” clearing despite a remaining backup warning, unusable time,
 paused-warning priority after 135 seconds and hiding during navigation/settings.

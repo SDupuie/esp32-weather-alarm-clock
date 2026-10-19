@@ -144,7 +144,8 @@ Your selected analog or digital face is the home screen.
 
 ### Weather and storm conditions
 
-Radar shows the latest [RainViewer](https://www.rainviewer.com/) frame over a
+Radar shows the latest [RainViewer](https://www.rainviewer.com/) frame, with
+smoothed precipitation edges, over a
 [USGS National Map](https://www.usgs.gov/programs/national-geospatial-program/national-map)
 background, with the map's printed town names, a marker at your saved weather
 location and the frame's local date/time. The key uses equal-width green, yellow
@@ -176,8 +177,7 @@ Location searches use Open-Meteo for either weather provider. The [configuration
 explains activation checks, key retention and clearing.
 
 The weather pages reached by swiping are Forecast and, for U.S. locations,
-Radar. The Conditions page in the design mockup is a retained reference and is
-not available through the clock's menus or swipes.
+Radar.
 
 ### Clock and backup-clock notices
 

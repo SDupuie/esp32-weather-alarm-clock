@@ -40,6 +40,13 @@ P4 silicon. Its package retains its own license and notices.
 
 The checked-in configuration selects ESP32-P4. From the repository root, use `targets/esp32-p4/scripts/set-target.sh` only when intentionally resetting the target configuration. See [test instructions](tests/README.md) for native checks.
 
+Regenerate the 18 weather pictures from their original vectors, including crop
+metadata, with `PYTHON_BIN=<CairoSVG-environment-python> targets/esp32-p4/scripts/generate-screen-parity-assets.sh --weather-only`. The environment needs CairoSVG;
+this is the sole weather-picture generator, updating image data and placement
+metadata together. It retains shared UI and storm artwork during that focused run.
+For the three Analog hands, use the same environment with `bash targets/esp32-p4/scripts/generate-analog-parity-assets.sh --hands-only`; the existing hand geometry and transparency are retained. Image
+format and placement rules belong in the [architecture](../../docs/architecture.md#weather-icons).
+
 Artwork generators update existing outputs. When adding or retiring a generated source, update `main/CMakeLists.txt` under the [source-list rules](../../docs/architecture.md#existing-code-changes-that-matter); there is no separate generated build manifest.
 
 ## Flash with a board
@@ -103,7 +110,7 @@ One `main` component holds the application, grouped by function. UI files use `m
 - `main/ui/clock_views.c`
   Private clock, unavailable-time, status and backup-notice drawing objects; `ui.c` retains navigation and notice actions
 - `main/ui/weather_views.c`
-  Private Forecast, Radar, message and weather-status drawing objects; retained Conditions renderer without a device route. `ui.c` retains navigation, display snapshots and message-dismissal decisions
+  Private Forecast, Radar, message and weather-status drawing objects; clock-edge indicators remain in `clock_views.c`. `ui.c` retains navigation, display snapshots and message-dismissal decisions
 - `main/connectivity.*`
   WiFi station connect, scanning, and time sync
 - `main/device_config.*`

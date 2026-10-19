@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Native ESP32-P4 forecast, location and conditions checks using the retained
+# Native ESP32-P4 forecast, location and storm checks using the retained
 # fixtures in shared/test-data/. These checks do not require another platform.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -68,7 +68,7 @@ echo "Building location parity test..."
   "$CJSON_DIR/cJSON.c" \
   -o "$BUILD_DIR/test_location_scoring"
 
-echo "Building storm-conditions parity test..."
+echo "Building storm-alert parity test..."
 "$CC" "${COMMON_FLAGS[@]}" \
   "$PROJECT_DIR/tests/test_storm_conditions.c" \
   "$PROJECT_DIR/main/storm_conditions.c" \
@@ -88,12 +88,12 @@ location_status=0
 "$BUILD_DIR/test_location_scoring" "$REPO_ROOT/shared/test-data/location-resolution-cases.json" || location_status=$?
 
 echo ""
-echo "--- Storm-conditions parity ---"
-conditions_status=0
-"$BUILD_DIR/test_storm_conditions" "$REPO_ROOT/shared/test-data/storm-conditions-cases.json" || conditions_status=$?
+echo "--- Storm-alert parity ---"
+storm_status=0
+"$BUILD_DIR/test_storm_conditions" "$REPO_ROOT/shared/test-data/storm-conditions-cases.json" || storm_status=$?
 
 echo ""
-if [[ "$forecast_status" -ne 0 || "$location_status" -ne 0 || "$conditions_status" -ne 0 ]]; then
+if [[ "$forecast_status" -ne 0 || "$location_status" -ne 0 || "$storm_status" -ne 0 ]]; then
   echo "NATIVE CHECK FAILED: ESP32-P4 results differ from expected fixture values"
   echo "Review the failing C calculation and fixture before shipping."
   exit 1

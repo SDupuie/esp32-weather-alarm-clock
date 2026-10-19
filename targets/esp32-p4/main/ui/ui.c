@@ -1,5 +1,6 @@
 #include "app_ui.h"
 #include "ui_private.h"
+#include "assets/weather_icons.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -157,6 +158,27 @@ void wac_ui_set_label_text(lv_obj_t *label, const char *text)
   }
 
   lv_label_set_text(label, next_text);
+}
+
+bool wac_ui_set_weather_image(lv_obj_t *image, const lv_image_dsc_t *source, int32_t size)
+{
+  if (source != NULL && lv_image_get_src(image) == source) return false;
+
+  /* Keep the original canvas as the layout box. Scaling the stored crop with
+   * CONTAIN would enlarge differently shaped icons by different amounts. */
+  lv_image_set_src(image, source);
+  lv_obj_set_size(image, size, size);
+  lv_image_set_inner_align(image, LV_IMAGE_ALIGN_TOP_LEFT);
+  const weather_icon_geometry_t *geometry = weather_icon_geometry_for_image(source);
+  int32_t x = geometry ? geometry->crop_x : 0;
+  int32_t y = geometry ? geometry->crop_y : 0;
+  lv_image_set_offset_x(image, x);
+  lv_image_set_offset_y(image, y);
+  /* The crop begins at (x,y), so its negative pivot scales around the
+   * original canvas origin and keeps its intended position in that box. */
+  lv_image_set_pivot(image, -x, -y);
+  lv_image_set_scale(image, geometry ? (uint32_t)size * LV_SCALE_NONE / geometry->canvas_size : LV_SCALE_NONE);
+  return true;
 }
 
 lv_obj_t *wac_ui_create_label(
@@ -673,7 +695,7 @@ static void update_weather_status(void)
     }
   }
   wac_clock_update_weather_notice(notice);
-  wac_weather_update_status(&s_ui.weather, s_ui.night_overlay_active, surface, notice);
+  wac_weather_update_status(&s_ui.weather, s_ui.night_overlay_active, surface);
 }
 
 static void update_alarm_surface(void)
@@ -721,8 +743,7 @@ void wac_ui_apply_display(const device_config_t *config)
   struct tm local_time;
   bool usable = s_ui.clock.usable && localtime_r(&s_ui.clock.utc_now, &local_time) != NULL;
   wac_clock_update_time(config, usable ? &local_time : NULL, s_ui.night_overlay_active);
-  wac_weather_update(&s_ui.weather, usable ? &local_time : NULL,
-    wac_ui_strings_equal_ignore_case(config->time_format, "24"));
+  wac_weather_update(&s_ui.weather, usable ? &local_time : NULL);
   wac_weather_update_radar(&s_ui.radar, config, s_ui.night_overlay_active);
   update_alarm_surface();
 }
@@ -980,13 +1001,11 @@ esp_err_t app_ui_update_runtime(
   else reset_clock_health();
   if (s_ui.weather.valid) {
     wac_clock_update_weather(&s_ui.weather);
-    wac_weather_update(&s_ui.weather, time_available ? &local_time : NULL,
-      wac_ui_strings_equal_ignore_case(config->time_format, "24"));
-    s_ui.weather_alert_active = s_ui.weather.has_conditions && s_ui.weather.conditions.alert;
+    wac_weather_update(&s_ui.weather, time_available ? &local_time : NULL);
+    s_ui.weather_alert_active = s_ui.weather.storm_alert;
   } else {
     wac_clock_update_weather(NULL);
-    wac_weather_update(&s_ui.weather, NULL,
-      wac_ui_strings_equal_ignore_case(config->time_format, "24"));
+    wac_weather_update(&s_ui.weather, NULL);
   }
   /* Generation zero is a failed short snapshot copy, except at startup. Keep
    * the last publication until its owner supplies a real replacement. */

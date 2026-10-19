@@ -14,7 +14,6 @@
 #include "assets/analog_second_hand.h"
 #include "assets/analog_stage_day.h"
 #include "assets/analog_stage_night.h"
-#include "assets/conditions_edge_indicator.h"
 #include "assets/weather_icons.h"
 #include "assets/round_stage_day.h"
 #include "assets/round_stage_night.h"
@@ -43,7 +42,7 @@
 #define ANALOG_DAY_TOP 130
 #define ANALOG_DATE_TOP 178
 #define ANALOG_WEATHER_ICON_OFFSET_Y -38
-#define ANALOG_WEATHER_ICON_SCALE 512
+#define ANALOG_WEATHER_ICON_SIZE 400
 #define ANALOG_WEATHER_ICON_OPACITY 92
 #define ANALOG_TICK_COUNT 60
 #define ANALOG_NUMERAL_COUNT 12
@@ -119,8 +118,8 @@
 #define DIGITAL_FORECAST_TOP 500
 #define DIGITAL_FORECAST_WIDTH 478
 #define DIGITAL_FORECAST_ICON_SIZE 75
-#define CONDITIONS_EDGE_INDICATOR_X 569
-#define CONDITIONS_EDGE_INDICATOR_Y 107
+#define WEATHER_EDGE_INDICATOR_X 569
+#define WEATHER_EDGE_INDICATOR_Y 107
 #define DAY_COUNT APP_FORECAST_DAYS
 
 typedef struct {
@@ -722,8 +721,7 @@ void wac_clock_build_analog(lv_obj_t *parent)
   lv_obj_add_flag(s_clock.analog_weather_layer, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 
   s_clock.analog_weather_icon = lv_image_create(s_clock.analog_weather_layer);
-  lv_image_set_src(s_clock.analog_weather_icon, weather_icon_image_for_snapshot(NULL));
-  lv_image_set_scale(s_clock.analog_weather_icon, ANALOG_WEATHER_ICON_SCALE);
+  wac_ui_set_weather_image(s_clock.analog_weather_icon, weather_icon_image_for_snapshot(NULL), ANALOG_WEATHER_ICON_SIZE);
   lv_obj_set_style_opa(s_clock.analog_weather_icon, ANALOG_WEATHER_ICON_OPACITY, 0);
   lv_obj_align(s_clock.analog_weather_icon, LV_ALIGN_CENTER, 0, ANALOG_WEATHER_ICON_OFFSET_Y);
 
@@ -910,9 +908,7 @@ void wac_clock_build_digital(lv_obj_t *parent)
   lv_obj_set_style_text_letter_space(s_clock.digital_temp_label, -2, 0);
 
   s_clock.digital_current_icon = lv_image_create(s_clock.digital_current_panel);
-  lv_image_set_src(s_clock.digital_current_icon, weather_icon_image_for_name(weather_icon_fallback_name()));
-  lv_obj_set_size(s_clock.digital_current_icon, DIGITAL_CURRENT_ICON_SIZE, DIGITAL_CURRENT_ICON_SIZE);
-  lv_image_set_inner_align(s_clock.digital_current_icon, LV_IMAGE_ALIGN_CONTAIN);
+  wac_ui_set_weather_image(s_clock.digital_current_icon, weather_icon_image_for_name(weather_icon_fallback_name()), DIGITAL_CURRENT_ICON_SIZE);
   lv_obj_set_style_opa(s_clock.digital_current_icon, LV_OPA_COVER, 0);
   lv_obj_align(s_clock.digital_current_icon, LV_ALIGN_CENTER, 0, 0);
   lv_obj_add_flag(s_clock.digital_current_icon, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
@@ -982,9 +978,7 @@ void wac_clock_build_digital(lv_obj_t *parent)
     lv_obj_set_width(s_clock.digital_forecast_day_labels[i], LV_PCT(100));
 
     s_clock.digital_forecast_icons[i] = lv_image_create(item);
-    lv_image_set_src(s_clock.digital_forecast_icons[i], weather_icon_image_for_name(weather_icon_fallback_name()));
-    lv_obj_set_size(s_clock.digital_forecast_icons[i], DIGITAL_FORECAST_ICON_SIZE, DIGITAL_FORECAST_ICON_SIZE);
-    lv_image_set_inner_align(s_clock.digital_forecast_icons[i], LV_IMAGE_ALIGN_CONTAIN);
+    wac_ui_set_weather_image(s_clock.digital_forecast_icons[i], weather_icon_image_for_name(weather_icon_fallback_name()), DIGITAL_FORECAST_ICON_SIZE);
     lv_obj_set_style_opa(s_clock.digital_forecast_icons[i], LV_OPA_COVER, 0);
 
     s_clock.digital_forecast_temp_labels[i] = wac_ui_create_label(
@@ -1147,8 +1141,8 @@ static void apply_weather_indicator_state(lv_obj_t *indicator, bool alert, bool 
 static lv_obj_t *create_weather_indicator(lv_obj_t *view)
 {
   lv_obj_t *indicator = lv_image_create(view);
-  lv_image_set_src(indicator, &conditions_edge_indicator);
-  lv_obj_align(indicator, LV_ALIGN_TOP_LEFT, CONDITIONS_EDGE_INDICATOR_X, CONDITIONS_EDGE_INDICATOR_Y);
+  lv_image_set_src(indicator, &weather_edge_indicator);
+  lv_obj_align(indicator, LV_ALIGN_TOP_LEFT, WEATHER_EDGE_INDICATOR_X, WEATHER_EDGE_INDICATOR_Y);
   lv_obj_add_flag(indicator, LV_OBJ_FLAG_HIDDEN);
   return indicator;
 }
@@ -1258,12 +1252,12 @@ void wac_clock_update_weather(const app_weather_snapshot_t *weather)
   format_high_low(high_low, sizeof(high_low), weather->high, weather->low);
   wac_ui_set_label_text(s_clock.analog_high_low_label, high_low);
   if (s_clock.analog_weather_icon != NULL) {
-    wac_ui_set_image_asset(s_clock.analog_weather_icon, weather_icon_image_for_name(weather->icon_name));
+    wac_ui_set_weather_image(s_clock.analog_weather_icon, weather_icon_image_for_name(weather->icon_name), ANALOG_WEATHER_ICON_SIZE);
   }
 
   wac_ui_set_label_text(s_clock.digital_temp_label, temps);
   if (s_clock.digital_current_icon != NULL) {
-    wac_ui_set_image_asset(s_clock.digital_current_icon, weather_icon_image_for_name(weather->icon_name));
+    wac_ui_set_weather_image(s_clock.digital_current_icon, weather_icon_image_for_name(weather->icon_name), DIGITAL_CURRENT_ICON_SIZE);
   }
   wac_ui_set_label_text(s_clock.digital_summary_label, weather->summary);
   wac_ui_set_label_text(s_clock.digital_high_low_label, high_low);
@@ -1276,9 +1270,9 @@ void wac_clock_update_weather(const app_weather_snapshot_t *weather)
     wac_ui_set_label_text(s_clock.digital_forecast_day_labels[i], forecast_day);
     wac_ui_set_label_text(s_clock.digital_forecast_temp_labels[i], day_temp);
     if (s_clock.digital_forecast_icons[i] != NULL) {
-      wac_ui_set_image_asset(
+      wac_ui_set_weather_image(
         s_clock.digital_forecast_icons[i],
-        weather_icon_image_for_name(weather->forecast[i].icon_name)
+        weather_icon_image_for_name(weather->forecast[i].icon_name), DIGITAL_FORECAST_ICON_SIZE
       );
     }
   }

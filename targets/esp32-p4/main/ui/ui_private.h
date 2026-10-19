@@ -53,6 +53,7 @@ static inline bool wac_ui_set_image_asset(lv_obj_t *image, const lv_image_dsc_t 
   lv_image_set_src(image, source);
   return true;
 }
+bool wac_ui_set_weather_image(lv_obj_t *image, const lv_image_dsc_t *source, int32_t size);
 lv_obj_t *wac_ui_create_label(lv_obj_t *parent, const lv_font_t *font,
   lv_color_t color, lv_text_align_t align, const char *text);
 void wac_ui_clear_container_chrome(lv_obj_t *obj);
@@ -93,13 +94,12 @@ void wac_clock_update_alarm(const device_config_t *config,
  * or another service/configuration snapshot. Surface is a draw-time input. */
 typedef enum {
   WAC_WEATHER_SURFACE_HOME, WAC_WEATHER_SURFACE_FORECAST,
-  WAC_WEATHER_SURFACE_CONDITIONS, WAC_WEATHER_SURFACE_RADAR, WAC_WEATHER_SURFACE_MESSAGE,
+  WAC_WEATHER_SURFACE_RADAR, WAC_WEATHER_SURFACE_MESSAGE,
   WAC_WEATHER_SURFACE_UNAVAILABLE_HOME
 } wac_weather_surface_t;
 
 void wac_weather_reset(void);
 void wac_weather_build_forecast(lv_obj_t *parent);
-void wac_weather_build_conditions(lv_obj_t *parent);
 void wac_weather_set_radar_enabled(lv_obj_t *parent, bool enabled);
 void wac_weather_update_radar(const app_radar_snapshot_t *radar,
   const device_config_t *config, bool night);
@@ -107,12 +107,11 @@ void wac_weather_build_message(lv_obj_t *parent);
 void wac_weather_build_status(lv_obj_t *parent);
 void wac_weather_set_visible(bool forecast, bool radar, bool message);
 void wac_weather_apply_night(const app_weather_snapshot_t *weather, bool important, bool active);
-void wac_weather_update(const app_weather_snapshot_t *weather, const struct tm *local_calendar,
-  bool time_24h);
+void wac_weather_update(const app_weather_snapshot_t *weather, const struct tm *local_calendar);
 void wac_weather_update_message(const app_message_snapshot_t *snapshot);
 void wac_weather_set_message_dismiss_text(const char *text);
 void wac_weather_update_status(const app_weather_snapshot_t *weather,
-  bool night, wac_weather_surface_t surface, const char *retained_notice);
+  bool night, wac_weather_surface_t surface);
 
 void wac_clock_build_machine(lv_obj_t *parent, lv_event_cb_t open_cb);
 void wac_clock_update_machine(bool home, bool analog, bool usable, bool playing, bool night);
