@@ -188,7 +188,7 @@ typedef int esp_err_t;
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
 #define pdMS_TO_TICKS(ms) (ms)
-typedef struct {bool available;} app_message_snapshot_t;
+typedef struct {bool available;char id[40],text[181],meta[96];} app_message_snapshot_t;
 '''
 store_defines='\n'.join(line for line in source.splitlines() if line.startswith('#define MESSAGE_'))
 store_types=source[source.index('typedef struct {\n  bool in_use;'):source.index('typedef struct {\n  char device_id[DEVICE_CONFIG_STR_LEN];\n  char room_name[DEVICE_CONFIG_STR_LEN];\n} request_known_device_t;')]
@@ -198,10 +198,13 @@ static message_runtime_state_t s_runtime;
 static message_client_cache_t s_client_cache;
 static uint64_t s_store_revision;
 static void *s_message_mutex=(void*)1;
-typedef struct {int unused;} http_response_buffer_t;
+typedef struct {char *data;} http_response_buffer_t;
+#define HTTP_GET 0
 static int locks, requests, refreshes, acknowledgments, response_status=200, request_error;
 static int64_t clock_ms;
 static bool wifi=true, apply_request=true, mutate_during_request;
+static int poll_status=200, poll_error;
+static const char *poll_reply="{\"unreadCount\":0,\"messages\":[]}";
 static char packet[384], requested_url[MESSAGE_URL_LEN];
 static char sent_payload[384];
 static size_t sent_payload_length;
@@ -215,8 +218,7 @@ static int64_t now_ms(void){return clock_ms;}
 static bool connectivity_is_wifi_connected(void){return wifi;}
 static bool connectivity_get_local_ipv4(char *out,size_t n){snprintf(out,n,"10.0.0.20");return wifi;}
 static void process_pending_acknowledgment(void){assert(locks==0);acknowledgments++;}
-static int refresh_remote_client_cache(void){assert(locks==0);refreshes++;return ESP_OK;}
-static void free_http_response_buffer(http_response_buffer_t *r){(void)r;}
+static void free_http_response_buffer(http_response_buffer_t *r){free(r->data);r->data=NULL;}
 static void update_known_target(const char *id,const char *room){(void)id;(void)room;}
 static int fake_close(int fd){(void)fd;assert(locks==1);return 0;}
 #define close fake_close
@@ -257,6 +259,7 @@ store_functions='\n'.join(function(f) for f in [
  'static void runtime_start_discovery_locked(', 'static void runtime_become_shared_hub_locked(',
  'static void runtime_become_shared_client_locked(', 'static void runtime_reset_network_locked(',
  'static void handle_hub_signal_locked(', 'static void process_discovery_packet(',
+ 'static void format_message_meta_values(', 'static esp_err_t refresh_remote_client_cache(',
  'static void message_runtime_task('
 ])
 store_tests=r'''
@@ -268,7 +271,13 @@ static message_record_t record(const char *id){
  strcpy(r.expires_at,"2100-01-01T00:00:00Z");strcpy(r.acknowledged_by[0],"bedroom");return r;
 }
 static esp_err_t perform_http_request(const char *url,int method,const char *body,const char *device,const char *room,int *status,http_response_buffer_t *response){
- (void)response;assert(locks==0 && acknowledgments>0 && method==HTTP_POST);
+ assert(locks==0 && acknowledgments>0);
+ if(method==HTTP_GET){
+  refreshes++;*status=poll_status;
+  response->data=malloc(strlen(poll_reply)+1);assert(response->data);strcpy(response->data,poll_reply);
+  return poll_error;
+ }
+ assert(method==HTTP_POST);
  assert(strcmp(device,"z-clock")==0 && strcmp(room,"Bedroom")==0);requests++;
  copy_text(requested_url,sizeof(requested_url),url);
  cJSON *json=cJSON_Parse(body);assert(json);cJSON *messages=cJSON_GetObjectItem(json,"messages");assert(cJSON_IsArray(messages));
@@ -293,6 +302,7 @@ static void heartbeat(const char *id,const char *url){
 }
 static void initialize(void){
  memset(s_messages,0,sizeof(s_messages));memset(remote,0,sizeof(remote));memset(&s_runtime,0,sizeof(s_runtime));
+ memset(&s_client_cache,0,sizeof(s_client_cache));poll_status=200;poll_error=ESP_OK;poll_reply="{\"unreadCount\":0,\"messages\":[]}";
  s_store_revision=0;requests=refreshes=acknowledgments=0;response_status=200;request_error=ESP_OK;
  wifi=apply_request=true;mutate_during_request=false;packet[0]='\0';
  strcpy(s_runtime.sharing_mode,"shared");strcpy(s_runtime.device_id,"z-clock");strcpy(s_runtime.room_name,"Bedroom");
@@ -414,7 +424,33 @@ int main(void){
  initialize();strcpy(s_runtime.sharing_mode,"single");iteration(1000);assert(requests==0);
  initialize();s_runtime.role=MESSAGE_ROLE_SHARED_DISCOVERING;s_runtime.hub_url[0]='\0';
  iteration(1000);assert(requests==0 && s_runtime.store_sync_pending);
+ // A selected hub can heartbeat normally while HTTP fails. Run the actual
+ // worker and cache refresh; keep its last useful message through each failure.
+ initialize();s_runtime.store_sync_pending=false;
+ heartbeat("a-clock","http://10.0.0.1:80");iteration(1000);
+ poll_reply="{\"unreadCount\":1,\"messages\":[{\"id\":\"cached\",\"text\":\"Call home\",\"priority\":\"important\"}]}";
+ iteration(1250);assert(refreshes==1 && s_client_cache.valid);
+ assert(strcmp(s_client_cache.snapshot.id,"cached")==0);
+ heartbeat("a-clock","http://10.0.0.1:80");iteration(15000);assert(refreshes==1);
+ // Transport, HTTP and invalid JSON failures each wait the complete interval.
+ for(int failure=0;failure<3;failure++){
+  int64_t due=16250+failure*15000;
+  poll_error=failure==0?6:ESP_OK;poll_status=failure==1?502:200;
+  poll_reply=failure==2?"invalid JSON":"{\"error\":\"hub unavailable\"}";
+  heartbeat("a-clock","http://10.0.0.1:80");iteration(due);
+  assert(refreshes==failure+2);
+  assert(s_client_cache.valid && strcmp(s_client_cache.snapshot.id,"cached")==0);
+  heartbeat("a-clock","http://10.0.0.1:80");iteration(due+250);
+  heartbeat("a-clock","http://10.0.0.1:80");iteration(due+14999);
+  assert(refreshes==failure+2 && s_client_cache.unread_count==1 && s_client_cache.has_important);
+ }
+ poll_error=ESP_OK;poll_status=200;poll_reply="{\"unreadCount\":0,\"messages\":[]}";
+ heartbeat("a-clock","http://10.0.0.1:80");iteration(61250);
+ assert(refreshes==5 && s_client_cache.valid && !s_client_cache.snapshot.available);
+ // Explicit refreshes remain immediate (the acknowledgment path calls this).
+ assert(refresh_remote_client_cache()==ESP_OK && refreshes==6);
  assert(locks==0);
+ puts("PASS: failed shared polling uses 15-second spacing, retains cache, recovers, and permits explicit refresh.");
  puts("PASS: actual worker reconnect, bounded retries, 2xx delivery, current hub/address, no unchanged replay, concurrent arrival, duplicate/ack/deactivation merge, Single/discovery/empty cases.");
 }
 '''
@@ -425,10 +461,7 @@ with tempfile.TemporaryDirectory(prefix='wac-message-transfer-') as temp:
 
 # Browser listing and forwarding use actual handlers. The request URI includes
 # its query, as in ESP-IDF; transport and HTTP server I/O are native substitutes.
-browser_prefix=store_prefix.replace(
- 'typedef struct {bool available;} app_message_snapshot_t;',
- 'typedef struct {bool available;char id[40],text[181],meta[96];} app_message_snapshot_t;'
-)+r'''
+browser_prefix=store_prefix+r'''
 #define HTTP_GET 0
 #define HTTP_HEAD 2
 #define HTTPD_RESP_USE_STRLEN -1
@@ -648,3 +681,168 @@ with tempfile.TemporaryDirectory(prefix='wac-message-browser-') as temp:
  p=Path(temp)/'test.c';p.write_text(browser_prefix+store_defines+'\n'+browser_types+browser_substitutes+browser_functions+browser_tests);binary=Path(temp)/'test'
  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I',str(cjson),str(p),str(cjson/'cJSON.c'),'-o',str(binary)],check=True)
  subprocess.run([str(binary)],check=True)
+
+# Execute the page's actual refresh and button handlers with controlled fetch
+# results and only the DOM operations they use. No browser or server is started.
+page=Path('targets/esp32-p4/main/web/messages.html').read_text()
+page_refresh=page[page.index('    async function loadTargets('):page.index('    async function initializeMessagesAdmin(')]
+javascript_tests=r'''
+const assert = require('node:assert/strict');
+class Element {
+  constructor() { this.children = []; this.style = {}; this.dataset = {}; this.listeners = {}; }
+  replaceChildren() { this.children = []; }
+  appendChild(child) { this.children.push(child); }
+  set innerHTML(html) {
+    this.text = new Element(); this.meta = new Element(); this.button = new Element();
+    this.button.dataset.id = html.match(/data-id="([^"]*)"/)[1];
+  }
+  querySelector(selector) { return selector === '.admin-message-text' ? this.text : this.meta; }
+  querySelectorAll() { return this.children.filter(child => child.button).map(child => child.button); }
+  addEventListener(event, handler) { this.listeners[event] = handler; }
+}
+class Select extends Element {
+  get value() { return this.selectedOptions[0]?.value || ''; }
+  set value(value) { this.selected = this.children.find(option => option.value === value); }
+  get selectedOptions() {
+    const option = this.children.includes(this.selected) ? this.selected : this.children[0];
+    return option ? [option] : [];
+  }
+}
+const list = new Element(), status = new Element(), target = new Select(), send = new Element();
+const fields = {'msg-target': target, 'send-message': send, 'msg-text': {value: 'Call home'}};
+const document = {
+  getElementById: id => id === 'active-messages' ? list : id === 'compose-status' ? status : fields[id] || null,
+  createElement: () => new Element()
+};
+let replies = [], requests = [], errors = [];
+const console = { error: (...args) => errors.push(args) };
+async function fetch(url, options) {
+  requests.push({url, options}); assert.ok(replies.length, 'unexpected request');
+  const reply = replies.shift(); if (reply instanceof Error) throw reply;
+  return reply;
+}
+function response(data, ok = true) { return {ok, json: async () => data}; }
+function formatAdminMessageTime(value) { throw Error('unexpected timestamp in controlled data'); }
+async function refresh(reply) {
+  replies.push(reply); await loadActiveMessages(); assert.equal(replies.length, 0);
+  assert.equal(requests.at(-1).url, '/api/messages?deviceId=all&includeDismissed=true');
+  assert.deepEqual(requests.at(-1).options, {cache: 'no-store'});
+}
+async function targets(reply) {
+  replies.push(reply); await loadTargets(); assert.equal(replies.length, 0);
+  assert.equal(requests.at(-1).url, '/api/message-targets');
+  assert.deepEqual(requests.at(-1).options, {cache: 'no-store'});
+}
+async function sentTo(expected) {
+  replies.push(response({ok: true}), response({messages: []}));
+  await send.listeners.click();
+  assert.equal(requests.at(-2).url, '/api/messages');
+  assert.equal(JSON.parse(requests.at(-2).options.body).target, expected);
+  assert.equal(replies.length, 0);
+}
+const all = {id: 'all', label: 'All clocks'}, kitchen = {id: 'kitchen', label: 'Kitchen'}, hall = {id: 'hall', label: 'Hall'};
+(async () => {
+  setupMessageForm();
+  await targets(response({targets: [all, kitchen, hall]}));
+  assert.equal(target.value, 'all');
+  target.value = 'kitchen';
+  const originalOptions = target.children.slice();
+  for (const failed of [
+    response({error: 'Message hub unavailable'}, false),
+    response({targets: [all]}, false),
+    response({error: 'Message hub unavailable', targets: [all]}),
+    response({}), response(null), response({targets: 'invalid'}),
+    new Error('network unavailable'),
+    {ok: true, json: async () => { throw Error('invalid JSON'); }}
+  ]) {
+    await targets(failed);
+    assert.equal(target.children.length, originalOptions.length);
+    originalOptions.forEach((option, index) => assert.equal(target.children[index], option));
+    assert.equal(target.value, 'kitchen');
+    await sentTo('kitchen');
+  }
+  assert.equal(errors.length, 8);
+  errors = [];
+  // A valid replacement hub list can temporarily lack the chosen room.
+  await targets(response({targets: [all, hall]}));
+  assert.equal(target.value, 'kitchen');
+  assert.equal(target.selectedOptions[0].textContent, 'Kitchen');
+  await sentTo('kitchen');
+  await targets(response({targets: [all, {id: 'kitchen', label: 'Kitchen updated'}, hall]}));
+  assert.equal(target.value, 'kitchen');
+  assert.equal(target.selectedOptions[0].textContent, 'Kitchen updated');
+  assert.equal(target.children.filter(option => option.value === 'kitchen').length, 1);
+  // Preserve choices made during either awaited operation, including when absent.
+  let resolveFetch;
+  replies.push(new Promise(resolve => { resolveFetch = resolve; }));
+  const pendingFetch = loadTargets();
+  target.value = 'hall';
+  resolveFetch(response({targets: [all, kitchen]}));
+  await pendingFetch;
+  assert.equal(target.value, 'hall');
+  assert.equal(target.selectedOptions[0].textContent, 'Hall');
+  await sentTo('hall');
+  let resolveJson, jsonStarted = false;
+  const pendingJsonData = new Promise(resolve => { resolveJson = resolve; });
+  replies.push({ok: true, json: () => { jsonStarted = true; return pendingJsonData; }});
+  const pendingJson = loadTargets();
+  await Promise.resolve();
+  assert.equal(jsonStarted, true);
+  target.value = 'kitchen';
+  resolveJson({targets: [all, hall]});
+  await pendingJson;
+  assert.equal(target.value, 'kitchen');
+  assert.equal(target.selectedOptions[0].textContent, 'Kitchen');
+  await sentTo('kitchen');
+  // Ordinary explicit choices still apply; stale retained rooms disappear once unselected.
+  target.value = 'all';
+  await targets(response({targets: [all, hall]}));
+  assert.equal(target.value, 'all');
+  assert.deepEqual(target.children.map(option => option.value), ['all', 'hall']);
+  await sentTo('all');
+  target.value = 'hall';
+  await targets(response({targets: [all, {id: 'hall', label: 'Hall updated'}]}));
+  assert.equal(target.value, 'hall');
+  assert.equal(target.selectedOptions[0].textContent, 'Hall updated');
+  await sentTo('hall');
+  await refresh(response({messages: [{id: 'room-message', text: 'Call home', target: 'bedroom', sender: 'Family'}]}));
+  const original = list.children[0];
+  assert.equal(original.text.textContent, 'Call home');
+  assert.equal(original.meta.textContent, 'bedroom · from Family');
+  assert.equal(typeof original.button.listeners.click, 'function');
+  for (const failed of [
+    response({error: 'Message hub unavailable'}, false),
+    response({messages: []}, false),
+    response({error: 'Message hub unavailable', messages: []}),
+    response({}), response(null), response({messages: 'invalid'}),
+    new Error('network unavailable'),
+    {ok: true, json: async () => { throw Error('invalid JSON'); }}
+  ]) {
+    await refresh(failed);
+    assert.equal(list.children.length, 1); assert.equal(list.children[0], original);
+    assert.equal(status.textContent, 'Failed to load active messages');
+    assert.equal(status.style.color, 'rgba(255, 164, 164, 0.96)');
+  }
+  assert.equal(errors.length, 8);
+  await refresh(response({messages: [{id: 'broadcast', text: 'Dinner ready', target: 'all'}]}));
+  assert.notEqual(list.children[0], original);
+  assert.equal(list.children[0].text.textContent, 'Dinner ready');
+  assert.equal(list.children[0].meta.textContent, 'All clocks');
+  // Deactivation still posts the global action, then refreshes the same list.
+  replies.push(response({ok: true}), response({messages: []}));
+  await list.children[0].button.listeners.click();
+  assert.equal(requests.at(-2).url, '/api/messages/broadcast/deactivate');
+  assert.deepEqual(requests.at(-2).options, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+  });
+  assert.equal(requests.at(-1).url, '/api/messages?deviceId=all&includeDismissed=true');
+  assert.equal(replies.length, 0);
+  assert.equal(list.children.length, 1);
+  assert.equal(list.children[0].textContent, 'No active messages.');
+  // On first load, failure must not manufacture an empty-list success either.
+  list.replaceChildren(); await refresh(response({error: 'Message hub unavailable'}, false));
+  assert.equal(list.children.length, 0);
+  process.stdout.write('PASS: actual browser target refresh preserves chosen ID/label and Send destination on failures, incomplete lists and choices during awaits; recovers and preserves normal selection, Active Messages and Deactivate behavior.\n');
+})().catch(error => { process.stderr.write(error.stack + '\n'); process.exitCode = 1; });
+'''
+subprocess.run(['node','-'],input=page_refresh+javascript_tests,text=True,check=True)

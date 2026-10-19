@@ -20,7 +20,7 @@ Only the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** is supported.
 - Current temperature, today's high and low, and weather icons that change between day and night.
 - A forecast for the next five days, with icons chosen to represent the daytime weather.
 - A current radar map for U.S. weather locations, centered on the saved location with a full-screen map covering a 75-mile diameter.
-- An edge indicator for approaching storm conditions, with quick access to Radar.
+- Official National Weather Service watches and warnings, with on-clock headlines, warning/watch counts, and an alert list with event details.
 - Weather from Open-Meteo without a key, or Visual Crossing with your API key.
 - Time synchronized over Wi-Fi.
 - DS3231 backup-clock support for startup while network synchronization proceeds, with lost-time and connection notices.
@@ -128,12 +128,13 @@ Your selected analog or digital face is the home screen.
 
 | From | Gesture or control | What happens |
 | --- | --- | --- |
-| Clock | Swipe left | Open Forecast, then Radar with another left swipe for U.S. locations. |
+| Clock | Swipe left | Open Forecast, then Radar with another left swipe for supported U.S. locations. |
 | Forecast or Radar | Swipe right | Step back toward the clock. |
 | Clock | Swipe right | Open Messages. |
 | Messages | Swipe left | Return to the clock. |
 | Clock | Swipe down | Open settings. |
 | Clock | Tap the speaker icon | Open Sound Machine; Back returns to the clock. |
+| Clock | Tap the alert triangle | Open the active-alert list. Tap an on-clock alert headline to dismiss it from both clock faces. |
 | Clock | Tap the next-alarm or **Alarm off** notice | Open Alarm Settings. |
 | Clock | Tap **Missed Alarm** | Dismiss the missed-alarm notice. |
 | Clock | Tap the snoozed-alarm notice | Open the snooze countdown screen. |
@@ -142,7 +143,7 @@ Your selected analog or digital face is the home screen.
 | Settings entry | Tap **Back** | Return to the clock after first-use location setup is complete. |
 | Unread message | Tap the displayed message | Mark it read for this clock and return home after acknowledgment succeeds. |
 
-### Weather and storm conditions
+### Weather alerts and Radar
 
 Radar shows the latest [RainViewer](https://www.rainviewer.com/) frame, with
 smoothed precipitation edges, over a
@@ -150,17 +151,40 @@ smoothed precipitation edges, over a
 background, with the map's printed town names, a marker at your saved weather
 location and the frame's local date/time. The key uses equal-width green, yellow
 and red sections labeled **Light**, **Moderate** and **Heavy**. These describe
-radar echo strength, not official storm warnings. Radar checks for a newer frame
+radar echo strength, not NWS alert severity. Radar checks for a newer frame
 every five minutes. An unsuccessful update
 keeps the previous image and marks it “Old”; before any image arrives it shows
 “Radar unavailable.” This first version supports locations resolved in the
 United States. Radar is hidden for other locations; Forecast remains available.
-The fixed map has no zoom, panning or animation controls.
+Tap **Play** above the key to play the six latest ten-minute frames once, aiming
+for 1.5 seconds per image. Playback stops on the newest image and shows Play
+again. The usual five-minute checks keep that still image current.
+A busy update can hold an image longer. Tap **Pause** to
+hold the displayed image; its timestamp says
+**Paused**. Play resumes with the next image, or finishes if already at the
+newest frame. Leaving Radar stops playback and
+returns to the latest still image. The control becomes available after history
+loads; fewer images may be available after a failed download. Six samples cover
+the latest hour, with fifty minutes between the oldest and newest timestamps.
+The fixed map has no zoom or panning controls.
 
-Storm conditions include strong wind or gusts, thunderstorms and heavy rain or
-snow. Falling pressure alone does not trigger an alert.
+Official watches and weather warnings come from the
+[National Weather Service Alerts API](https://api.weather.gov/alerts), using the
+saved weather location and coordinates. This works independently of the
+selected forecast provider. The clock keeps the weather-alert triangle visible;
+red warning and yellow watch badges show active counts. When an eligible alert
+headline is displayed, tap its text to dismiss the headline on both clock faces.
+The active event remains in the alert list and counts.
 
-During an alert, a pulsing edge indicator appears on the clock. It is amber during the day and red in Night Shift. Swiping left opens **Radar first**, then Forecast for U.S. locations, or Forecast alone elsewhere.
+Tap the triangle to open **Alerts**. The list includes all active watches and
+warnings in NWS priority order, including alerts whose clock headline was
+dismissed. Select a row to read its affected area, issue/end times, description
+and protective instructions. The list reports when current alerts could not be
+updated or saved, and identifies locations where NWS alerts are unavailable.
+
+From the clock, swiping left always opens **Forecast** first and then **Radar**
+for supported U.S. locations. An alert does not change this order. Forecast is
+the only weather page for other locations.
 
 Weather normally refreshes every ten minutes. Until the first successful update,
 the clock and Forecast show **Waiting for weather…** with no invented readings.
@@ -253,7 +277,8 @@ Room Name, Device ID and House Messages are under **Device Setup → Messaging**
 | --- | --- |
 | Wi-Fi | Network and password; tap **Wi-Fi** to scan or enter a network manually. |
 | Weather location | The place used for weather and the clock's timezone. Enter `City, State`, optionally followed by a country code, such as `Cincinnati,OH,US`. For a city and country without a state, use `Paris,FR`. |
-| Weather provider / API key | Choose Open-Meteo or Visual Crossing in **Device Setup → Weather**. Visual Crossing requires a key, checked when first selected or changed. |
+| Provider / API key | Choose Open-Meteo or Visual Crossing in **Device Setup → Weather → Provider**. Visual Crossing's API Key editor is nested under Provider; a key is checked when first selected or changed. |
+| Alerts | In **Device Setup → Weather → Alerts**, choose which watches and warnings can sound, alert-update sounds and whether those sounds can play during Night Shift. Visual alerts remain enabled when sounds are silent. |
 | Room name | The friendly name shown when choosing message targets. |
 | Device ID | The identity used by shared messaging; choose a distinct value for every shared clock. |
 | House Messages | **Single** for this clock or **Shared** for several clocks. |
@@ -280,6 +305,16 @@ check fails, the editor stays open for retry without restarting. Choosing
 Open-Meteo keeps the saved key for later reuse. To remove it, open API Key while
 Visual Crossing is selected, tap **Clear**, close the keyboard, choose
 Open-Meteo and Save. Cancel discards unsaved key changes.
+
+Alerts use two separate sound catalogs: 23 NWS watches and 32 weather warnings.
+Watch Sounds offers **Off**, **All watches** or individual watches; Warning
+Sounds offers **Off**, **All warnings** or individual warnings. Their defaults
+are Off for watches and All warnings for warnings. **Alert Update Sounds**
+offers Off, Increased danger only or All updates and defaults to Off.
+**Night Alert Sounds** defaults to Off. These choices use the alarm volume;
+there is no separate alert-volume control. The Weather screen's Alerts summary
+describes the selected watch/warning sounds; **Silent** means sounds are off,
+not that visual alerts are disabled. See the [approved weather-alert behavior](docs/architecture.md#nws-watches-and-warnings) for the full rules.
 
 If Visual Crossing confirms that the key's daily allowance is exhausted, the
 clock keeps its last weather and waits for the provider's retry time, or checks
@@ -350,6 +385,7 @@ Original project © 2026 Josh Hendrickson. [Author](https://anoraker.com). The o
   — the optional keyed forecast and current-weather source, under its
   [weather data license](https://www.visualcrossing.com/weather-service-terms/)
   and [attribution guidance](https://www.visualcrossing.com/resources/documentation/weather-data/how-to-properly-cite-or-attribute-visual-crossing-weather-data/).
+- **Official watches and weather warnings by the [National Weather Service](https://api.weather.gov/alerts)** — active alerts for the clock's saved weather location.
 - **Location data by [GeoNames](https://www.geonames.org/), via
   [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api#attribution)**
   — place names, coordinates and timezones used by location setup, including

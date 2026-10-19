@@ -937,7 +937,62 @@ static void reader_checks(void)
 }
 #ifdef WAC_ALARM_COMMAND_TEST
 #include "app_ui.h"
+#include "message_service.h"
+#include "night.h"
+#include "weather_client.h"
 #include "alarm_commands.inc"
+
+/* Controlled owner replies exercise main's real assembly when only the weather
+ * copy is unavailable. The real alarm owner remains linked to this target. */
+static bool weather_copy_unavailable;
+bool weather_client_copy(app_weather_snapshot_t *weather, app_radar_snapshot_t *radar)
+{
+  if (weather_copy_unavailable) return false;
+  *weather = (app_weather_snapshot_t){ .valid = true, .temp = 72 };
+  *radar = (app_radar_snapshot_t){ .generation = 12 };
+  return true;
+}
+void wac_time_snapshot(wac_time_snapshot_t *out) { *out = clock_snapshot; }
+esp_err_t message_service_get_snapshot(const char *id, app_message_snapshot_t *out,
+  uint32_t *unread, bool *important)
+{
+  assert(id == config.device_id);
+  *out = (app_message_snapshot_t){ .available = true, .id = "current-message" };
+  *unread = 2; *important = true;
+  return ESP_OK;
+}
+bool wac_night_active(void) { return true; }
+void wac_night_solar_times(solar_times_t *out) { *out = (solar_times_t){ .available = true }; }
+void wac_audio_copy(wac_audio_snapshot_t *out) { *out = (wac_audio_snapshot_t){ .ready = true }; }
+bool weather_client_alerts_sync_location(const device_config_t *applied)
+{
+  assert(applied == &config);
+  return false;
+}
+void weather_client_alerts_copy(app_alert_snapshot_t *out)
+{
+  *out = (app_alert_snapshot_t){ .revision = 7, .status = APP_ALERT_CURRENT };
+}
+static void independent_owner_copy_checks(void)
+{
+  reset();
+  assert(update(11, 7, 0, 0) == ESP_OK);
+  app_runtime_state_t result;
+  for (unsigned failure = 0; failure < 2; ++failure) {
+    weather_copy_unavailable = failure;
+    clock_snapshot.utc_now = at(11, 7, 0, failure);
+    memset(&result, 0xa5, sizeof(result));
+    runtime_state_snapshot(&result, &config);
+    assert(result.weather.valid == !failure);
+    assert(result.radar.generation == (failure ? 0u : 12u));
+    assert(result.clock.usable && result.clock.utc_now == clock_snapshot.utc_now);
+    assert(result.message.available && !strcmp(result.message.id, "current-message"));
+    assert(result.unread_message_count == 2 && result.has_important_message);
+    assert(result.alarm.phase == WAC_ALARM_RINGING && result.audio.ready);
+    assert(result.night_active && result.solar.available && result.alerts.revision == 7);
+  }
+  puts("independent owner copies survive unavailable weather publication");
+}
 
 /* Only the task boundary is substituted. The payload size and two-item
  * capacity match the production queue; all alarm work uses the real owner. */
@@ -1101,6 +1156,7 @@ int main(void)
   active_edit_restart_checks(); arming_failure_checks();
   failure_checks(); off_checks(); enable_checks(); reader_checks();
 #ifdef WAC_ALARM_COMMAND_TEST
+  independent_owner_copy_checks();
   command_submission_checks(); command_execution_checks(); delayed_completion_checks();
   puts("alarm command and completion checks passed");
 #else

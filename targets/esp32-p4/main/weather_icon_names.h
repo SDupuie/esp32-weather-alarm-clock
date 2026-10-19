@@ -53,10 +53,9 @@ weather_picture_t weather_picture_for_facts(const weather_condition_facts_t *fac
 const char *weather_caption_for_facts(const weather_condition_facts_t *facts, bool is_day);
 const char *weather_icon_name_for_picture(weather_picture_t picture, bool is_day);
 
-/* Shared normalized hourly arrays: time (local ISO timestamp), epoch (instant
+/* Shared normalized hourly arrays: time (local ISO timestamp), optional epoch (instant
  * identity), condition_flags, sky, precipitation_probability (%), precipitation
- * (mm), rain/showers (mm), snowfall (cm), cloud_cover (%), pressure_msl (hPa),
- * wind_speed_10m/wind_gusts_10m (km/h), temperature_2m (selected display unit).
+ * (mm), rain/showers (mm), snowfall (cm), cloud_cover (%).
  * Keep unavailable quantities null rather than manufacturing zero. */
 uint32_t weather_hourly_flags_at(const cJSON *hourly, int index);
 weather_sky_t weather_hourly_sky_at(const cJSON *hourly, int index);

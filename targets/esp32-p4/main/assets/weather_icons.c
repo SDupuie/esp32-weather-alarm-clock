@@ -53,11 +53,6 @@ const lv_image_dsc_t *weather_icon_image_for_name(const char *icon_name)
   return NULL;
 }
 
-const lv_image_dsc_t *weather_icon_image_for_snapshot(const app_weather_snapshot_t *weather)
-{
-  return weather && weather->valid ? weather_icon_image_for_name(weather->icon_name) : NULL;
-}
-
 const weather_icon_geometry_t *weather_icon_geometry_for_image(const lv_image_dsc_t *image)
 {
   for (size_t i = 0; i < sizeof(weather_icons) / sizeof(weather_icons[0]); ++i) {

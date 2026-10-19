@@ -4,8 +4,7 @@
 The effect combines angle-based color and opacity, a radial alpha mask, and
 a soft blur. This script computes the per-pixel values because the current
 cairosvg rasterization pipeline does not render that gradient, mask, and
-filter combination. The ``message`` variant is red and the ``weather``
-variant is an amber mask tinted by the firmware at runtime.
+filter combination.
 """
 
 from __future__ import annotations
@@ -41,27 +40,6 @@ ANGLE_STOPS = [
     (360.0, 0.0),
 ]
 COLOR_RGB = (255, 74, 74)
-
-# Weather variant: same mask and blur with a different angle profile. The
-# firmware stores this one as A8 and tints it amber at runtime.
-WEATHER_GRADIENT_FROM_DEG = 36.0
-WEATHER_ANGLE_STOPS = [
-    (0.0, 0.0),
-    (2.0, 0.0),
-    (12.0, 0.1),
-    (28.0, 0.34),
-    (52.0, 0.62),
-    (76.0, 0.34),
-    (92.0, 0.1),
-    (102.0, 0.0),
-    (360.0, 0.0),
-]
-WEATHER_COLOR_RGB = (255, 176, 64)
-
-VARIANTS = {
-    "message": (GRADIENT_FROM_DEG, ANGLE_STOPS, COLOR_RGB),
-    "weather": (WEATHER_GRADIENT_FROM_DEG, WEATHER_ANGLE_STOPS, WEATHER_COLOR_RGB),
-}
 
 # (pixels inward from the mask radius, alpha) stops, converted below to
 # absolute radii from the center.
@@ -110,14 +88,13 @@ def render_alpha(size: int, from_deg: float, angle_stops: list[tuple[float, floa
     return angle_alpha * radius_alpha
 
 
-def render(output_path: Path, size: int = STAGE_SIZE, variant: str = "message") -> None:
-    from_deg, angle_stops, color_rgb = VARIANTS[variant]
-    alpha = render_alpha(size, from_deg, angle_stops)
+def render(output_path: Path, size: int = STAGE_SIZE) -> None:
+    alpha = render_alpha(size, GRADIENT_FROM_DEG, ANGLE_STOPS)
 
     rgba = np.zeros((size, size, 4), dtype=np.uint8)
-    rgba[..., 0] = color_rgb[0]
-    rgba[..., 1] = color_rgb[1]
-    rgba[..., 2] = color_rgb[2]
+    rgba[..., 0] = COLOR_RGB[0]
+    rgba[..., 1] = COLOR_RGB[1]
+    rgba[..., 2] = COLOR_RGB[2]
     rgba[..., 3] = np.clip(alpha * 255.0, 0, 255).astype(np.uint8)
 
     image = Image.fromarray(rgba, mode="RGBA")
@@ -149,12 +126,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, help="Output PNG path")
     parser.add_argument("--size", type=int, default=STAGE_SIZE)
-    parser.add_argument("--variant", choices=sorted(VARIANTS), default="message")
     args = parser.parse_args()
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    render(output_path, args.size, args.variant)
+    render(output_path, args.size)
     return 0
 
 

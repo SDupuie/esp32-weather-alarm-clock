@@ -7,17 +7,18 @@
 #include <string.h>
 #include <time.h>
 
-typedef enum { STRING, U8, I16, BLOB } value_type_t;
+typedef enum { STRING, U8, U32, I16, BLOB } value_type_t;
 typedef struct {
   char namespace[16];
   char key[16];
   value_type_t type;
   char string[256];
-  int number;
+  int64_t number;
+  uint8_t *blob;
   size_t blob_size;
 } entry_t;
 
-static entry_t entries[64];
+static entry_t entries[160];
 static char namespaces[8][16];
 static unsigned namespace_count;
 static unsigned count, calls[FAKE_OP_COUNT], failure[FAKE_OP_COUNT];
@@ -72,12 +73,17 @@ static entry_t *put(const char *name, const char *key, value_type_t type)
 {
   entry_t *entry = find(name, key);
   if (!entry) {
-    assert(count < 64);
+    assert(count < sizeof(entries) / sizeof(entries[0]));
     entry = &entries[count++];
     assert(strlen(key) < sizeof(entry->key));
     strcpy(entry->key, key);
     assert(strlen(name) < sizeof(entry->namespace));
     strcpy(entry->namespace, name);
+  }
+  if (entry->type == BLOB && type != BLOB) {
+    free(entry->blob);
+    entry->blob = NULL;
+    entry->blob_size = 0;
   }
   entry->type = type;
   return entry;
@@ -92,6 +98,7 @@ void fake_nvs_clear_activity(void)
 
 void fake_nvs_reset(void)
 {
+  for (unsigned i = 0; i < count; ++i) free(entries[i].blob);
   memset(entries, 0, sizeof(entries));
   count = namespace_count = 0;
   memset(namespaces, 0, sizeof(namespaces));
@@ -121,7 +128,9 @@ void fake_nvs_remove(const char *key)
 {
   entry_t *entry = find("wac_cfg", key);
   assert(entry);
+  free(entry->blob);
   *entry = entries[--count];
+  memset(&entries[count], 0, sizeof(entries[count]));
 }
 void fake_nvs_put_str(const char *key, const char *value)
 {
@@ -130,6 +139,7 @@ void fake_nvs_put_str(const char *key, const char *value)
   strcpy(entry->string, value);
 }
 void fake_nvs_put_u8(const char *key, uint8_t value) { put("wac_cfg", key, U8)->number = value; }
+void fake_nvs_put_u32(const char *key, uint32_t value) { put("wac_cfg", key, U32)->number = value; }
 
 esp_err_t nvs_open(const char *name, nvs_open_mode_t mode, nvs_handle_t *handle)
 {
@@ -198,6 +208,7 @@ esp_err_t nvs_set_str(nvs_handle_t handle, const char *key, const char *value)
     return ESP_OK; \
   }
 NUMBER_ACCESSORS(u8, uint8_t, U8)
+NUMBER_ACCESSORS(u32, uint32_t, U32)
 NUMBER_ACCESSORS(i16, int16_t, I16)
 
 esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *value, size_t *size)
@@ -211,17 +222,33 @@ esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *value, size_t
   size_t needed = entry->blob_size;
   if (value && *size < needed) { *size = needed; return ESP_ERR_NVS_INVALID_LENGTH; }
   *size = needed;
-  if (value) memcpy(value, entry->string, needed);
+  if (value) memcpy(value, entry->blob, needed);
   return ESP_OK;
 }
 esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value, size_t size)
 {
-  assert(key && value && size <= sizeof(entries[0].string));
+  assert(key && value && size <= 192 * 1024);
   esp_err_t error = operation(FAKE_SET);
   if (error != ESP_OK) return error;
+  uint8_t *copy = malloc(size ? size : 1);
+  if (!copy) return ESP_ERR_NO_MEM;
+  memcpy(copy, value, size);
   entry_t *entry = put(namespace_for(handle), key, BLOB);
-  memcpy(entry->string, value, size);
+  free(entry->blob);
+  entry->blob = copy;
   entry->blob_size = size;
+  return ESP_OK;
+}
+
+esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key)
+{
+  esp_err_t error = operation(FAKE_SET);
+  if (error != ESP_OK) return error;
+  entry_t *entry = find(namespace_for(handle), key);
+  if (!entry) return ESP_ERR_NVS_NOT_FOUND;
+  free(entry->blob);
+  *entry = entries[--count];
+  memset(&entries[count], 0, sizeof(entries[count]));
   return ESP_OK;
 }
 

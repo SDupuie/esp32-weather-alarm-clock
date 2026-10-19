@@ -41,9 +41,11 @@ P4 silicon. Its package retains its own license and notices.
 The checked-in configuration selects ESP32-P4. From the repository root, use `targets/esp32-p4/scripts/set-target.sh` only when intentionally resetting the target configuration. See [test instructions](tests/README.md) for native checks.
 
 Regenerate the 18 weather pictures from their original vectors, including crop
-metadata, with `PYTHON_BIN=<CairoSVG-environment-python> targets/esp32-p4/scripts/generate-screen-parity-assets.sh --weather-only`. The environment needs CairoSVG;
-this is the sole weather-picture generator, updating image data and placement
-metadata together. It retains shared UI and storm artwork during that focused run.
+metadata, with `PYTHON_BIN=<CairoSVG-environment-python> bash targets/esp32-p4/scripts/generate-screen-parity-assets.sh --weather-only`. The environment needs CairoSVG;
+this focused run updates weather image data and placement metadata together.
+For the shared settings and utility icons, use the same command with
+`--settings-only`. That mode updates utility icons in the combined icon outputs
+while retaining the weather image bytes and crop metadata.
 For the three Analog hands, use the same environment with `bash targets/esp32-p4/scripts/generate-analog-parity-assets.sh --hands-only`; the existing hand geometry and transparency are retained. Image
 format and placement rules belong in the [architecture](../../docs/architecture.md#weather-icons).
 
@@ -108,9 +110,9 @@ One `main` component holds the application, grouped by function. UI files use `m
 - `main/app_ui.h` and `main/ui/`
   Public UI interface, retained clock/weather/message rendering and settings draft editors
 - `main/ui/clock_views.c`
-  Private clock, unavailable-time, status and backup-notice drawing objects; `ui.c` retains navigation and notice actions
+  Private clock, alert headline/count, unavailable-time, status and backup-notice drawing objects; `ui.c` retains navigation and notice actions
 - `main/ui/weather_views.c`
-  Private Forecast, Radar, message and weather-status drawing objects; clock-edge indicators remain in `clock_views.c`. `ui.c` retains navigation, display snapshots and message-dismissal decisions
+  Private Forecast, Radar, Alerts list/details, message and weather-status drawing objects. `ui.c` retains navigation, display snapshots and message-dismissal decisions
 - `main/connectivity.*`
   WiFi station connect, scanning, and time sync
 - `main/device_config.*`
@@ -120,7 +122,7 @@ One `main` component holds the application, grouped by function. UI files use `m
 - `main/alarm.*`
   Live alarm decisions, snooze/dismissal/missed-notice recovery and the separate operating record
 - `main/audio.*`
-  Alarm sounds and previews, Sound Machine playback, recording decoding and speaker ownership
+  Alarm and weather-alert sounds, previews, Sound Machine playback, recording decoding and speaker ownership
 - `main/alarm_schedule.*`
   Stateless recurring-occurrence and daylight-saving calculations using the applied system timezone
 - `main/ds3231.*`
@@ -136,11 +138,11 @@ One `main` component holds the application, grouped by function. UI files use `m
 - `main/web/messages.html`
   The composer page served by `message_service.c`, embedded into the firmware image
 - `main/weather_client.*`
-  Open-Meteo/Visual Crossing forecasts and serialized RainViewer/USGS Radar preparation, using the bundled LVGL PNG decoder and RAM image buffers
+  Existing weather worker and request schedules, retained Open-Meteo/Visual Crossing forecasts, National Weather Service alert catalog/state, and RainViewer/USGS Radar preparation/publication, using the bundled LVGL PNG decoder and RAM image buffers
 - `main/bsp_shims.h`
   Small forward declarations for BSP backlight helpers documented upstream
 - `tests/`
-  Native settings, time, connectivity and UI checks, plus weather/location and message checks
+  Native settings, time, connectivity and UI checks, plus forecast, NWS alert, location and message checks
 - `scripts/`
   Shell helpers: `setup.sh` (build/flash), plus `activate-idf.sh`, `set-target.sh`, `build.sh`, `flash.sh`, `monitor.sh` for manual use
 

@@ -19,6 +19,14 @@ typedef enum {
   DEVICE_CONFIG_WEATHER_VISUAL_CROSSING,
 } device_config_weather_provider_t;
 
+/* The watch catalog has 23 selections; warnings occupy every uint32_t bit. */
+#define DEVICE_CONFIG_ALERT_WATCH_MASK UINT32_C(0x007fffff)
+typedef enum {
+  DEVICE_CONFIG_ALERT_UPDATES_OFF = 0,
+  DEVICE_CONFIG_ALERT_UPDATES_INCREASED,
+  DEVICE_CONFIG_ALERT_UPDATES_ALL,
+} device_config_alert_updates_t;
+
 typedef enum {
   DEVICE_CONFIG_ALARM_CLASSIC_BEEP = 0,
   DEVICE_CONFIG_ALARM_CLASSIC_BELL,
@@ -60,6 +68,10 @@ typedef struct {
   char units[DEVICE_CONFIG_SHORT_STR_LEN];
   device_config_weather_provider_t weather_provider;
   char weather_api_key[DEVICE_CONFIG_WEATHER_KEY_LEN];
+  uint32_t alert_watch_sounds;
+  uint32_t alert_warning_sounds;
+  device_config_alert_updates_t alert_update_sounds;
+  bool alert_night_sounds;
   char latitude[DEVICE_CONFIG_COORD_LEN];
   char longitude[DEVICE_CONFIG_COORD_LEN];
   char night_shift_start[DEVICE_CONFIG_TIME_STR_LEN];

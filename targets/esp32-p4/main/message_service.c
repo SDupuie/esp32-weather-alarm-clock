@@ -987,6 +987,8 @@ static esp_err_t refresh_remote_client_cache(void)
   copy_text(hub_url, sizeof(hub_url), s_runtime.hub_url);
   copy_text(device_id, sizeof(device_id), s_runtime.device_id);
   copy_text(room_name, sizeof(room_name), s_runtime.room_name);
+  // Failed polls retain the cache and wait the normal interval before retrying.
+  s_runtime.last_client_refresh_ms = now_ms();
   xSemaphoreGive(s_message_mutex);
 
   char url[MESSAGE_URL_LEN];

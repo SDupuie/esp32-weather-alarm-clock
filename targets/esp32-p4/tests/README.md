@@ -24,26 +24,20 @@ Activate ESP-IDF 5.5.5 as described in the [target guide](../README.md#prepare-t
 targets/esp32-p4/scripts/test-weather-parity.sh
 ```
 
-The retained script name runs C forecast, location and storm-alert checks against
-fixtures in `shared/test-data/`. It also checks that provider search names retain
-state/country qualifiers before the provider's result limit. No Raspberry Pi or
-JavaScript suite is required. cJSON is read from `$IDF_PATH/components/json/cJSON`.
+The retained script name now runs only C forecast-representative and location
+scoring checks against fixtures in `shared/test-data/`. It also checks that
+provider search names retain state/country qualifiers before the provider's
+result limit. NWS alert behavior is covered by the native service and UI tests
+below. No Raspberry Pi or JavaScript suite is required. cJSON is read from
+`$IDF_PATH/components/json/cJSON`.
 
 Weather fixtures exercise the [approved provider mappings and daily rules](../../../docs/weather.md),
 including compound facts, unknown/no-picture inputs, current-only exclusions,
 the paired ordinary-rain gate, independent Hail reports and mixed-snow majority.
 The retained daily cold-weather guesses are checked separately from current
-classification, which requires reported snow evidence. Missing storm measurements
-must not invent an alert. Constructed rare-condition cases establish decoding
-behavior, not evidence that the provider returns those conditions in practice.
-
-The 27 storm cases exercise the fixed [storm-warning limits](../../../docs/architecture.md#storm-detection),
-current and upcoming wind, gusts, heavy precipitation and thunder. They check
-missing measurements, unmatched hours and repeated local-hour identity; pressure
-alone does not create an alert. The two gust-boundary cases supply the same
-64 km/h gust: metric warns at its inclusive limit, while imperial stays below
-its limit. These test inputs preserve the existing difference between the
-unit-specific defaults; the fixture adapter accepts only the units choice.
+classification, which requires reported snow evidence. Constructed rare-condition
+cases establish decoding behavior, not how often a provider returns those
+conditions in practice.
 
 If the selected macOS compiler is broken, use the installed Command Line Tools
 compiler for this run:
@@ -51,6 +45,42 @@ compiler for this run:
 ```bash
 CC=/Library/Developer/CommandLineTools/usr/bin/clang targets/esp32-p4/scripts/test-weather-parity.sh
 ```
+
+## NWS alert services and screens
+
+After configuring and building the native suite below, run the focused NWS and
+screen checks with:
+
+```bash
+ctest --test-dir /tmp/esp32-p4-native-tests -R '^(device_config|weather_service|settings_alerts|ui_shell)$' --output-on-failure
+```
+
+`weather_service` compiles the production `weather_client.c` alert owner and its
+existing weather worker directly. Controlled HTTP,
+clock, audio and storage substitutes cover the complete 55-event catalog,
+cross-family NWS priority, event details, CAP update/cancel relationships,
+shared dismissal, new and escalated events, configured sounds, expiry, saved
+events and failure recovery. Request-spanning dusk/dawn cases change the controlled
+Night value during HTTP, checking both Night sound preferences, retained visual
+alerts and no delayed or unchanged replay. A dismissal during response cleanup checks that a
+sound cannot start after its headline was just dismissed, while a later eligible
+revision can still sound. A captured historical NWS feature checks real CAP
+field shapes and protective text; follow-up cases are constructed. The tests do
+not make live NWS requests.
+
+`settings_alerts` uses 55 constructed catalog rows to check scrollability,
+selection behavior and nested draft handling, plus update-sound and Night Alert
+Sounds choices. `device_config` checks alert preference defaults, validation,
+save/reload and failure handling. Catalog membership and ordering are checked by
+`weather_service`. `ui_shell` uses production LVGL screens and controlled alert
+snapshots to check count badges and status marks, and headline display and
+dismissal on both clock faces in Day and Night. It also checks the Alerts list,
+scrollable event details, back navigation, and checking/failure/save/unavailable
+states.
+These software checks do not establish live provider responses, physical touch
+or display behavior, or alert audio on the board. Approved behavior and current
+device verification are recorded in the [architecture](../../../docs/architecture.md#nws-watches-and-warnings)
+and [work record](../../../docs/work.md#current-work).
 
 ## Settings, time, backup clock, alarms, Night Shift, connectivity and UI controls
 
@@ -62,9 +92,31 @@ ctest --test-dir /tmp/esp32-p4-native-tests --output-on-failure
 
 Managed dependencies must already be available from a normal firmware build.
 The UI targets use the existing managed LVGL library with a native configuration.
-The CMake suite registers 44 cases across settings, time, alarm-calendar,
+
+For a visual review, the optional capture targets render the production UI with
+its compiled artwork, fonts and RGB565 software renderer. They are excluded from
+the normal build and CTest run; they are not firmware build modes. Hardware,
+network and feature-owner publications use controlled test inputs.
+
+```bash
+cmake -S targets/esp32-p4/tests -B /tmp/esp32-p4-render-review
+cmake --build /tmp/esp32-p4-render-review --target test_settings_capture test_ui_capture -j 6
+mkdir -p /tmp/esp32-p4-render-review/settings /tmp/esp32-p4-render-review/ui
+/tmp/esp32-p4-render-review/test_settings_capture --capture /tmp/esp32-p4-render-review/settings all
+/tmp/esp32-p4-render-review/test_ui_capture --capture /tmp/esp32-p4-render-review/ui all
+```
+
+Each capture writes an 800×800 PPM and JSON with text, resolved font, ordinary and
+transformed bounds, colors and control styles. A named scenario can replace
+`all`. `WAC_CAPTURE_RADAR_BGRA` optionally supplies an 800×800 BGRA map input;
+without it Radar uses a clearly artificial flat sample. These renders establish
+software layout, not physical panel, touch, brightness, service or audio behavior.
+The [work record](../../../docs/work.md#rendered-firmware-visual-review--october-19-2026)
+links the completed comparison and its coverage limits.
+
+The CMake suite registers 49 cases across settings, time, alarm-calendar,
 alarm-recovery, alarm-command, audio, Night Shift, solar-event, settings-control,
-UI-shell, weather-service, connectivity and touchscreen-recovery targets.
+UI-shell, NWS/weather service, connectivity and touchscreen-recovery targets.
 This count describes the configured suite; completed runs belong in the
 [work record](../../../docs/work.md).
 
@@ -148,7 +200,10 @@ warning compatibility, captured occurrence identity and rejection of stale taps.
 The real owner checks Snooze, Dismiss and missed-notice actions, including
 failed operating-record writes whose live action still applies. Completion is
 retained and consumed once; reading the owner's current state after delivery
-preserves a resumed or later alarm. The full clock task and heartbeat are not
+preserves a resumed or later alarm. The same target executes main's actual
+status-collection function with controlled weather-copy success and failure.
+It checks that fresh clock, message, alarm, audio, Night Shift and alert state
+still reach the display when weather cannot be copied. The full clock task and heartbeat are not
 executed here; their delivery order and short copied read are source-reviewed
 and compiled in the firmware build.
 
@@ -281,9 +336,8 @@ ESP-Hosted behavior or real Wi-Fi driver and network timing.
 
 The weather-service target includes production `main/weather_client.c` with
 substitute HTTP responses and the existing weather calculations, allowing checks
-of private normalized values without a firmware test interface. Its build also
-extracts the actual private weather worker and publication helpers from
-`main/main.c`; source changes regenerate that build include. It checks provider
+of private normalized values and the actual worker without a firmware test
+interface or main-source weather-worker extraction. It checks provider
 date/temperature/icon pairing, missing or invalid dates, downloads without
 usable time, retained payloads after failure, ten-minute refreshes and independent
 twenty-second weather and network-time-startup retries, including slow requests
@@ -297,7 +351,7 @@ Retained values, stale state and the existing refresh/retry timing are checked
 together.
 Both providers are exercised using retained real response data and explicitly
 constructed current/error/rare-condition supplements. Checks cover selected
-units, raw fractional amounts, observation timestamps, provider local times
+units, raw fractional amounts, provider epoch validation, provider local times
 across DST, repeated-hour identity, missing optional fields, required daily
 values and bounded responses. Request checks cover encoded dummy keys, including
 a maximum-length key whose characters all require URL encoding,
@@ -350,16 +404,34 @@ sampling layout are constructed references, not matching USGS geography or a
 finished screen. Live source captures, host comparisons and board results are
 recorded separately in the [Radar sprint](../../../docs/work.md#sprint-512px-radar-tiles-and-provider-smoothing--prepared-october-18-2026).
 
-UI checks cover Forecast/Radar navigation, stable storm ordering, Day/Night,
+`/tmp/esp32-p4-native-tests/test_weather_service --radar-six-frame-data <capture-folder>`
+checks the six retained Florida frames and twelve source tiles against their
+original full-image reference pixels, including completion and holding the newest
+image without additional HTTP requests. Use
+`.reviews/main/radar-six-frame-test-2026-10-19` as the capture folder.
+The ordinary constructed checks also cover the exact color
+lookup across every source-table row and alpha value, compressed-history bounds
+and reuse, single-pass chronological playback and newest-image completion,
+displayed-frame Pause races, resume/Latest,
+controls during metadata checks and offline/failure handling. These checks do
+not measure animation speed or audio continuity; the
+[playback work record](../../../docs/work.md#radar-color-lookup-and-six-frame-playback--authorized-october-19-2026)
+keeps the separate board measurements and their limits.
+
+UI checks cover the fixed Clock/Forecast/Radar navigation, Day/Night,
 full-screen map and horizontal header fit, equal-width Light/Moderate/Heavy key
 sections with centered labels, an unshaded footer, and no added town-label objects,
 frame time and old/unavailable states, image-source retirement and alarm
-preemption. Non-U.S., missing-country and unfinished locations create no Radar
-objects or route; their storm destination is Forecast. Country changes remove
-even a hidden Radar image, and U.S. re-enablement restores navigation. Storm
-checks exercise the shared alert flag and clock-edge indicators. Native pixels
-and pointer events do not establish display
-quality, physical gestures or concurrent board performance.
+preemption. Alert activity does not reorder the weather pages. Non-U.S.,
+missing-country and unfinished locations create no Radar objects or route;
+Forecast remains the only weather page. Country changes remove even a hidden
+Radar image, and U.S. re-enablement restores navigation. Native pixels and
+pointer events do not establish display quality, physical gestures or
+concurrent board performance.
+Playback checks exercise the actual Play/Pause hit target and swipe routing,
+disabled/loading states, the Paused timestamp, image retirement and lifecycle
+stop/Latest commands. The optional capture scenarios `radar-playing` and
+`radar-paused` render these states in Day and Night appearance.
 
 The settings-control target compiles production `main/ui/settings.c` with real LVGL
 objects and events. It checks nested Done/Cancel, shared Wi-Fi drafts, deferred
@@ -492,6 +564,15 @@ glyph offsets are checked against the reference font metrics; 32px icon sources,
 boxes and tint are checked in both appearances. These native checks do not
 establish physical rendering; the mockup’s browser-native slider track is not a fixed raster asset.
 
+The approved October 19 presentation checks also cover one-line long Wi-Fi and
+Messaging summaries with complete editor values, the single-line Warning Sounds
+and Night Alert Sounds labels, selected radio fills, and the 520px content /
+12px gap / 10px outside scrollbar layout. They check actual scrollbar bounds and
+overflow visibility, common keyboard proportions, alarm time/period and Snooze
+label positions, disabled Snooze colors, the Night unread tint, and natural
+centering of alert titles with their expiry text. These are native software
+checks; physical LCD and touch appearance remain separate.
+
 Alarm/Sound/Snooze/Solar menu checks compare actual rows, switches, footers,
 descriptions, selected checks and icon/text spacing with both reference palettes.
 They verify draft-only time/repeat/sound/snooze edits, Alarm Save without restart,
@@ -519,8 +600,8 @@ backup-clock notice wording, layout and fonts, failed dismissal submission,
 duplicate blocking, owner acknowledgment and a different warning arriving while
 dismissal is pending. It also checks first-use routing, settings draft retention,
 modal gesture blocking, home-view indicators and day/night colors supplied by the
-appearance owner, including a snapshot that differs from the settings mode. Both pairs of
-edge indicators are exercised through repeated pulse cycles with one-second UI
+appearance owner, including a snapshot that differs from the settings mode. Both
+House Messages edge indicators are exercised through repeated pulse cycles with one-second UI
 refreshes, plus tint changes and transitions to normal and hidden states. Message
 checks use real pointer taps and swipes to cover
 pending/duplicate dismissal, submission and worker-result errors, retaining the
@@ -548,12 +629,6 @@ Cancel/Back discard changes; Save and ordinary configuration reload preserve
 the 12-hour preference under saved 24-hour mode. Existing geometry, palettes,
 five-entry Display saves and no-restart behavior remain checked. These checks
 establish LVGL controls and settings behavior, not physical touch or pixels.
-
-Storm decoder checks use a constructed provider payload with a matching current
-hour. They verify the alert with missing gust data when thunder remains, clearing
-on a successful replacement without a matching hour, and retention through a
-failed refresh. These are controlled decoder and worker checks, not physical
-provider or board observations.
 
 Clock checks cover both configured faces, analog hand rotation, midnight/noon,
 12/24-hour and leading-zero formats, and recovery through unavailable Day/Night
@@ -688,6 +763,12 @@ acknowledgments and deactivation, including a local operation finishing during
 an outgoing transfer. These are controlled failure examples, not board
 observations. The existing finite RAM store and full-store merge limits remain.
 
+The worker's actual shared-cache refresh also runs through controlled transport,
+HTTP and invalid-JSON failures while hub heartbeats continue. Checks retain prior
+messages/unread/importance, enforce the 15-second failed-poll interval, and cover
+successful recovery and an immediate explicit refresh. Replacement-hub selection
+retains its existing timer behavior.
+
 The same harness executes the production discovery sender and captures its
 outgoing packet bytes. It checks the existing five fields with ordinary names,
 quotation marks and backslashes, the retained packet-size limit, allocation and
@@ -702,7 +783,17 @@ all-target browser listing, per-clock filtering, dismissed messages, expiration,
 deactivation, priority/date ordering and exact request-path/query/body forwarding.
 The browser's existing `deviceId=all&includeDismissed=true` request lists every
 target; normal polling remains filtered even for a clock whose ID is `all`.
-These checks do not run a browser or establish live traffic between clocks.
+The Python harness also requires **Node.js on PATH** to execute the page's actual
+JavaScript with controlled DOM/fetch objects. It checks that HTTP, returned-error,
+schema, JSON and network failures retain existing cards and show the existing
+error status; recovery, confirmed empty success and Deactivate still work.
+Destination-refresh checks preserve selected IDs, labels and subsequent Send
+targets after failed responses or valid lists temporarily missing the chosen
+room. They also cover updated labels without duplicate options, ordinary
+explicit choices, removal of unselected retained rooms, and choices made while
+the request or JSON decoding is pending. These use the actual page functions;
+their room names and HTTP responses are controlled examples.
+These checks do not render a browser or establish live traffic between clocks.
 
 The synchronous acknowledgment operation is private to the message worker; the
 UI checks use copied-ID submission and retained completion. Snapshot checks keep

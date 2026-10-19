@@ -207,8 +207,15 @@
       try {
         var response = await fetch('/api/message-targets', { cache: 'no-store' });
         var data = await response.json();
-        var targets = Array.isArray(data.targets) ? data.targets : [{ id: 'all', label: 'All clocks' }];
+        if (!response.ok || !data || data.error || !Array.isArray(data.targets)) {
+          throw new Error('Failed to load message targets');
+        }
+        var targets = data.targets;
         var previousValue = select.value;
+        var previousOption = select.selectedOptions[0];
+        if (previousOption && !targets.some(function (target) { return target.id === previousValue; })) {
+          targets.push({ id: previousValue, label: previousOption.textContent });
+        }
         select.replaceChildren();
 
         targets.forEach(function (target) {
@@ -218,7 +225,7 @@
           select.appendChild(option);
         });
 
-        if (previousValue && targets.some(function (target) { return target.id === previousValue; })) {
+        if (previousOption) {
           select.value = previousValue;
         }
       } catch (error) {
@@ -240,7 +247,10 @@
       try {
         var response = await fetch('/api/messages?deviceId=all&includeDismissed=true', { cache: 'no-store' });
         var data = await response.json();
-        var messages = Array.isArray(data.messages) ? data.messages : [];
+        if (!response.ok || !data || data.error || !Array.isArray(data.messages)) {
+          throw new Error('Failed to load active messages');
+        }
+        var messages = data.messages;
         list.replaceChildren();
 
         if (messages.length === 0) {

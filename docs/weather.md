@@ -1,8 +1,8 @@
 # Weather condition mappings
 
-Revised October 18, 2026.
+Revised October 19, 2026.
 
-This document owns the detailed condition-to-icon mappings for Open-Meteo and Visual Crossing. The [architecture](architecture.md#weather) owns location, measurements, refreshes, [quota recovery](architecture.md#visual-crossing-quota-recovery), stale-data presentation and existing warning rules. [Development work](work.md) records implementation and verification.
+This document owns the detailed condition-to-icon mappings for Open-Meteo and Visual Crossing. The [architecture](architecture.md#weather) owns location, measurements, refreshes, [quota recovery](architecture.md#visual-crossing-quota-recovery), stale-data presentation and independent [NWS alerts](architecture.md#nws-watches-and-warnings). [Development work](work.md) records implementation and verification.
 
 **Status: approved October 13, 2026 and implemented.** Every listed provider input has a defined treatment, including shared pictures, unused conditions and unknown inputs. Open-Meteo remains the default; Visual Crossing is the keyed alternative. The approved [daily forecast policy](#five-day-forecasts) reuses the current selection method for both providers with a 50% probability and 1.5 mm precipitation requirement for ordinary Rain/Showers, the [two-report Hail and Rain & Snow majority rules](#additional-daily-pictures), and current-only Ice, Wind and Funnel/Tornado pictures. Delivery evidence and remaining verification limits, including rare live provider IDs and real quota exhaustion, belong in [work.md](work.md#sprint-visual-crossing-and-approved-weather-mappings--authorized-october-13-2026).
 
@@ -38,7 +38,7 @@ The table covers all 29 currently documented Open-Meteo weather codes, all 43 li
 | Blowing / Drifting Snow | ![Blowing Snow](weather-icons/snow.png)<br>Snow | No direct code | `1` | Shared artwork; retain Blowing Snow caption. Does not alone establish falling snow |
 | Diamond Dust / Ice Crystals | ![Diamond Dust](weather-icons/snow.png)<br>Snow | No direct code | `39` | Shared artwork; retain Diamond Dust / Ice Crystals caption. Does not alone establish falling snow |
 | Hail | ![Hail](weather-icons/hail.png)<br>Larger white pellets | `96`, `99` report hail with thunder | `16`, `40` | Direct when reported; within one record, Hail picture wins over Thunderstorm while retaining thunder |
-| Thunderstorm | ![Thunderstorm](weather-icons/thunderstorm.png)<br>Thunderstorm | `95`, `97`; `96`, `99` also retain thunder when Hail supplies the picture | `37`, `38`; `thunder-rain`, `thunder-showers-day`, `thunder-showers-night` | Direct; recognition of `97` includes the existing thunder warning. `38` does not imply rain |
+| Thunderstorm | ![Thunderstorm](weather-icons/thunderstorm.png)<br>Thunderstorm | `95`, `97`; `96`, `99` also retain thunder when Hail supplies the picture | `37`, `38`; `thunder-rain`, `thunder-showers-day`, `thunder-showers-night` | Direct; recognize `97` as thunder. `38` does not imply rain |
 | Lightning Without Thunder | ![Lightning](weather-icons/thunderstorm.png)<br>Thunderstorm artwork | No separate code | `18` | Approximation for current and forecast pictures; current caption Lightning. Do not invent thunder or rain |
 | Thundersnow | ![Thundersnow](weather-icons/thundersnow.png)<br>Thundersnow | Derived from thunder and falling-snow evidence in the same interval | Same-record thunder and falling-snow evidence; no dedicated native ID | Derived; require same-period evidence |
 | Sleet / Ice Pellets | ![Sleet](weather-icons/sleet.png)<br>Two rows of small white pellets | No direct ice-pellet code; `77` remains Snow Grains | No precise supported pairing; `17` and `preciptype=ice` map to Generic Ice | **Unused by these providers**; do not manufacture a Sleet classification |
@@ -59,7 +59,7 @@ The classifications in the table and their current-condition selection/wording r
 
 ### Current conditions and compound records
 
-Use each provider's reported condition evidence. Do not infer snow, sleet, freezing rain or hail from air temperature alone. Preserve precipitation types and thunder independently of the selected picture. For example, Hail can supply the picture while a caption says Hail & Thunder and the existing thunder warning still receives the thunder fact.
+Use each provider's reported condition evidence. Do not infer snow, sleet, freezing rain or hail from air temperature alone. Preserve precipitation types and thunder independently of the selected picture. For example, Hail can supply the picture while a caption says Hail & Thunder; keep both reported facts independently.
 
 For conditions reported together in one current/hourly record, the approved picture order is **Funnel/Tornado → Hail → Freezing Rain → Thundersnow → Thunderstorm/Lightning → Rain & Snow → Snow → Rain/Showers → Generic Ice → Fog → Wind → sky**. This selects the picture for that record; it does not rank scientific severity or replace the approved daily selection method below. Generic Ice yields to more precise reported precipitation; Fog precedes Wind as in the provider's ordinary icon selection. Sleet is unused by these providers and has no selection branch. Retain accompanying weather facts independently of the winning picture.
 
@@ -92,7 +92,7 @@ The probability is the maximum hourly value in this window, not the probability 
 
 Remove the independent qualification based on three wet hours. Wet-hour counts remain available to the other existing condition checks. Preserve the existing Rain/Showers subtype calculation, including Showers winning a tie. If the paired requirement fails, continue to the existing fog and sky checks.
 
-The 50% threshold applies only to this ordinary daily Rain/Showers check. Existing probability thresholds in thunder, freezing and snow checks, current-condition pictures and short-term storm warnings retain their separate rules.
+The 50% threshold applies only to this ordinary daily Rain/Showers check. Existing probability thresholds in thunder, freezing and snow checks and current-condition pictures retain their separate rules. Official alerts are independent of these picture-selection rules; see [NWS watches and warnings](architecture.md#nws-watches-and-warnings).
 
 This narrows selection of ordinary Rain/Showers from low-probability or trace precipitation. A brief event can still determine the daily picture when the paired requirements are met; this policy does not require a majority of daytime hours. The chosen values are a product decision, not a statistically validated accuracy improvement.
 
@@ -121,7 +121,7 @@ Ice.
 | ![Hail](weather-icons/hail.png) Hail | Select Hail when **at least two distinct daytime hourly forecasts explicitly report hail**. Check this before the existing thunder check. **Thunder is not required**, and the ordinary Rain/Showers probability and amount requirements do not apply. | One isolated hail report does not select the daily Hail picture, so meaningful hail confined to one hourly forecast can be omitted. Two reports do not imply two continuous hours of hail. |
 | ![Rain and Snow](weather-icons/rain-snow.png) Rain & Snow | After the existing snow check qualifies, select Rain & Snow only when **more than half of the hours counted by that snow check have same-period liquid-rain and falling-snow evidence**. A tie retains Snow. | Rain at one hour and snow at another do not establish mixed precipitation. Temperature-only snow qualification cannot create the mixed picture. |
 | ![Generic Ice](weather-icons/ice.png) Generic Ice | **Current conditions only.** | Excluded from daily pictures, including the mapped-daily fallback. Preserve other reported facts without guessing an ice subtype. |
-| ![Wind](weather-icons/wind.png) Wind | **Current conditions only.** | Excluded from daily pictures, including the mapped-daily fallback. Existing wind measurements and warning rules remain. |
+| ![Wind](weather-icons/wind.png) Wind | **Current conditions only.** | Excluded from daily pictures, including the mapped-daily fallback. Reported wind measurements do not independently create an official alert. |
 | ![Tornado](weather-icons/tornado.png) Funnel/Tornado | **Current conditions only.** | Excluded from daily pictures, including the mapped-daily fallback. Retain the combined current caption without claiming a confirmed tornado. |
 
 Count explicit Hail evidence from the provider mapping, independently of the
@@ -148,7 +148,7 @@ Visual Crossing forecast IDs still need real-response verification.
 
 ### Thunder classification
 
-The Open-Meteo thunder classification includes `95`, `96`, `97` and `99`; the Visual Crossing classification follows the Thunderstorm row. Hail may win the picture while retaining the thunder fact for the existing storm warning. Visual Crossing `18` selects the electrical-weather picture but does not set the thunder fact. Numerical warning thresholds remain in the architecture.
+The Open-Meteo thunder classification includes `95`, `96`, `97` and `99`; the Visual Crossing classification follows the Thunderstorm row. Hail may win the picture while retaining the separately reported thunder fact. Visual Crossing `18` selects the electrical-weather picture but does not set the thunder fact. These classifications do not create official alerts; [NWS watches and warnings](architecture.md#nws-watches-and-warnings) use their own source.
 
 ## Provider and display limitations
 
@@ -160,7 +160,7 @@ These have defined treatments in the table rather than unresolved mappings:
 - Detailed Visual Crossing IDs are handled if returned; real-response availability remains a verification matter. The decoder uses recognized accompanying evidence, then the defined Unknown fallback.
 - The previews illustrate the selected artwork. Firmware uses its existing generated assets, with the Fog revision and five added pictures; previews themselves are not application assets.
 
-The approved daily policy reuses existing selection behavior with the paired ordinary-rain requirement, two-report Hail qualification and Rain & Snow majority above. The mapping/artwork scope includes the richer freezing, mixed, hail and generic-ice distinctions developed in this discussion, with Ice, Wind and Funnel/Tornado confined to current conditions. Existing decoding, icon-selection, forecast and storm-detection owners are sufficient; no new provider framework, worker, cache or storage owner is needed just for these mappings.
+The approved daily policy reuses existing selection behavior with the paired ordinary-rain requirement, two-report Hail qualification and Rain & Snow majority above. The mapping/artwork scope includes the richer freezing, mixed, hail and generic-ice distinctions developed in this discussion, with Ice, Wind and Funnel/Tornado confined to current conditions. Existing decoding, icon-selection and forecast owners are sufficient; no new provider framework, worker, cache or storage owner is needed just for these mappings.
 
 ## Current firmware mapping
 

@@ -179,7 +179,6 @@ fi
 generate_font "lv_font_clock_time_144" 144 "0x2D,0x30-0x39,0x3A"
 
 # Digits + minus + degree sign -- temperature can go below zero.
-generate_font "lv_font_temp_105" 105 "0x2D,0x30-0x39,0xB0"
 generate_font "lv_font_temp_102" 102 "0x2D,0x30-0x39,0xB0"
 
 echo "Done. Regenerated fonts are in $OUTPUT_DIR -- rebuild the firmware to pick them up."

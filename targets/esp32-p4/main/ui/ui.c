@@ -16,6 +16,7 @@
 #include "lvgl.h"
 #include "message_service.h"
 #include "location_scoring.h"
+#include "weather_client.h"
 
 #define SWIPE_THRESHOLD_PX 70
 #define SWIPE_AXIS_RATIO_X10 15
@@ -26,7 +27,9 @@ typedef enum {
   APP_VIEW_DIGITAL,
   APP_VIEW_FORECAST,
   APP_VIEW_RADAR,
-  APP_VIEW_MESSAGE
+  APP_VIEW_MESSAGE,
+  APP_VIEW_ALERTS,
+  APP_VIEW_ALERT_DETAIL
 } app_view_mode_t;
 
 typedef struct {
@@ -37,16 +40,10 @@ typedef struct {
   bool settings_suspended;
   app_view_mode_t current_view;
   app_view_mode_t last_home_view;
-  /* The weather views left of home, nearest first. Snapshotted when leaving
-   * home so an alert starting or clearing mid-visit doesn't reshuffle the
-   * row; the new order applies from the next swipe out of home. */
-  app_view_mode_t weather_row[2];
-  unsigned weather_row_count;
-  bool weather_alert_active;
+  app_alert_snapshot_t alerts;
+  uint64_t alert_detail_id;
   lv_point_t gesture_start;
   bool gesture_tracking;
-  bool clock_usable;
-  wac_time_warning_t clock_warning;
   bool backup_notice_open;
   wac_time_warning_t backup_dismiss_warning;
   bool night_overlay_active;
@@ -59,6 +56,9 @@ typedef struct {
   bool has_important_messages;
   app_weather_snapshot_t weather;
   app_radar_snapshot_t radar;
+  bool radar_visit_active;
+  bool radar_pause_pending;
+  uint32_t radar_displayed_generation;
   device_config_t config_snapshot;
   int last_displayed_minute_key;
   int64_t last_minute_advance_ms;
@@ -77,6 +77,7 @@ typedef struct {
 static app_ui_state_t s_ui;
 static esp_err_t (*s_clock_warning_dismiss_handler)(wac_time_warning_t);
 static esp_err_t (*s_alarm_action_handler)(app_alarm_action_t, const wac_alarm_occurrence_t *);
+static esp_err_t (*s_radar_action_handler)(app_radar_action_t, time_t);
 static const char *TAG = "rwd_app_ui";
 
 lv_color_t wac_ui_color_bg(void)
@@ -102,11 +103,6 @@ lv_color_t wac_ui_color_night_primary(void)
 lv_color_t wac_ui_color_night_muted(void)
 {
   return lv_color_hex(0xc17a7a);
-}
-
-lv_color_t wac_ui_color_night_alert(void)
-{
-  return lv_color_hex(0xec9682);
 }
 
 bool wac_ui_strings_equal_ignore_case(const char *a, const char *b)
@@ -220,6 +216,11 @@ static void yield_ui_bootstrap(void)
 static void open_settings(void);
 static void update_backup_notice(void);
 static void machine_open_event_cb(lv_event_t *event);
+static void alerts_open_event_cb(lv_event_t *event);
+static void alert_dismiss_event_cb(lv_event_t *event);
+static void settings_open_event_cb(lv_event_t *event);
+static void alerts_back_event_cb(lv_event_t *event);
+static void alert_row_event_cb(lv_event_t *event);
 static void apply_view_night_state(bool active);
 static void update_weather_status(void);
 static void update_alarm_surface(void);
@@ -229,6 +230,27 @@ static void refresh_message_ui_state(
   uint32_t unread_count,
   bool has_important_message
 );
+
+void app_ui_set_radar_action_handler(esp_err_t (*handler)(app_radar_action_t, time_t))
+{
+  s_radar_action_handler = handler;
+}
+
+static bool submit_radar_action(app_radar_action_t action)
+{
+  if (action == APP_RADAR_PAUSE && s_ui.radar_pause_pending) return false;
+  esp_err_t result = s_radar_action_handler
+    ? s_radar_action_handler(action, s_ui.radar.frame_time) : ESP_ERR_INVALID_STATE;
+  if (result != ESP_OK && s_radar_action_handler)
+    ESP_LOGW(TAG, "Radar action submission failed: %s", esp_err_to_name(result));
+  if (result == ESP_OK) s_ui.radar_pause_pending = action == APP_RADAR_PAUSE;
+  return result == ESP_OK;
+}
+
+uint32_t app_ui_radar_displayed_generation(void)
+{
+  return s_ui.radar_displayed_generation;
+}
 
 static void reset_clock_health(void)
 {
@@ -370,7 +392,7 @@ static void apply_view_night_state(bool active)
   wac_clock_apply_night(active);
   wac_weather_apply_night(&s_ui.weather, s_ui.has_important_messages, active);
   wac_clock_update_indicators(s_ui.has_unread_messages, s_ui.has_important_messages,
-    s_ui.weather_alert_active, s_ui.night_overlay_active);
+    s_ui.night_overlay_active);
   update_night_overlay_visibility();
   update_backup_notice();
 }
@@ -393,7 +415,7 @@ static void set_view_mode(app_view_mode_t next_view)
     s_ui.backup_notice_open = false;
   }
 
-  wac_clock_set_visible(next_view == APP_VIEW_ANALOG, next_view == APP_VIEW_DIGITAL, s_ui.clock_usable);
+  wac_clock_set_visible(next_view == APP_VIEW_ANALOG, next_view == APP_VIEW_DIGITAL, s_ui.clock.usable);
   if (next_view != APP_VIEW_ANALOG && next_view != APP_VIEW_DIGITAL)
     wac_clock_update_status("", false, false);
 
@@ -418,38 +440,17 @@ static void update_radar_eligibility(void)
   bool enabled = radar_enabled();
   wac_weather_set_radar_enabled(s_ui.stage, enabled);
   if (!enabled) {
-    s_ui.weather_row[0] = APP_VIEW_FORECAST;
-    s_ui.weather_row_count = 1;
     if (s_ui.current_view == APP_VIEW_RADAR) s_ui.current_view = APP_VIEW_FORECAST;
     s_ui.radar = (app_radar_snapshot_t){0};
+    s_ui.radar_pause_pending = false;
   }
-}
-
-/* During a storm alert, Radar jumps ahead of the forecast so one swipe
- * from home lands on it; the forecast is still one more swipe away. */
-static void snapshot_weather_row(void)
-{
-  bool radar = radar_enabled();
-  s_ui.weather_row_count = radar ? 2 : 1;
-  s_ui.weather_row[0] = radar && s_ui.weather_alert_active ? APP_VIEW_RADAR : APP_VIEW_FORECAST;
-  s_ui.weather_row[1] = s_ui.weather_alert_active ? APP_VIEW_FORECAST : APP_VIEW_RADAR;
-}
-
-static int weather_row_index(app_view_mode_t view)
-{
-  for (unsigned i = 0; i < s_ui.weather_row_count; ++i) {
-    if (s_ui.weather_row[i] == view) {
-      return i;
-    }
-  }
-  return -1;
 }
 
 /* Navigation map:
  * only the configured face is home, and every screen is a fixed neighbour
  * of home that returns with the opposite swipe:
  *   right -> messages
- *   left  -> forecast -> Radar (Radar first during an alert)
+ *   left  -> forecast -> Radar
  *   down  -> Settings (anywhere on the face)
  * Swipe up from home is reserved for a future view below home. */
 static void handle_swipe(int delta_x, int delta_y)
@@ -465,21 +466,20 @@ static void handle_swipe(int delta_x, int delta_y)
   if (abs_x >= SWIPE_THRESHOLD_PX && (abs_x * 10) > (abs_y * SWIPE_AXIS_RATIO_X10)) {
     if (is_home) {
       if (delta_x < 0) {
-        snapshot_weather_row();
-        set_view_mode(s_ui.weather_row[0]);
+        set_view_mode(APP_VIEW_FORECAST);
       } else {
         set_view_mode(APP_VIEW_MESSAGE);
       }
       return;
     }
 
-    int row_index = weather_row_index(s_ui.current_view);
-    if (row_index >= 0) {
-      if (delta_x < 0 && (unsigned)(row_index + 1) < s_ui.weather_row_count) {
-        set_view_mode(s_ui.weather_row[row_index + 1]);
-      } else if (delta_x > 0) {
-        set_view_mode(row_index == 0 ? s_ui.last_home_view : s_ui.weather_row[0]);
-      }
+    if (s_ui.current_view == APP_VIEW_FORECAST) {
+      if (delta_x > 0) set_view_mode(s_ui.last_home_view);
+      else if (radar_enabled()) set_view_mode(APP_VIEW_RADAR);
+      return;
+    }
+    if (s_ui.current_view == APP_VIEW_RADAR) {
+      if (delta_x > 0) set_view_mode(APP_VIEW_FORECAST);
       return;
     }
 
@@ -522,6 +522,14 @@ static void gesture_layer_event_cb(lv_event_t *event)
     int delta_y = point.y - s_ui.gesture_start.y;
     s_ui.gesture_tracking = false;
 
+    if (code == LV_EVENT_RELEASED && s_ui.current_view == APP_VIEW_RADAR
+        && LV_ABS(delta_x) < 12 && LV_ABS(delta_y) < 12
+        && wac_weather_radar_control_hit(s_ui.gesture_start.x, s_ui.gesture_start.y)
+        && wac_weather_radar_control_hit(point.x, point.y)) {
+      submit_radar_action(s_ui.radar.playing ? APP_RADAR_PAUSE : APP_RADAR_PLAY);
+      return;
+    }
+
     if (s_ui.current_view == APP_VIEW_MESSAGE
         && LV_ABS(delta_x) < 12
         && LV_ABS(delta_y) < 12
@@ -562,7 +570,7 @@ static void build_gesture_layer(lv_obj_t *parent)
 static void backup_open_event_cb(lv_event_t *event)
 {
   (void)event;
-  if (alarm_page() || s_ui.clock_warning == WAC_TIME_WARNING_NONE || settings_visible()) return;
+  if (alarm_page() || !s_ui.clock.usable || s_ui.clock.warning == WAC_TIME_WARNING_NONE || settings_visible()) return;
   s_ui.backup_notice_open = true;
   s_ui.gesture_tracking = false;
   update_backup_notice();
@@ -574,13 +582,13 @@ static void backup_dismiss_event_cb(lv_event_t *event)
   (void)event;
   if (alarm_page() || s_ui.backup_dismiss_warning != WAC_TIME_WARNING_NONE || !s_ui.backup_notice_open) return;
   esp_err_t error = s_clock_warning_dismiss_handler
-    ? s_clock_warning_dismiss_handler(s_ui.clock_warning) : ESP_ERR_INVALID_STATE;
+    ? s_clock_warning_dismiss_handler(s_ui.clock.warning) : ESP_ERR_INVALID_STATE;
   if (error != ESP_OK) {
     ESP_LOGW(TAG, "Backup-clock dismissal failed: %s", esp_err_to_name(error));
     update_backup_notice();
     return;
   }
-  s_ui.backup_dismiss_warning = s_ui.clock_warning;
+  s_ui.backup_dismiss_warning = s_ui.clock.warning;
   update_backup_notice();
 }
 
@@ -589,10 +597,10 @@ static void update_backup_notice(void)
   bool home = !alarm_page() && !settings_visible()
     && (s_ui.current_view == APP_VIEW_ANALOG || s_ui.current_view == APP_VIEW_DIGITAL);
   wac_clock_update_backup(home, s_ui.current_view == APP_VIEW_ANALOG,
-    s_ui.clock_usable, s_ui.clock_warning, s_ui.backup_notice_open,
+    s_ui.clock.usable, s_ui.clock.warning, s_ui.backup_notice_open,
     s_ui.backup_dismiss_warning != WAC_TIME_WARNING_NONE,
     s_ui.night_overlay_active);
-  wac_clock_update_machine(home, s_ui.current_view == APP_VIEW_ANALOG, s_ui.clock_usable,
+  wac_clock_update_machine(home, s_ui.current_view == APP_VIEW_ANALOG, s_ui.clock.usable,
     s_ui.audio.machine_active, s_ui.night_overlay_active);
 }
 
@@ -608,6 +616,45 @@ static void machine_open_event_cb(lv_event_t *event)
   bool returning_to_draft = s_ui.settings_suspended;
   open_settings();
   if (settings_visible()) wac_settings_start_machine(!returning_to_draft);
+}
+
+static void settings_open_event_cb(lv_event_t *event)
+{
+  (void)event;
+  open_settings();
+}
+
+static void alert_dismiss_event_cb(lv_event_t *event)
+{
+  (void)event;
+  if (alarm_page() || settings_visible() || s_ui.backup_notice_open) return;
+  weather_client_alerts_dismiss();
+  weather_client_alerts_copy(&s_ui.alerts);
+  update_alarm_surface();
+}
+
+static void alerts_open_event_cb(lv_event_t *event)
+{
+  (void)event;
+  if (alarm_page() || settings_visible() || s_ui.backup_notice_open) return;
+  weather_client_alerts_dismiss();
+  weather_client_alerts_copy(&s_ui.alerts);
+  set_view_mode(APP_VIEW_ALERTS);
+}
+
+static void alerts_back_event_cb(lv_event_t *event)
+{
+  (void)event;
+  if (alarm_page() || settings_visible()) return;
+  set_view_mode(s_ui.current_view == APP_VIEW_ALERT_DETAIL
+    ? APP_VIEW_ALERTS : s_ui.last_home_view);
+}
+
+static void alert_row_event_cb(lv_event_t *event)
+{
+  if (alarm_page() || settings_visible() || s_ui.current_view != APP_VIEW_ALERTS) return;
+  s_ui.alert_detail_id = wac_weather_alert_event_id(event);
+  if (s_ui.alert_detail_id) set_view_mode(APP_VIEW_ALERT_DETAIL);
 }
 
 static void build_night_overlay(lv_obj_t *parent)
@@ -674,12 +721,7 @@ static void update_clock_status(const wac_time_snapshot_t *clock)
 
 static void update_weather_status(void)
 {
-  wac_weather_surface_t surface = WAC_WEATHER_SURFACE_HOME;
-  if (alarm_page()) surface = WAC_WEATHER_SURFACE_UNAVAILABLE_HOME;
-  else if (s_ui.current_view == APP_VIEW_FORECAST) surface = WAC_WEATHER_SURFACE_FORECAST;
-  else if (s_ui.current_view == APP_VIEW_RADAR) surface = WAC_WEATHER_SURFACE_RADAR;
-  else if (s_ui.current_view == APP_VIEW_MESSAGE) surface = WAC_WEATHER_SURFACE_MESSAGE;
-  else if (!s_ui.clock_usable) surface = WAC_WEATHER_SURFACE_UNAVAILABLE_HOME;
+  bool forecast_visible = !alarm_page() && s_ui.current_view == APP_VIEW_FORECAST;
   char notice[64] = "";
   if (s_ui.weather.valid && s_ui.weather.stale) {
     const wac_time_snapshot_t *clock = &s_ui.clock;
@@ -695,20 +737,36 @@ static void update_weather_status(void)
     }
   }
   wac_clock_update_weather_notice(notice);
-  wac_weather_update_status(&s_ui.weather, s_ui.night_overlay_active, surface);
+  wac_weather_update_status(&s_ui.weather, s_ui.night_overlay_active, forecast_visible);
 }
 
 static void update_alarm_surface(void)
 {
+  if (s_ui.current_view == APP_VIEW_ALERT_DETAIL) {
+    weather_alert_detail_t detail;
+    size_t needed;
+    if (weather_client_alerts_detail_copy(s_ui.alert_detail_id, &detail, NULL, 0,
+        &needed) == ESP_ERR_NOT_FOUND) {
+      s_ui.current_view = APP_VIEW_ALERTS;
+      s_ui.alert_detail_id = 0;
+    }
+  }
   bool home = s_ui.current_view == APP_VIEW_ANALOG || s_ui.current_view == APP_VIEW_DIGITAL;
   bool page = alarm_page();
+  bool radar_visit = !page && !settings_visible() && !s_ui.backup_notice_open
+    && s_ui.current_view == APP_VIEW_RADAR;
+  if (radar_visit != s_ui.radar_visit_active) {
+    /* Retry a temporarily busy command mailbox on the next UI heartbeat. */
+    if (s_radar_action_handler == NULL || submit_radar_action(APP_RADAR_LATEST))
+      s_ui.radar_visit_active = radar_visit;
+  }
   wac_clock_alarm_surface_t surface = s_ui.alarm_confirmation_timer ? WAC_CLOCK_ALARM_DISMISSED
     : alarm_ringing() || s_ui.alarm_slide_pending ? WAC_CLOCK_ALARM_RINGING
     : settings_visible() ? WAC_CLOCK_ALARM_HIDDEN
     : page ? WAC_CLOCK_ALARM_SNOOZED
     : home ? WAC_CLOCK_ALARM_HOME : WAC_CLOCK_ALARM_HIDDEN;
   wac_clock_set_visible(!page && s_ui.current_view == APP_VIEW_ANALOG,
-    !page && s_ui.current_view == APP_VIEW_DIGITAL, s_ui.clock_usable);
+    !page && s_ui.current_view == APP_VIEW_DIGITAL, s_ui.clock.usable);
   wac_weather_set_visible(!page && s_ui.current_view == APP_VIEW_FORECAST,
     !page && s_ui.current_view == APP_VIEW_RADAR,
     !page && s_ui.current_view == APP_VIEW_MESSAGE);
@@ -727,6 +785,13 @@ static void update_alarm_surface(void)
   update_clock_status(&s_ui.clock);
   update_weather_status();
   update_backup_notice();
+  wac_clock_update_alerts(&s_ui.alerts,
+    home && !page && !settings_visible() && !s_ui.backup_notice_open,
+    s_ui.current_view == APP_VIEW_ANALOG, s_ui.clock.usable, s_ui.night_overlay_active);
+  wac_weather_update_alerts(&s_ui.alerts, &s_ui.config_snapshot,
+    !page && !settings_visible() && s_ui.current_view == APP_VIEW_ALERTS,
+    !page && !settings_visible() && s_ui.current_view == APP_VIEW_ALERT_DETAIL,
+    s_ui.alert_detail_id, s_ui.night_overlay_active);
 }
 
 /* Apply published Display choices once without replacing an editor or a
@@ -879,6 +944,7 @@ void app_ui_complete_alarm_action(app_alarm_action_t action,
 
 static void build_app_shell(const device_config_t *config)
 {
+  if (s_ui.radar_visit_active) submit_radar_action(APP_RADAR_LATEST);
   cancel_alarm_confirmation();
   lv_obj_t *screen = lv_screen_active();
   wac_settings_close();
@@ -890,7 +956,6 @@ static void build_app_shell(const device_config_t *config)
   wac_clock_reset();
   wac_weather_reset();
   s_ui.config_snapshot = *config;
-  snapshot_weather_row();
 
   s_ui.stage = lv_obj_create(screen);
   lv_obj_set_size(s_ui.stage, LV_PCT(100), LV_PCT(100));
@@ -915,6 +980,9 @@ static void build_app_shell(const device_config_t *config)
   wac_clock_build_status(s_ui.stage);
   build_night_overlay(s_ui.stage);
   wac_clock_build_machine(s_ui.stage, machine_open_event_cb);
+  wac_clock_build_alerts(s_ui.stage, alerts_open_event_cb, alert_dismiss_event_cb,
+    settings_open_event_cb);
+  wac_weather_build_alerts(s_ui.stage, alerts_back_event_cb, alert_row_event_cb);
   wac_clock_build_backup(s_ui.stage, backup_open_event_cb, backup_dismiss_event_cb);
   wac_clock_build_alarm(s_ui.stage, alarm_action_event_cb, alarm_badge_event_cb, open_alarm_event_cb,
     alarm_slide_event_cb);
@@ -964,6 +1032,7 @@ esp_err_t app_ui_update_runtime(
   s_ui.clock = runtime->clock;
   s_ui.alarm = runtime->alarm;
   s_ui.audio = runtime->audio;
+  s_ui.alerts = runtime->alerts;
   s_ui.config_snapshot = *config;
   update_radar_eligibility();
   if (new_ring) {
@@ -976,14 +1045,12 @@ esp_err_t app_ui_update_runtime(
     s_ui.current_view = s_ui.last_home_view;
   }
   if (runtime->alarm.phase != WAC_ALARM_SNOOZED) s_ui.snoozed_view = false;
-  s_ui.clock_usable = runtime->clock.usable;
-  s_ui.clock_warning = runtime->clock.warning;
-  if (s_ui.clock_warning == WAC_TIME_WARNING_NONE) s_ui.backup_notice_open = false;
+  if (!s_ui.clock.usable || s_ui.clock.warning == WAC_TIME_WARNING_NONE) s_ui.backup_notice_open = false;
   /* The owner may acknowledge one warning and reveal another between UI
    * heartbeats. The newly displayed warning needs its own dismissal. */
-  if (s_ui.clock_warning == WAC_TIME_WARNING_NONE
+  if (s_ui.clock.warning == WAC_TIME_WARNING_NONE
       || (s_ui.backup_dismiss_warning != WAC_TIME_WARNING_NONE
-          && s_ui.clock_warning != s_ui.backup_dismiss_warning)) {
+          && s_ui.clock.warning != s_ui.backup_dismiss_warning)) {
     s_ui.backup_dismiss_warning = WAC_TIME_WARNING_NONE;
   }
   if (runtime->weather.valid) {
@@ -1002,15 +1069,32 @@ esp_err_t app_ui_update_runtime(
   if (s_ui.weather.valid) {
     wac_clock_update_weather(&s_ui.weather);
     wac_weather_update(&s_ui.weather, time_available ? &local_time : NULL);
-    s_ui.weather_alert_active = s_ui.weather.storm_alert;
   } else {
     wac_clock_update_weather(NULL);
     wac_weather_update(&s_ui.weather, NULL);
   }
   /* Generation zero is a failed short snapshot copy, except at startup. Keep
    * the last publication until its owner supplies a real replacement. */
-  if (radar_enabled() && (runtime->radar.generation != 0 || s_ui.radar.generation == 0))
-    s_ui.radar = runtime->radar;
+  bool pause_confirmed = runtime->radar.paused
+    && runtime->radar.frame_time == s_ui.radar.frame_time;
+  bool location_changed = runtime->radar.latitude != s_ui.radar.latitude
+    || runtime->radar.longitude != s_ui.radar.longitude;
+  /* Pause names the frame already shown. A newer worker publication may have
+   * been copied before that tap; retain our pointer and its acknowledgement
+   * until the owner supplies the requested hold or removes the old image. */
+  bool accept_radar = !s_ui.radar_pause_pending || pause_confirmed
+    || (runtime->radar.generation != 0 && (!runtime->radar.valid || location_changed));
+  if (radar_enabled()) {
+    if (accept_radar && (runtime->radar.generation != 0 || s_ui.radar.generation == 0)) {
+      s_ui.radar = runtime->radar;
+      if (runtime->radar.generation != 0)
+        s_ui.radar_displayed_generation = runtime->radar.generation;
+      s_ui.radar_pause_pending = false;
+    }
+  } else if (runtime->radar.generation != 0) {
+    /* Eligibility already deleted the descriptor and released its pointer. */
+    s_ui.radar_displayed_generation = runtime->radar.generation;
+  }
   wac_weather_update_radar(&s_ui.radar, config, runtime->night_active);
   refresh_message_ui_state(&runtime->message, runtime->unread_message_count, runtime->has_important_message);
   s_ui.night_overlay_active = runtime->night_active;
@@ -1030,6 +1114,7 @@ esp_err_t app_ui_update_runtime(
 
 void app_ui_show_storage_error(esp_err_t error)
 {
+  if (s_ui.radar_visit_active) submit_radar_action(APP_RADAR_LATEST);
   cancel_alarm_confirmation();
   lv_obj_t *screen = lv_screen_active();
   lv_obj_clean(screen);

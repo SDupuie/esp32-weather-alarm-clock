@@ -25,7 +25,8 @@
  * press popovers. Only mode selection needs a local callback. */
 #define KEY (LV_BUTTONMATRIX_CTRL_POPOVER | 1)
 #define UTILITY (LV_KEYBOARD_CTRL_BUTTON_FLAGS | 1)
-#define WIDE (LV_KEYBOARD_CTRL_BUTTON_FLAGS | 2)
+#define MODE (LV_KEYBOARD_CTRL_BUTTON_FLAGS | 5)
+#define BOTTOM_UTILITY (LV_KEYBOARD_CTRL_BUTTON_FLAGS | 3)
 
 static const char *const SETTINGS_KEYBOARD_LOWER_MAP[] = {
   "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
@@ -55,17 +56,18 @@ static const lv_buttonmatrix_ctrl_t SETTINGS_KEYBOARD_LETTER_CTRL[] = {
   KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY,
   KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, 1,
   UTILITY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY,
-  WIDE, UTILITY, 6, 1, 1, UTILITY
+  MODE, BOTTOM_UTILITY, 14, 3, 3, BOTTOM_UTILITY
 };
 static const lv_buttonmatrix_ctrl_t SETTINGS_KEYBOARD_SYMBOLS_CTRL[] = {
   KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, 1,
   KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY,
   UTILITY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY, KEY,
-  WIDE, UTILITY, 6, 1, 1, UTILITY
+  MODE, BOTTOM_UTILITY, 14, 3, 3, BOTTOM_UTILITY
 };
 #undef KEY
 #undef UTILITY
-#undef WIDE
+#undef MODE
+#undef BOTTOM_UTILITY
 
 typedef enum { SAVE_DEVICE, SAVE_DISPLAY, SAVE_WEATHER, SAVE_ALARM, SAVE_TOGGLE, SAVE_MACHINE } save_kind_t;
 typedef struct {
@@ -122,7 +124,7 @@ static struct {
   bool field_error;
   notice_kind_t notice_kind;
   lv_obj_t *percent_values[3];
-  lv_obj_t *solar_times[2], *solar_note, *solar_description;
+  lv_obj_t *solar_times[2], *solar_note, *solar_description, *solar_summary;
   solar_times_t solar;
   bool clock_usable;
   time_t clock_utc;
@@ -131,6 +133,13 @@ static struct {
   /* Weather has an independent draft while its Device parent keeps edits. */
   device_config_t held_device_draft;
   bool holding_device_draft;
+  /* Bounded child snapshots restore only the fields that child edits. */
+  struct { device_config_weather_provider_t provider; char key[DEVICE_CONFIG_WEATHER_KEY_LEN]; } provider_start;
+  struct { uint32_t watches, warnings; device_config_alert_updates_t updates; bool night; } alerts_start;
+  uint32_t family_start;
+  device_config_alert_updates_t update_start;
+  lv_obj_t *alert_list;
+  int alert_scroll;
   connectivity_scan_result_t networks[SCAN_LIMIT];
   size_t network_count;
   esp_err_t scan_error;
@@ -142,12 +151,16 @@ static struct {
 enum {
   ACTION_BACK = 100, ACTION_DONE, ACTION_CANCEL, ACTION_SAVE,
   ACTION_ALARM_TOGGLE, ACTION_FACE, ACTION_FORMAT, ACTION_ZERO,
-  ACTION_UNITS, ACTION_SHARING, ACTION_SCAN, ACTION_MANUAL, ACTION_PROVIDER,
+  ACTION_UNITS, ACTION_SHARING, ACTION_SCAN, ACTION_MANUAL,
   ACTION_PREVIEW, ACTION_CLEAR_KEY, ACTION_MACHINE_PLAY, ACTION_MACHINE_RETRY,
   ACTION_HOUR_UP, ACTION_HOUR_DOWN, ACTION_MINUTE_UP, ACTION_MINUTE_DOWN,
   ACTION_AM, ACTION_PM, ACTION_WEEKDAYS, ACTION_EVERY_DAY, ACTION_REPEAT_NONE,
   ACTION_OFFSET_BEFORE, ACTION_OFFSET_AT, ACTION_OFFSET_AFTER,
   ACTION_OFFSET_MINUS, ACTION_OFFSET_PLUS,
+  ACTION_PROVIDER_METEO, ACTION_PROVIDER_CROSSING, ACTION_ALERT_NIGHT,
+  ACTION_ALERT_OFF, ACTION_ALERT_ALL,
+  ACTION_ALERT_UPDATE_BASE = 170,
+  ACTION_ALERT_TYPE_BASE = 400,
   ACTION_DAY_BASE = 200, ACTION_SOUND_BASE = 220,
   ACTION_SNOOZE_BASE = 230, ACTION_MODE_BASE = 240,
   ACTION_NETWORK_BASE = 260, ACTION_MACHINE_SOUND_BASE = 280, ACTION_MACHINE_TIMER_BASE = 300
@@ -160,11 +173,12 @@ static void scan_networks(void);
 static void navigate(wac_settings_view_t view);
 static void submit_save(save_kind_t kind);
 static void focus_validation(wac_settings_view_t view, int field_id, const char *text);
+static void refresh_solar(void);
 
 /* Updating these shared color styles preserves the active editor, its cursor
  * and keyboard. Appearance is supplied by the Night Shift owner through ui.c. */
 enum { STYLE_PRIMARY, STYLE_MUTED, STYLE_ACCENT, STYLE_BUTTON,
-  STYLE_SELECTED, STYLE_TRACK, STYLE_TRACK_ON, STYLE_KNOB, STYLE_RANGE, STYLE_SCROLL_TRACK, STYLE_SCROLL_THUMB, STYLE_COUNT };
+  STYLE_SELECTED, STYLE_TRACK, STYLE_TRACK_ON, STYLE_KNOB, STYLE_RANGE, STYLE_SCROLL_TRACK, STYLE_SCROLL_THUMB, STYLE_CHOICE, STYLE_CHOICE_ON, STYLE_COUNT };
 static lv_style_t s_palette[STYLE_COUNT];
 static bool s_palette_ready, s_night;
 
@@ -186,6 +200,7 @@ void wac_settings_apply_night(bool active)
   lv_style_set_border_color(&s_palette[STYLE_PRIMARY], primary());
   lv_style_set_text_color(&s_palette[STYLE_MUTED], muted());
   lv_style_set_text_color(&s_palette[STYLE_ACCENT], accent());
+  lv_style_set_border_color(&s_palette[STYLE_ACCENT], accent());
   lv_style_set_image_recolor(&s_palette[STYLE_PRIMARY], primary());
   lv_style_set_image_recolor_opa(&s_palette[STYLE_PRIMARY], LV_OPA_COVER);
   lv_style_set_image_recolor(&s_palette[STYLE_ACCENT], accent());
@@ -202,6 +217,10 @@ void wac_settings_apply_night(bool active)
   lv_style_set_bg_color(&s_palette[STYLE_KNOB], primary());
   lv_style_set_bg_color(&s_palette[STYLE_SCROLL_TRACK], muted());
   lv_style_set_bg_color(&s_palette[STYLE_SCROLL_THUMB], accent());
+  lv_style_set_bg_color(&s_palette[STYLE_CHOICE], lv_color_hex(active ? 0x321c20 : 0x17263b));
+  lv_style_set_border_color(&s_palette[STYLE_CHOICE], muted());
+  lv_style_set_bg_color(&s_palette[STYLE_CHOICE_ON], selected);
+  lv_style_set_border_color(&s_palette[STYLE_CHOICE_ON], accent());
   lv_style_set_bg_color(&s_palette[STYLE_RANGE], lv_color_hex(active ? 0xc17a7a : 0x78b8ff));
   for (int i = 0; i < STYLE_COUNT; ++i) lv_obj_report_style_change(&s_palette[i]);
   if (s_settings.root) lv_obj_set_style_bg_color(s_settings.root, lv_color_hex(active ? 0x18090c : 0x07101c), 0);
@@ -306,10 +325,13 @@ static lv_obj_t *entry_box(const char *title, const char *subtitle, int action, 
     else if (solar) lv_label_set_long_mode(detail, LV_LABEL_LONG_CLIP);
     lv_obj_update_layout(detail);
     int subtitle_height = lv_obj_get_height(detail);
-    int stack_height = title_height + 6 + subtitle_height;
+    int gap = action == WAC_SETTINGS_WATCH_SOUNDS || action == WAC_SETTINGS_WARNING_SOUNDS
+      || action == WAC_SETTINGS_UPDATE_SOUNDS ? 7 : 6;
+    int stack_height = title_height + gap + subtitle_height;
     lv_obj_align(title_obj, LV_ALIGN_LEFT_MID, 0, (title_height - stack_height) / 2);
     lv_obj_align(detail, LV_ALIGN_LEFT_MID, 0, (stack_height - subtitle_height) / 2);
     if (action == WAC_SETTINGS_WIFI) s_settings.wifi_summary = detail;
+    if (action == WAC_SETTINGS_NIGHT_SOLAR) s_settings.solar_summary = detail;
   }
   return obj;
 }
@@ -322,19 +344,165 @@ static void entry_row(const char *title, const char *subtitle, int action, int y
 static void value_row(const char *title, const char *value, int action, int y)
 {
   lv_obj_t *obj = button_box(action, 140, y, 520, 96, false);
-  lv_obj_t *title_obj = label(obj, title, 0, 0, action == ACTION_PROVIDER ? 200 : 260, &lv_font_montserrat_28);
+  lv_obj_t *title_obj = label(obj, title, 0, 0, 260, &lv_font_montserrat_28);
   lv_obj_set_style_text_align(title_obj, LV_TEXT_ALIGN_LEFT, 0);
   lv_obj_align(title_obj, LV_ALIGN_LEFT_MID, 0, 0);
-  lv_obj_t *value_obj = label(obj, value, 0, 0, action == ACTION_PROVIDER ? 260 : 200, &lv_font_montserrat_28);
+  lv_obj_t *value_obj = label(obj, value, 0, 0, 200, &lv_font_montserrat_28);
   lv_obj_add_style(value_obj, &s_palette[STYLE_ACCENT], 0);
   lv_obj_set_style_text_align(value_obj, LV_TEXT_ALIGN_RIGHT, 0);
   lv_obj_align(value_obj, LV_ALIGN_RIGHT_MID, 0, 0);
 }
 
+/* Provider and Alerts keep their values beside the chevron, as in Weather. */
+static void weather_value_row(const char *title, const char *value, int action, int y)
+{
+  lv_obj_t *obj = button_box(action, 140, y, 520, 96, false);
+  lv_obj_t *caption = label(obj, title, 0, 0, 180, &lv_font_montserrat_28);
+  lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_align(caption, LV_ALIGN_LEFT_MID, 0, 0);
+  lv_obj_t *detail = label(obj, value, 0, 0, 300, &wac_font_settings_24);
+  lv_obj_add_style(detail, &s_palette[STYLE_MUTED], 0);
+  lv_obj_set_style_text_align(detail, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_align(detail, LV_ALIGN_RIGHT_MID, -46, 0);
+  chevron(obj, false);
+}
+
+static void child_footer(void)
+{
+  button("Cancel", ACTION_CANCEL, 178, 646, 206, 88, false);
+  button("Done", ACTION_DONE, 412, 646, 210, 88, true);
+}
+
+static void alarm_volume_note(void)
+{
+  lv_obj_t *caption = label(s_settings.body, "Uses alarm volume", 150, 174, 500, &lv_font_montserrat_28);
+  lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
+}
+
+static void radio(lv_obj_t *parent, bool selected, bool right)
+{
+  lv_obj_t *circle = lv_obj_create(parent);
+  lv_obj_remove_style_all(circle);
+  lv_obj_set_size(circle, 30, 30);
+  lv_obj_add_style(circle, &s_palette[selected ? STYLE_CHOICE_ON : STYLE_CHOICE], 0);
+  lv_obj_set_style_radius(circle, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(circle, 2, 0);
+  lv_obj_set_style_bg_opa(circle, LV_OPA_TRANSP, 0);
+  lv_obj_align(circle, right ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID, 0, 0);
+  lv_obj_remove_flag(circle, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+  if (selected) {
+    lv_obj_t *dot = lv_obj_create(circle);
+    lv_obj_remove_style_all(dot);
+    /* Five-pixel inset is measured from the inside of the two-pixel border. */
+    lv_obj_set_size(dot, 16, 16);
+    lv_obj_center(dot);
+    lv_obj_add_style(dot, &s_palette[STYLE_SCROLL_THUMB], 0);
+    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+  }
+}
+
+static void family_summary(char *text, size_t size, uint32_t mask, bool warning)
+{
+  if (!mask) snprintf(text, size, "Off");
+  else if (mask == (warning ? UINT32_MAX : DEVICE_CONFIG_ALERT_WATCH_MASK))
+    snprintf(text, size, "All %s", warning ? "warnings" : "watches");
+  else {
+    unsigned count = 0;
+    for (; mask; mask &= mask - 1) ++count;
+    snprintf(text, size, "%u selected", count);
+  }
+}
+
+static const char *const alert_update_labels[] = {"Off", "Increased danger only", "All updates"};
+
+static lv_obj_t *scrolling_list(int height)
+{
+  lv_obj_t *list = lv_obj_create(s_settings.body);
+  lv_obj_remove_style_all(list);
+  lv_obj_set_pos(list, 140, 212);
+  /* The trailing gutter keeps all 520 pixels of row content and places the
+   * native scrollbar twelve pixels beyond its right edge. */
+  lv_obj_set_size(list, 542, height);
+  lv_obj_set_style_pad_right(list, 22, 0);
+  lv_obj_set_scroll_dir(list, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
+  lv_obj_set_style_width(list, 10, LV_PART_SCROLLBAR);
+  lv_obj_set_style_radius(list, LV_RADIUS_CIRCLE, LV_PART_SCROLLBAR);
+  lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_SCROLLBAR);
+  lv_obj_add_style(list, &s_palette[STYLE_SCROLL_THUMB], LV_PART_SCROLLBAR);
+  return list;
+}
+
+static void scrolling_list_track(lv_obj_t *list)
+{
+  lv_obj_update_layout(list);
+  if (lv_obj_get_scroll_top(list) + lv_obj_get_scroll_bottom(list) <= 0) return;
+  lv_obj_t *track = lv_obj_create(lv_obj_get_parent(list));
+  lv_obj_remove_style_all(track);
+  lv_obj_set_pos(track, 672, 212);
+  lv_obj_set_size(track, 10, lv_obj_get_height(list));
+  lv_obj_set_style_radius(track, LV_RADIUS_CIRCLE, 0);
+  lv_obj_add_style(track, &s_palette[STYLE_SCROLL_TRACK], 0);
+  lv_obj_set_style_bg_opa(track, 97, 0);
+  lv_obj_remove_flag(track, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_move_to_index(track, lv_obj_get_index(list));
+}
+
+static void alert_sound_picker(bool warning)
+{
+  uint32_t mask = warning ? s_settings.draft.alert_warning_sounds : s_settings.draft.alert_watch_sounds;
+  uint32_t all = warning ? UINT32_MAX : DEVICE_CONFIG_ALERT_WATCH_MASK;
+  lv_obj_t *list = s_settings.alert_list = scrolling_list(402);
+  s_settings.body = list;
+  for (int i = 0; i < 2; ++i) {
+    bool selected = i ? mask == all : !mask;
+    lv_obj_t *obj = button_box(i ? ACTION_ALERT_ALL : ACTION_ALERT_OFF, 0, i * 102, 520, 92, selected);
+    radio(obj, selected, false);
+    lv_obj_t *caption = label(obj, i ? warning ? "All warnings" : "All watches" : "Off", 48, 0, 418, &lv_font_montserrat_28);
+    lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_align(caption, LV_ALIGN_LEFT_MID, 48, 0);
+  }
+  size_t count;
+  const weather_alert_type_t *catalog = weather_client_alert_catalog(&count);
+  int y = 204;
+  for (size_t i = 0; i < count; ++i) {
+    if (catalog[i].warning != warning) continue;
+    bool selected = mask != all && (mask & (UINT32_C(1) << catalog[i].bit));
+    lv_obj_t *obj = button_box(ACTION_ALERT_TYPE_BASE + i, 0, y, 520, 92, false);
+    if (selected) lv_obj_add_style(obj, &s_palette[STYLE_ACCENT], 0);
+    lv_obj_t *caption = label(obj, catalog[i].name, 50, 0, 416, &lv_font_montserrat_28);
+    lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_style_text_line_space(caption, 6, 0);
+    lv_obj_update_layout(caption);
+    int height = lv_obj_get_height(caption) + 32;
+    if (height < 92) height = 92;
+    lv_obj_set_height(obj, height);
+    lv_obj_align(caption, LV_ALIGN_LEFT_MID, 50, 0);
+    lv_obj_t *check = lv_obj_create(obj);
+    lv_obj_remove_style_all(check);
+    lv_obj_set_size(check, 32, 32);
+    lv_obj_set_style_radius(check, 6, 0);
+    lv_obj_set_style_border_width(check, 2, 0);
+    lv_obj_set_style_bg_opa(check, LV_OPA_COVER, 0);
+    lv_obj_add_style(check, &s_palette[selected ? STYLE_CHOICE_ON : STYLE_CHOICE], 0);
+    lv_obj_align(check, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_remove_flag(check, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    if (selected) lv_obj_center(image_icon(check, &wac_icon_check, STYLE_PRIMARY));
+    y += height + 10;
+  }
+  s_settings.body = s_settings.root;
+  scrolling_list_track(list);
+  lv_obj_scroll_to_y(list, s_settings.alert_scroll, LV_ANIM_OFF);
+  child_footer();
+}
+
 static lv_obj_t *switch_row(const char *title, bool enabled, int action, int y)
 {
   lv_obj_t *obj = button_box(action, 140, y, 520, 96, false);
-  lv_obj_t *title_obj = label(obj, title, 0, 0, 260, &lv_font_montserrat_28);
+  lv_obj_t *title_obj = label(obj, title, 0, 0, action == ACTION_ALERT_NIGHT ? 290 : 260, &lv_font_montserrat_28);
+  if (action == ACTION_ALERT_NIGHT) lv_obj_set_height(title_obj, lv_font_get_line_height(&lv_font_montserrat_28));
   lv_obj_set_style_text_align(title_obj, LV_TEXT_ALIGN_LEFT, 0);
   lv_obj_align(title_obj, LV_ALIGN_LEFT_MID, 0, 0);
   lv_obj_t *value = label(obj, enabled ? "On" : "Off", 0, 0, 80, &lv_font_montserrat_28);
@@ -369,7 +537,7 @@ static void check_icon(lv_obj_t *parent)
 
 static void arrow_button(int action, int x, int y, const lv_image_dsc_t *source)
 {
-  lv_obj_t *obj = button_box(action, x, y, 130, 96, false);
+  lv_obj_t *obj = button_box(action, x, y, 130, 80, false);
   lv_obj_center(image_icon(obj, source, STYLE_PRIMARY));
 }
 
@@ -402,6 +570,7 @@ static void network_row(const connectivity_scan_result_t *network, size_t index)
   lv_obj_t *obj = button_box(ACTION_NETWORK_BASE + index, 0, index * 108, 520, 96, false);
   lv_obj_t *title = label(obj, network->ssid, 0, 0, 420, &lv_font_montserrat_28);
   lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+  lv_obj_set_height(title, lv_font_get_line_height(&lv_font_montserrat_28));
   lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_LEFT, 0);
   char text[64];
   snprintf(text, sizeof(text), "%s · %d dBm", network->requires_password ? "Secured" : "Open", network->rssi);
@@ -546,7 +715,7 @@ static void stop_preview(void)
 
 static void refresh_button(void)
 {
-  lv_obj_t *obj = icon_button("Refresh", ACTION_SCAN, 270, 664, 260, 80,
+  lv_obj_t *obj = icon_button("Refresh", ACTION_SCAN, 270, 650, 260, 80,
     &wac_icon_refresh, true, false);
   lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(obj, 0, 0);
@@ -619,7 +788,7 @@ static void refresh_notice(void)
       case NOTICE_SAVE_ERROR: text = "Couldn't save settings.\nTry Save again."; break;
       case NOTICE_LOCATION_CHECKING: text = "Checking Location…"; break;
       case NOTICE_PROVIDER_CHECKING: text = "Checking Weather…"; break;
-      case NOTICE_PROVIDER_ERROR: text = "Weather check failed.\nTry Save again."; break;
+      case NOTICE_PROVIDER_ERROR: text = "Check failed. Try again."; break;
       default: break;
     }
   } else if (!s_settings.field_error && view == WAC_SETTINGS_CREDENTIALS
@@ -637,12 +806,16 @@ static void refresh_notice(void)
     }
   }
   if (view == WAC_SETTINGS_WEATHER) {
+    bool validation_notice = !s_settings.field_error && !s_settings.active_input
+      && (s_settings.notice_kind == NOTICE_LOCATION_CHECKING
+        || s_settings.notice_kind == NOTICE_PROVIDER_CHECKING
+        || s_settings.notice_kind == NOTICE_PROVIDER_ERROR);
     bool two_lines = strchr(text, '\n') != NULL;
-    lv_obj_set_pos(s_settings.status, s_settings.field_error ? 230 : 245,
-      two_lines ? 170 : 178);
-    lv_obj_set_width(s_settings.status, s_settings.field_error ? 340 : 310);
+    lv_obj_set_pos(s_settings.status, validation_notice ? 150 : s_settings.field_error ? 230 : 245,
+      validation_notice ? 174 : two_lines ? 170 : 178);
+    lv_obj_set_width(s_settings.status, validation_notice ? 500 : s_settings.field_error ? 340 : 310);
     lv_obj_set_style_text_font(s_settings.status,
-      s_settings.field_error || two_lines ? &lv_font_montserrat_18
+      validation_notice ? &wac_font_settings_28 : s_settings.field_error || two_lines ? &lv_font_montserrat_18
       : strstr(text, "…") ? &wac_font_settings_26 : &lv_font_montserrat_22, 0);
   }
   lv_label_set_text(s_settings.status, text);
@@ -654,9 +827,11 @@ void wac_settings_update_alarm(const device_config_t *config, const wac_alarm_sn
   s_settings.alarm = *alarm;
   s_settings.alarm_snapshot_valid = true;
   bool enabled_changed = s_settings.draft.alarm_enabled != config->alarm_enabled;
+  bool location_ready_changed = s_settings.applied.location_ready != config->location_ready;
   s_settings.applied = *config;
   s_settings.baseline.alarm_enabled = config->alarm_enabled;
   s_settings.draft.alarm_enabled = config->alarm_enabled;
+  if (location_ready_changed) refresh_solar();
   /* Auto-Off can arrive while any nested editor is open. Change only the
    * immediate switch, retaining all other draft fields and active controls. */
   if (enabled_changed && s_settings.toggle_button) {
@@ -673,9 +848,11 @@ void wac_settings_update_alarm(const device_config_t *config, const wac_alarm_sn
 void wac_settings_update_clock(const wac_time_snapshot_t *clock)
 {
   if (!clock) return;
+  bool usability_changed = s_settings.clock_usable != clock->usable;
   s_settings.clock_usable = clock->usable;
   s_settings.clock_utc = clock->utc_now;
   if (wac_ui_settings_view() == WAC_SETTINGS_ALARM) refresh_notice();
+  if (usability_changed) refresh_solar();
 }
 
 static void show_notice(const char *text)
@@ -908,7 +1085,8 @@ static void field_changed(lv_event_t *event)
 static void field(const char *title, const char *value, int field_id, size_t length, int y, bool password)
 {
   bool compact = wac_ui_settings_view() == WAC_SETTINGS_DEVICE
-    || wac_ui_settings_view() == WAC_SETTINGS_WEATHER;
+    || wac_ui_settings_view() == WAC_SETTINGS_WEATHER
+    || wac_ui_settings_view() == WAC_SETTINGS_PROVIDER;
   bool disabled = field_id == FIELD_API_KEY && s_settings.draft.weather_provider != DEVICE_CONFIG_WEATHER_VISUAL_CROSSING;
   lv_obj_t *block = compact ? lv_button_create(s_settings.body) : lv_obj_create(s_settings.body);
   lv_obj_remove_style_all(block);
@@ -970,10 +1148,12 @@ static void field(const char *title, const char *value, int field_id, size_t len
     lv_obj_add_event_cb(block, field_focus, LV_EVENT_CLICKED, obj);
     lv_obj_remove_flag(caption, LV_OBJ_FLAG_CLICKABLE);
     lv_label_set_long_mode(caption, LV_LABEL_LONG_DOT);
-    lv_obj_t *summary = label(block, field_summary(field_id), 20, 53, 434, &wac_font_settings_24);
+    lv_obj_t *summary = label(block, field_summary(field_id), 20, 53, 434, field_id == FIELD_API_KEY ? &lv_font_montserrat_22 : &wac_font_settings_24);
     lv_obj_add_style(summary, &s_palette[STYLE_MUTED], 0);
     lv_obj_set_style_text_align(summary, LV_TEXT_ALIGN_LEFT, 0);
     lv_label_set_long_mode(summary, LV_LABEL_LONG_DOT);
+    if (field_id == FIELD_ROOM || field_id == FIELD_ID)
+      lv_obj_set_height(summary, lv_font_get_line_height(&wac_font_settings_24));
     lv_obj_remove_flag(summary, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t *arrow = image_icon(block, &wac_icon_chevron_right, STYLE_PRIMARY);
     lv_obj_set_pos(arrow, 466, 32);
@@ -1080,20 +1260,20 @@ static void time_picker(int hour, int minute, const device_config_t *draft)
   caption = label(s_settings.body, "Minute", 460, 196, 170, &lv_font_montserrat_28);
   lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
   arrow_button(ACTION_HOUR_UP, 200, 240, &wac_icon_chevron_up);
-  arrow_button(ACTION_HOUR_DOWN, 200, 472, &wac_icon_chevron_down);
+  arrow_button(ACTION_HOUR_DOWN, 200, 466, &wac_icon_chevron_down);
   arrow_button(ACTION_MINUTE_UP, 470, 240, &wac_icon_chevron_up);
-  arrow_button(ACTION_MINUTE_DOWN, 470, 472, &wac_icon_chevron_down);
+  arrow_button(ACTION_MINUTE_DOWN, 470, 466, &wac_icon_chevron_down);
   char text[8];
   snprintf(text, sizeof(text), twelve ? "%d" : "%02d", twelve ? (hour % 12 ? hour % 12 : 12) : hour);
-  label(s_settings.body, text, 180, 355, 170, &wac_font_settings_104);
+  label(s_settings.body, text, 180, 339, 170, &wac_font_settings_104);
   snprintf(text, sizeof(text), "%02d", minute);
-  label(s_settings.body, text, 450, 355, 170, &wac_font_settings_104);
-  label(s_settings.body, ":", 365, 357, 70, &wac_font_settings_104);
+  label(s_settings.body, text, 450, 339, 170, &wac_font_settings_104);
+  label(s_settings.body, ":", 365, 341, 70, &wac_font_settings_104);
   if (twelve) {
-    button("AM", ACTION_AM, 270, 588, 120, 72, hour < 12);
-    button("PM", ACTION_PM, 410, 588, 120, 72, hour >= 12);
+    button("AM", ACTION_AM, 270, 566, 120, 72, hour < 12);
+    button("PM", ACTION_PM, 410, 566, 120, 72, hour >= 12);
   }
-  button("Done", ACTION_DONE, 270, 682, 260, 88, true);
+  button("Done", ACTION_DONE, 270, 650, 260, 80, true);
 }
 
 static void change_time(int action)
@@ -1127,14 +1307,39 @@ static void offset_label(char *text, size_t size, int value, bool sunset)
   else snprintf(text, size, "%d min %s %s", abs(value), value < 0 ? "before" : "after", event);
 }
 
+static const char *solar_unavailable(void)
+{
+  if (!s_settings.clock_usable) return "Waiting for Time Sync";
+  if (!s_settings.applied.location_ready) return "Weather Location Needed";
+  if (!s_settings.solar.available) return "Sunrise/sunset times unavailable";
+  return NULL;
+}
+
+static void format_solar_summary(char *text, size_t size)
+{
+  const device_config_t *draft = &s_settings.draft;
+  const char *unavailable = solar_unavailable();
+  if (draft->night_shift_mode == DEVICE_CONFIG_NIGHT_SOLAR && unavailable)
+    snprintf(text, size, "%s", unavailable);
+  else snprintf(text, size, "Sunset %s%d min · Sunrise %s%d min",
+    draft->night_sunset_offset_minutes > 0 ? "+" : "", draft->night_sunset_offset_minutes,
+    draft->night_sunrise_offset_minutes > 0 ? "+" : "", draft->night_sunrise_offset_minutes);
+}
+
 static void refresh_solar(void)
 {
+  if (s_settings.solar_summary) {
+    char summary[80];
+    format_solar_summary(summary, sizeof(summary));
+    lv_label_set_text(s_settings.solar_summary, summary);
+  }
   if (!s_settings.solar_note) return;
   const device_config_t *draft = &s_settings.draft;
+  const char *unavailable = solar_unavailable();
   struct tm start, end;
   time_t sunset = s_settings.solar.sunset + draft->night_sunset_offset_minutes * 60;
   time_t sunrise = s_settings.solar.sunrise + draft->night_sunrise_offset_minutes * 60;
-  bool available = s_settings.solar.available && s_settings.applied.location_ready
+  bool available = !unavailable
     && localtime_r(&sunset, &start) != NULL && localtime_r(&sunrise, &end) != NULL;
   char text[24];
   for (int i = 0; i < 2; ++i) {
@@ -1145,7 +1350,7 @@ static void refresh_solar(void)
     lv_label_set_text(s_settings.solar_times[i], text);
   }
   lv_label_set_text(s_settings.solar_note, available
-    ? "Starts tonight · Ends tomorrow" : "Sunrise/sunset times unavailable");
+    ? "Starts tonight · Ends tomorrow" : unavailable ? unavailable : "Sunrise/sunset times unavailable");
   lv_obj_set_y(s_settings.solar_note, available ? 514 : 518);
   lv_obj_set_style_text_font(s_settings.solar_note,
     available ? &wac_font_settings_24 : &lv_font_montserrat_28, 0);
@@ -1153,7 +1358,11 @@ static void refresh_solar(void)
   lv_obj_remove_style(s_settings.solar_note, &s_palette[STYLE_MUTED], 0);
   lv_obj_add_style(s_settings.solar_note, &s_palette[available ? STYLE_MUTED : STYLE_PRIMARY], 0);
   lv_label_set_text(s_settings.solar_description, !available
-    ? "Keeps the current appearance and\nbrightness until times are available."
+    ? !s_settings.clock_usable
+      ? "Keeps the current appearance and\nbrightness until time is available."
+      : !s_settings.applied.location_ready
+        ? "Set a weather location. Keeps the current\nappearance and brightness until ready."
+        : "Keeps the current appearance and\nbrightness until times are available."
     : draft->night_shift_mode == DEVICE_CONFIG_NIGHT_SOLAR
       ? "Updates each day for this location."
       : "Choose Sunset to Sunrise in Mode\nto use this schedule.");
@@ -1174,7 +1383,7 @@ void wac_settings_update_solar(const solar_times_t *events)
 
 static void offset_picker(int value, bool sunset)
 {
-  lv_obj_t *caption = label(s_settings.body, sunset ? "Night starts" : "Night ends", 150, 190, 500, &lv_font_montserrat_28);
+  lv_obj_t *caption = label(s_settings.body, sunset ? "Night starts" : "Night ends", 150, 174, 500, &lv_font_montserrat_28);
   lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
   button("Before", ACTION_OFFSET_BEFORE, 164, 244, 148, 88, value < 0);
   button("At", ACTION_OFFSET_AT, 326, 244, 148, 88, value == 0);
@@ -1193,7 +1402,7 @@ static void offset_picker(int value, bool sunset)
   offset_label(text, sizeof(text), value, sunset);
   caption = label(s_settings.body, text, 150, 560, 500, &lv_font_montserrat_28);
   lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
-  button("Done", ACTION_DONE, 270, 664, 260, 80, true);
+  button("Done", ACTION_DONE, 270, 650, 260, 80, true);
 }
 
 static void restart_timer(lv_timer_t *timer)
@@ -1263,7 +1472,9 @@ static void submit_save(save_kind_t kind)
   s_settings.machine_changed_while_saving = false;
   if (kind == SAVE_WEATHER && s_settings.draft.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
       && !has_text(s_settings.draft.weather_api_key)) {
-    focus_validation(WAC_SETTINGS_WEATHER, FIELD_API_KEY, "Enter a Visual Crossing API key.");
+    s_settings.provider_start.provider = s_settings.draft.weather_provider;
+    memcpy(s_settings.provider_start.key, s_settings.draft.weather_api_key, sizeof(s_settings.provider_start.key));
+    focus_validation(WAC_SETTINGS_PROVIDER, FIELD_API_KEY, "Enter a Visual Crossing API key.");
     return;
   }
   if (kind == SAVE_DEVICE && wac_ui_settings_view() == WAC_SETTINGS_CREDENTIALS
@@ -1400,13 +1611,13 @@ void wac_settings_close(void)
   ++s_settings.route;
   if (s_settings.root) lv_obj_delete(s_settings.root);
   s_settings.root = s_settings.body = s_settings.status = s_settings.keyboard = NULL;
-  s_settings.backdrop = s_settings.wifi_summary = NULL;
+  s_settings.backdrop = s_settings.wifi_summary = s_settings.alert_list = NULL;
   s_settings.preview_button = s_settings.preview_caption = NULL;
   s_settings.machine_button = s_settings.machine_status = s_settings.machine_volume = NULL;
   s_settings.machine_list = s_settings.machine_bar = s_settings.machine_thumb = s_settings.machine_retry = NULL;
   s_settings.heading = s_settings.back_button = s_settings.normal_note = s_settings.active_input = NULL;
   s_settings.save_button = s_settings.toggle_button = NULL;
-  s_settings.solar_note = s_settings.solar_description = NULL;
+  s_settings.solar_note = s_settings.solar_description = s_settings.solar_summary = NULL;
   memset(s_settings.solar_times, 0, sizeof(s_settings.solar_times));
   memset(s_settings.fields, 0, sizeof(s_settings.fields));
 }
@@ -1469,7 +1680,7 @@ static void navigate(wac_settings_view_t view)
   wac_ui_settings_navigate(view);
 }
 
-static void back(void)
+static void back(bool apply_child)
 {
   switch (wac_ui_settings_view()) {
     case WAC_SETTINGS_ENTRY: wac_ui_settings_close(); break;
@@ -1481,6 +1692,29 @@ static void back(void)
     case WAC_SETTINGS_DEVICE_SETUP:
       s_settings.draft = s_settings.baseline;
       navigate(WAC_SETTINGS_ENTRY); break;
+    case WAC_SETTINGS_PROVIDER:
+      if (!apply_child) {
+        s_settings.draft.weather_provider = s_settings.provider_start.provider;
+        memcpy(s_settings.draft.weather_api_key, s_settings.provider_start.key, sizeof(s_settings.draft.weather_api_key));
+      }
+      navigate(WAC_SETTINGS_WEATHER); break;
+    case WAC_SETTINGS_ALERTS:
+      if (!apply_child) {
+        s_settings.draft.alert_watch_sounds = s_settings.alerts_start.watches;
+        s_settings.draft.alert_warning_sounds = s_settings.alerts_start.warnings;
+        s_settings.draft.alert_update_sounds = s_settings.alerts_start.updates;
+        s_settings.draft.alert_night_sounds = s_settings.alerts_start.night;
+      }
+      navigate(WAC_SETTINGS_WEATHER); break;
+    case WAC_SETTINGS_WATCH_SOUNDS: case WAC_SETTINGS_WARNING_SOUNDS:
+      if (!apply_child) {
+        if (wac_ui_settings_view() == WAC_SETTINGS_WATCH_SOUNDS) s_settings.draft.alert_watch_sounds = s_settings.family_start;
+        else s_settings.draft.alert_warning_sounds = s_settings.family_start;
+      }
+      navigate(WAC_SETTINGS_ALERTS); break;
+    case WAC_SETTINGS_UPDATE_SOUNDS:
+      if (!apply_child) s_settings.draft.alert_update_sounds = s_settings.update_start;
+      navigate(WAC_SETTINGS_ALERTS); break;
     case WAC_SETTINGS_WEATHER:
       s_settings.draft = s_settings.holding_device_draft
         ? s_settings.held_device_draft : s_settings.baseline;
@@ -1543,7 +1777,7 @@ static void action_event(lv_event_t *event)
   }
   stop_preview();
   s_settings.preview_submission_error = ESP_OK;
-  if (action > WAC_SETTINGS_NONE && action <= WAC_SETTINGS_MACHINE_TIMER) {
+  if (action > WAC_SETTINGS_NONE && action <= WAC_SETTINGS_UPDATE_SOUNDS) {
     if (action == WAC_SETTINGS_MACHINE) { wac_settings_start_machine(false); return; }
     if (action == WAC_SETTINGS_WEATHER && wac_ui_settings_view() == WAC_SETTINGS_DEVICE_SETUP) {
       s_settings.held_device_draft = s_settings.draft;
@@ -1554,11 +1788,32 @@ static void action_event(lv_event_t *event)
       s_settings.holding_device_draft = false;
       s_settings.baseline = s_settings.draft = s_settings.applied;
     }
+    if (action == WAC_SETTINGS_PROVIDER) {
+      s_settings.provider_start.provider = s_settings.draft.weather_provider;
+      memcpy(s_settings.provider_start.key, s_settings.draft.weather_api_key, sizeof(s_settings.provider_start.key));
+    } else if (action == WAC_SETTINGS_ALERTS) {
+      s_settings.alerts_start.watches = s_settings.draft.alert_watch_sounds;
+      s_settings.alerts_start.warnings = s_settings.draft.alert_warning_sounds;
+      s_settings.alerts_start.updates = s_settings.draft.alert_update_sounds;
+      s_settings.alerts_start.night = s_settings.draft.alert_night_sounds;
+    } else if (action == WAC_SETTINGS_WATCH_SOUNDS || action == WAC_SETTINGS_WARNING_SOUNDS) {
+      s_settings.family_start = action == WAC_SETTINGS_WATCH_SOUNDS
+        ? s_settings.draft.alert_watch_sounds : s_settings.draft.alert_warning_sounds;
+      s_settings.alert_scroll = 0;
+    } else if (action == WAC_SETTINGS_UPDATE_SOUNDS) s_settings.update_start = s_settings.draft.alert_update_sounds;
     navigate(action);
     if (action == WAC_SETTINGS_WIFI) scan_networks();
     return;
   }
-  if (action == ACTION_BACK || action == ACTION_DONE || action == ACTION_CANCEL) { back(); return; }
+  if (action == ACTION_BACK || action == ACTION_DONE || action == ACTION_CANCEL) {
+    if (action == ACTION_DONE && wac_ui_settings_view() == WAC_SETTINGS_PROVIDER
+        && s_settings.draft.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
+        && !has_text(s_settings.draft.weather_api_key)) {
+      focus_validation(WAC_SETTINGS_PROVIDER, FIELD_API_KEY, "Enter a Visual Crossing API key.");
+      return;
+    }
+    back(action == ACTION_DONE); return;
+  }
   if (action == ACTION_SAVE) {
     submit_save(wac_ui_settings_view() == WAC_SETTINGS_WEATHER ? SAVE_WEATHER : wac_ui_settings_view() == WAC_SETTINGS_ALARM ? SAVE_ALARM : wac_ui_settings_view() == WAC_SETTINGS_DISPLAY ? SAVE_DISPLAY : SAVE_DEVICE);
     return;
@@ -1607,10 +1862,27 @@ static void action_event(lv_event_t *event)
   else if (action == ACTION_ZERO && strcmp(draft->time_format, "24") != 0)
     draft->leading_zero_12h = !draft->leading_zero_12h;
   else if (action == ACTION_UNITS) snprintf(s_settings.draft.units, sizeof(s_settings.draft.units), "%s", strcmp(s_settings.draft.units, "metric") == 0 ? "imperial" : "metric");
-  else if (action == ACTION_PROVIDER) {
-    draft->weather_provider = draft->weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
-      ? DEVICE_CONFIG_WEATHER_OPEN_METEO : DEVICE_CONFIG_WEATHER_VISUAL_CROSSING;
-    show_notice("");
+  else if (action == ACTION_PROVIDER_METEO || action == ACTION_PROVIDER_CROSSING)
+    draft->weather_provider = action == ACTION_PROVIDER_METEO ? DEVICE_CONFIG_WEATHER_OPEN_METEO : DEVICE_CONFIG_WEATHER_VISUAL_CROSSING;
+  else if (action == ACTION_ALERT_NIGHT) draft->alert_night_sounds = !draft->alert_night_sounds;
+  else if (action >= ACTION_ALERT_UPDATE_BASE && action < ACTION_ALERT_UPDATE_BASE + 3)
+    draft->alert_update_sounds = action - ACTION_ALERT_UPDATE_BASE;
+  else if (action == ACTION_ALERT_OFF || action == ACTION_ALERT_ALL || action >= ACTION_ALERT_TYPE_BASE) {
+    bool warning = wac_ui_settings_view() == WAC_SETTINGS_WARNING_SOUNDS;
+    uint32_t *mask = warning ? &draft->alert_warning_sounds : &draft->alert_watch_sounds;
+    uint32_t all = warning ? UINT32_MAX : DEVICE_CONFIG_ALERT_WATCH_MASK;
+    if (s_settings.alert_list) s_settings.alert_scroll = lv_obj_get_scroll_y(s_settings.alert_list);
+    if (action == ACTION_ALERT_OFF) *mask = 0;
+    else if (action == ACTION_ALERT_ALL) *mask = all;
+    else {
+      size_t count;
+      const weather_alert_type_t *catalog = weather_client_alert_catalog(&count);
+      size_t index = action - ACTION_ALERT_TYPE_BASE;
+      if (index < count && catalog[index].warning == warning) {
+        if (*mask == all) *mask = 0;
+        *mask ^= UINT32_C(1) << catalog[index].bit;
+      }
+    }
   }
   else if (action == ACTION_SHARING) snprintf(draft->message_sharing, sizeof(draft->message_sharing), "%s", strcmp(draft->message_sharing, "shared") == 0 ? "single" : "shared");
   else if (action >= ACTION_DAY_BASE && action < ACTION_DAY_BASE + 7) s_settings.draft.alarm_repeat_days ^= 1 << (action - ACTION_DAY_BASE);
@@ -1738,13 +2010,13 @@ void wac_settings_render(wac_settings_view_t view)
   if (!s_settings.root || view == WAC_SETTINGS_NONE) return;
   if (view != WAC_SETTINGS_SOUND_PICKER) stop_preview();
   lv_obj_clean(s_settings.root);
-  s_settings.status = s_settings.keyboard = s_settings.wifi_summary = NULL;
+  s_settings.status = s_settings.keyboard = s_settings.wifi_summary = s_settings.alert_list = NULL;
   s_settings.preview_button = s_settings.preview_caption = NULL;
   s_settings.machine_button = s_settings.machine_status = s_settings.machine_volume = NULL;
   s_settings.machine_list = s_settings.machine_bar = s_settings.machine_thumb = s_settings.machine_retry = NULL;
   s_settings.normal_note = s_settings.active_input = NULL;
   s_settings.save_button = s_settings.toggle_button = NULL;
-  s_settings.solar_note = s_settings.solar_description = NULL;
+  s_settings.solar_note = s_settings.solar_description = s_settings.solar_summary = NULL;
   memset(s_settings.solar_times, 0, sizeof(s_settings.solar_times));
   memset(s_settings.fields, 0, sizeof(s_settings.fields));
   memset(s_settings.percent_values, 0, sizeof(s_settings.percent_values));
@@ -1752,9 +2024,13 @@ void wac_settings_render(wac_settings_view_t view)
   s_settings.backdrop = lv_image_create(s_settings.root);
   lv_image_set_src(s_settings.backdrop, s_night ? &round_stage_night : &round_stage_day);
   lv_obj_remove_flag(s_settings.backdrop, LV_OBJ_FLAG_CLICKABLE);
-  const char *titles[] = {"", "Settings", "Device Setup", "Display", "Messaging", "Weather", "Wi-Fi", "Network Details", "Alarm", "Alarm Time", "Repeat", "Custom Days", "Sound & Snooze", "Alarm Sound", "Snooze", "Night Shift", "Night Shift Mode", "Fixed Schedule", "Night Starts", "Night Ends", "Sunrise/Sunset", "Sunset Offset", "Sunrise Offset", "Brightness", "Sound Machine", "Sound", "Sleep Timer"};
+  const char *titles[] = {"", "Settings", "Device Setup", "Display", "Messaging", "Weather", "Wi-Fi", "Network Details", "Alarm", "Alarm Time", "Repeat", "Custom Days", "Sound & Snooze", "Alarm Sound", "Snooze", "Night Shift", "Night Shift Mode", "Fixed Schedule", "Night Starts", "Night Ends", "Sunrise/Sunset", "Sunset Offset", "Sunrise Offset", "Brightness", "Sound Machine", "Sound", "Sleep Timer", "Provider", "Alerts", "Watch Sounds", "Warning Sounds", "Update Sounds"};
   s_settings.heading = label(s_settings.body, titles[view], 245, 128, 320, &lv_font_montserrat_36);
   lv_obj_set_style_text_letter_space(s_settings.heading, 1, 0);
+  if (view == WAC_SETTINGS_WARNING_SOUNDS) {
+    lv_obj_set_x(s_settings.heading, 235);
+    lv_obj_set_width(s_settings.heading, 340);
+  }
   s_settings.back_button = button_box(ACTION_BACK, 145, 104, 88, 88, false);
   chevron(s_settings.back_button, true);
   if (s_settings.restarting && s_settings.notice_kind == NOTICE_RESTART_SAVED_EDITOR
@@ -1836,7 +2112,7 @@ void wac_settings_render(wac_settings_view_t view)
       lv_obj_add_event_cb(range, machine_slider_changed, LV_EVENT_VALUE_CHANGED, NULL);
       s_settings.machine_status = label(s_settings.body, "Stopped", 150, 598, 500, &wac_font_settings_26);
       lv_obj_add_style(s_settings.machine_status, &s_palette[STYLE_MUTED], 0);
-      s_settings.machine_button = icon_button("Play", ACTION_MACHINE_PLAY, 270, 676, 260, 80, &wac_icon_play, true, true);
+      s_settings.machine_button = icon_button("Play", ACTION_MACHINE_PLAY, 270, 650, 260, 80, &wac_icon_play, true, true);
       refresh_machine();
       break;
     }
@@ -1879,7 +2155,7 @@ void wac_settings_render(wac_settings_view_t view)
       lv_obj_update_layout(s_settings.machine_list);
       lv_obj_scroll_to_y(s_settings.machine_list, s_settings.machine_scroll, LV_ANIM_OFF);
       machine_scroll_event(NULL);
-      button("Done", ACTION_DONE, 270, 676, 260, 80, true);
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true);
       break;
     }
     case WAC_SETTINGS_MACHINE_TIMER:
@@ -1887,10 +2163,10 @@ void wac_settings_render(wac_settings_view_t view)
         if (machine_timers[i]) snprintf(text, sizeof(text), "%u Minutes", machine_timers[i]);
         else snprintf(text, sizeof(text), "Continuous");
         bool selected = s_settings.machine_desired.timer == machine_timers[i];
-        if (selected) icon_button(text, ACTION_MACHINE_TIMER_BASE + i, 170, 212 + i * 92, 460, 80, &wac_icon_check, false, true);
-        else button(text, ACTION_MACHINE_TIMER_BASE + i, 170, 212 + i * 92, 460, 80, false);
+        if (selected) icon_button(text, ACTION_MACHINE_TIMER_BASE + i, 140, 212 + i * 86, 520, 76, &wac_icon_check, false, true);
+        else button(text, ACTION_MACHINE_TIMER_BASE + i, 140, 212 + i * 86, 520, 76, false);
       }
-      button("Done", ACTION_DONE, 270, 676, 260, 80, true);
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true);
       break;
     case WAC_SETTINGS_DEVICE_SETUP:
       wifi_summary(text, sizeof(text));
@@ -1917,33 +2193,67 @@ void wac_settings_render(wac_settings_view_t view)
       field("Device ID", d->device_id, FIELD_ID, sizeof(d->device_id), 320, false);
       value_row("House Messages", strcmp(d->message_sharing, "shared") == 0 ? "Shared" : "Single", ACTION_SHARING, 428);
       s_settings.normal_note = label(s_settings.body, "Each shared clock needs a distinct Device ID.", 140, 555, 520, &wac_font_settings_26);
-      button("Done", ACTION_DONE, 270, 664, 260, 80, true); break;
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true); break;
     case WAC_SETTINGS_WEATHER:
       field("Weather Location", d->location, FIELD_LOCATION, sizeof(d->location), 212, false);
-      value_row("Provider", (s_settings.draft.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING) ? "Visual Crossing" : "Open-Meteo", ACTION_PROVIDER, 320);
-      value_row("Units", strcmp(d->units, "metric") == 0 ? "Metric" : "Imperial", ACTION_UNITS, 428);
-      field("API Key", s_settings.draft.weather_api_key, FIELD_API_KEY, sizeof(s_settings.draft.weather_api_key), 536, true);
+      weather_value_row("Provider", d->weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING ? "Visual Crossing" : "Open-Meteo", WAC_SETTINGS_PROVIDER, 320);
+      weather_value_row("Alerts", d->alert_watch_sounds ? (d->alert_warning_sounds ? "Watches + Warnings" : "Watches")
+        : d->alert_warning_sounds ? "Warnings" : "Silent", WAC_SETTINGS_ALERTS, 428);
+      value_row("Units", strcmp(d->units, "metric") == 0 ? "Metric" : "Imperial", ACTION_UNITS, 536);
       s_settings.normal_note = label(s_settings.body, "Time zone is set automatically from this location.", 140, 359, 520, &lv_font_montserrat_22);
       /* Keep the nearest existing font on one line in the illustrated band. */
       lv_obj_set_style_text_letter_space(s_settings.normal_note, -1, 0);
       button("Cancel", ACTION_CANCEL, 178, 646, 206, 88, false);
-      lv_obj_t *save_button = button(s_settings.saving && s_settings.notice_kind == NOTICE_LOCATION_CHECKING
-        ? "Checking…" : "Save", ACTION_SAVE, 412, 646, 210, 88, true);
+      lv_obj_t *save_button = button("Save", ACTION_SAVE, 412, 646, 210, 88, true);
       lv_obj_set_style_text_font(lv_obj_get_child(save_button, 0), &wac_font_settings_28, 0);
       break;
+    case WAC_SETTINGS_PROVIDER:
+      for (int i = 0; i < 2; ++i) {
+        lv_obj_t *obj = entry_box(i ? "Visual Crossing" : "Open-Meteo", i ? "API key required" : "No API key required",
+          i ? ACTION_PROVIDER_CROSSING : ACTION_PROVIDER_METEO, 212 + i * 108,
+          d->weather_provider == (device_config_weather_provider_t)i);
+        radio(obj, d->weather_provider == (device_config_weather_provider_t)i, true);
+      }
+      if (d->weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING)
+        field("API Key", d->weather_api_key, FIELD_API_KEY, sizeof(d->weather_api_key), 428, true);
+      child_footer();
+      break;
+    case WAC_SETTINGS_ALERTS:
+      alarm_volume_note();
+      family_summary(text, sizeof(text), d->alert_watch_sounds, false);
+      entry_row("Watch Sounds", text, WAC_SETTINGS_WATCH_SOUNDS, 212);
+      family_summary(text, sizeof(text), d->alert_warning_sounds, true);
+      entry_row("Warning Sounds", text, WAC_SETTINGS_WARNING_SOUNDS, 320);
+      entry_row("Alert Update Sounds", alert_update_labels[d->alert_update_sounds], WAC_SETTINGS_UPDATE_SOUNDS, 428);
+      switch_row("Night Alert Sounds", d->alert_night_sounds, ACTION_ALERT_NIGHT, 536);
+      child_footer();
+      return;
+    case WAC_SETTINGS_WATCH_SOUNDS: case WAC_SETTINGS_WARNING_SOUNDS:
+      alert_sound_picker(view == WAC_SETTINGS_WARNING_SOUNDS);
+      return;
+    case WAC_SETTINGS_UPDATE_SOUNDS:
+      for (int i = 0; i < 3; ++i) {
+        lv_obj_t *obj = button_box(ACTION_ALERT_UPDATE_BASE + i, 140, 212 + i * 108, 520, 96,
+          d->alert_update_sounds == (device_config_alert_updates_t)i);
+        radio(obj, d->alert_update_sounds == (device_config_alert_updates_t)i, false);
+        lv_obj_t *caption = label(obj, alert_update_labels[i], 48, 0, 430, &lv_font_montserrat_28);
+        lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_align(caption, LV_ALIGN_LEFT_MID, 48, 0);
+      }
+      lv_obj_t *note = label(s_settings.body, "At least 10 minutes between sounds\nfor the same event", 140, 548, 520, &lv_font_montserrat_22);
+      lv_obj_add_style(note, &s_palette[STYLE_MUTED], 0);
+      lv_obj_set_style_text_line_space(note, 4, 0);
+      child_footer();
+      return;
     case WAC_SETTINGS_WIFI: {
       if (!s_settings.scanning && s_settings.scan_error == ESP_OK && s_settings.network_count) {
-        lv_obj_t *subtitle = label(s_settings.body, "Choose a Network", 150, 175, 500, &lv_font_montserrat_28);
+        lv_obj_t *subtitle = label(s_settings.body, "Choose a Network", 150, 174, 500, &lv_font_montserrat_28);
         lv_obj_add_style(subtitle, &s_palette[STYLE_MUTED], 0);
-        lv_obj_t *list = lv_obj_create(s_settings.body);
-        lv_obj_remove_style_all(list);
-        lv_obj_set_pos(list, 140, 220);
-        lv_obj_set_size(list, 520, 312);
-        lv_obj_set_scroll_dir(list, LV_DIR_VER);
-        lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_t *list = scrolling_list(312);
         s_settings.body = list;
         for (size_t i = 0; i < s_settings.network_count; ++i) network_row(&s_settings.networks[i], i);
         s_settings.body = s_settings.root;
+        scrolling_list_track(list);
       } else {
         status_mark(s_settings.scanning ? &wac_icon_wifi_mark : &wac_icon_wifi_off_mark);
         const char *title = s_settings.scanning ? "Scanning for Networks…"
@@ -1954,7 +2264,7 @@ void wac_settings_render(wac_settings_view_t view)
           150, 444, 500, &wac_font_settings_26);
         lv_obj_add_style(detail, &s_palette[STYLE_MUTED], 0);
       }
-      button("Manual Network", ACTION_MANUAL, 140, 544, 520, 96, false);
+      button("Manual Network", ACTION_MANUAL, 140, 536, 520, 96, false);
       refresh_button();
       return;
     }
@@ -1966,7 +2276,7 @@ void wac_settings_render(wac_settings_view_t view)
       button("Back", ACTION_BACK, 187, 646, 136, 88, false);
       button("Save & Restart", ACTION_SAVE, 345, 646, 268, 88, true); break;
     case WAC_SETTINGS_ALARM:
-      s_settings.status = label(s_settings.body, "", 180, 169, 440, &wac_font_settings_28);
+      s_settings.status = label(s_settings.body, "", 150, 174, 500, &wac_font_settings_28);
       lv_obj_add_style(s_settings.status, &s_palette[STYLE_MUTED], 0);
       refresh_notice();
       switch_row("Alarm", d->alarm_enabled, ACTION_ALARM_TOGGLE, 212);
@@ -1975,8 +2285,8 @@ void wac_settings_render(wac_settings_view_t view)
       repeat_summary(text, sizeof(text), d->alarm_repeat_days, true);
       value_entry("Repeat", text, WAC_SETTINGS_REPEAT, 428, 96);
       entry_row("Sound & Snooze", NULL, WAC_SETTINGS_SOUND, 536);
-      button("Cancel", ACTION_CANCEL, 178, 644, 206, 88, false);
-      button("Save", ACTION_SAVE, 412, 644, 210, 88, true);
+      button("Cancel", ACTION_CANCEL, 178, 646, 206, 88, false);
+      button("Save", ACTION_SAVE, 412, 646, 210, 88, true);
       return;
     case WAC_SETTINGS_ALARM_TIME: time_picker(d->alarm_hour, d->alarm_minute, d); return;
     case WAC_SETTINGS_REPEAT: {
@@ -1996,9 +2306,9 @@ void wac_settings_render(wac_settings_view_t view)
       }
       if (d->alarm_repeat_days) repeat_summary(text, sizeof(text), d->alarm_repeat_days, true);
       else snprintf(text, sizeof(text), "Rings once");
-      lv_obj_t *caption = label(s_settings.body, text, 155, 646, 490, &wac_font_settings_28);
+      lv_obj_t *caption = label(s_settings.body, text, 150, 174, 500, &wac_font_settings_28);
       lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
-      button("Done", ACTION_DONE, 270, 682, 260, 88, true);
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true);
       return;
     }
     case WAC_SETTINGS_REPEAT_CUSTOM: {
@@ -2022,7 +2332,7 @@ void wac_settings_render(wac_settings_view_t view)
       else snprintf(text, sizeof(text), "Rings once");
       caption = label(s_settings.body, text, 155, 542, 490, &wac_font_settings_28);
       lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
-      button("Done", ACTION_DONE, 270, 682, 260, 88, true);
+      button("Done", ACTION_DONE, 270, 646, 260, 88, true);
       return;
     }
     case WAC_SETTINGS_SOUND: {
@@ -2032,7 +2342,7 @@ void wac_settings_render(wac_settings_view_t view)
       slider("Volume", FIELD_VOLUME, d->alarm_volume, 452);
       lv_obj_t *hint = label(s_settings.body, "Sound rises gently to this level", 150, 598, 500, &wac_font_settings_26);
       lv_obj_add_style(hint, &s_palette[STYLE_MUTED], 0);
-      button("Done", ACTION_DONE, 270, 676, 260, 80, true);
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true);
       return;
     }
     case WAC_SETTINGS_SOUND_PICKER: {
@@ -2045,7 +2355,7 @@ void wac_settings_render(wac_settings_view_t view)
         lv_obj_t *obj = entry_box(sounds[i], descriptions[i], ACTION_SOUND_BASE + i, 212 + i * 108, selected);
         if (selected) check_icon(obj);
       }
-      s_settings.preview_button = icon_button("Preview Sound", ACTION_PREVIEW, 140, 552, 520, 96,
+      s_settings.preview_button = icon_button("Preview Sound", ACTION_PREVIEW, 140, 536, 520, 96,
         &wac_icon_volume_2, true, false);
       /* Lucide's outlined square uses the existing 32px icon slot. */
       lv_obj_t *slot = lv_obj_create(s_settings.preview_button);
@@ -2061,7 +2371,7 @@ void wac_settings_render(wac_settings_view_t view)
       lv_obj_add_style(square, &s_palette[STYLE_PRIMARY], 0);
       lv_obj_remove_flag(square, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
       refresh_audio();
-      button("Done", ACTION_DONE, 270, 676, 260, 80, true);
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true);
       return;
     }
     case WAC_SETTINGS_SNOOZE:
@@ -2069,10 +2379,10 @@ void wac_settings_render(wac_settings_view_t view)
         int minutes = 5 * (i + 1);
         snprintf(text, sizeof(text), "%d Minutes", minutes);
         if (d->alarm_snooze_minutes == minutes)
-          icon_button(text, ACTION_SNOOZE_BASE + i, 170, 244 + i * 122, 460, 104, &wac_icon_check, false, true);
-        else button(text, ACTION_SNOOZE_BASE + i, 170, 244 + i * 122, 460, 104, false);
+          icon_button(text, ACTION_SNOOZE_BASE + i, 140, 212 + i * 108, 520, 96, &wac_icon_check, false, true);
+        else button(text, ACTION_SNOOZE_BASE + i, 140, 212 + i * 108, 520, 96, false);
       }
-      button("Done", ACTION_DONE, 270, 662, 260, 96, true);
+      button("Done", ACTION_DONE, 270, 642, 260, 96, true);
       return;
     case WAC_SETTINGS_NIGHT: {
       entry_row("Mode", modes[d->night_shift_mode], WAC_SETTINGS_NIGHT_MODE, 212);
@@ -2081,11 +2391,9 @@ void wac_settings_render(wac_settings_view_t view)
       format_fixed_time(end, sizeof(end), d->night_shift_end, d);
       snprintf(text, sizeof(text), "%s – %s", start, end);
       entry_row("Fixed Schedule", text, WAC_SETTINGS_NIGHT_FIXED, 320);
-      snprintf(text, sizeof(text), "Sunset %s%d min · Sunrise %s%d min",
-        d->night_sunset_offset_minutes > 0 ? "+" : "", d->night_sunset_offset_minutes,
-        d->night_sunrise_offset_minutes > 0 ? "+" : "", d->night_sunrise_offset_minutes);
+      format_solar_summary(text, sizeof(text));
       entry_row("Sunrise/Sunset Offsets", text, WAC_SETTINGS_NIGHT_SOLAR, 428);
-      button("Done", ACTION_DONE, 270, 664, 260, 80, true);
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true);
       return;
     }
     case WAC_SETTINGS_NIGHT_MODE: {
@@ -2095,11 +2403,11 @@ void wac_settings_render(wac_settings_view_t view)
         lv_obj_t *obj = entry_box(modes[i], descriptions[i], ACTION_MODE_BASE + i, 212 + i * 108, selected);
         if (selected) check_icon(obj);
       }
-      button("Done", ACTION_DONE, 270, 664, 260, 80, true);
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true);
       return;
     }
     case WAC_SETTINGS_NIGHT_FIXED: {
-      lv_obj_t *caption = label(s_settings.body, "Every Day", 150, 175, 500, &lv_font_montserrat_28);
+      lv_obj_t *caption = label(s_settings.body, "Every Day", 150, 174, 500, &lv_font_montserrat_28);
       lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
       format_fixed_time(text, sizeof(text), d->night_shift_start, d);
       value_entry("Night Starts", text, WAC_SETTINGS_NIGHT_START, 244, 104);
@@ -2114,7 +2422,7 @@ void wac_settings_render(wac_settings_view_t view)
         ? "Fixed Schedule is selected." : "Choose Fixed Schedule in Mode to use these times.",
         150, 564, 500, &lv_font_montserrat_28);
       lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
-      button("Done", ACTION_DONE, 270, 664, 260, 80, true);
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true);
       return;
     }
     case WAC_SETTINGS_NIGHT_START: case WAC_SETTINGS_NIGHT_END: {
@@ -2144,7 +2452,7 @@ void wac_settings_render(wac_settings_view_t view)
       s_settings.solar_description = label(s_settings.body, "", 140, 566, 520, &lv_font_montserrat_24);
       lv_obj_add_style(s_settings.solar_description, &s_palette[STYLE_MUTED], 0);
       refresh_solar();
-      button("Done", ACTION_DONE, 270, 664, 260, 80, true);
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true);
       return;
     }
     case WAC_SETTINGS_SUNSET_OFFSET: case WAC_SETTINGS_SUNRISE_OFFSET:
@@ -2156,7 +2464,7 @@ void wac_settings_render(wac_settings_view_t view)
       slider("Night Brightness", FIELD_NIGHT_BRIGHTNESS, d->night_brightness, 412);
       lv_obj_t *caption = label(s_settings.body, "Uses the brightness for the active\nday or night mode.", 150, 570, 500, &lv_font_montserrat_28);
       lv_obj_add_style(caption, &s_palette[STYLE_MUTED], 0);
-      button("Done", ACTION_DONE, 270, 664, 260, 80, true);
+      button("Done", ACTION_DONE, 270, 650, 260, 80, true);
       return;
     }
     default: break;
@@ -2177,7 +2485,7 @@ void wac_settings_render(wac_settings_view_t view)
     if (s_settings.notice[0]) lv_obj_add_flag(s_settings.normal_note, LV_OBJ_FLAG_HIDDEN);
   }
   if (view != WAC_SETTINGS_DEVICE && view != WAC_SETTINGS_WEATHER
-      && view != WAC_SETTINGS_CREDENTIALS) return;
+      && view != WAC_SETTINGS_CREDENTIALS && view != WAC_SETTINGS_PROVIDER) return;
   s_settings.keyboard = lv_keyboard_create(s_settings.root);
   lv_obj_remove_style_all(s_settings.keyboard);
   lv_obj_remove_event_cb(s_settings.keyboard, lv_keyboard_def_event_cb);

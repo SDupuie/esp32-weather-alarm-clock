@@ -6371,13 +6371,14 @@ implement the separate NWS work.
 
 ## Sprint: NWS alerts and approved screen/menu parity — prepared October 18, 2026
 
-**Prepared only. Held for review; not sent or released for execution.** The user
-requested a sprint that implements NWS retrieval, tracking, persistence, sounds
-and the reviewed screens, including all later approved menu changes. Its
-execution scope includes behavior tests, the ESP32-P4 build, flashing the
-attached device and unattended checks. None of those execution actions is
-started by preparing this document. Begin only after the user releases the
-sprint. No commit, push, merge, NVS erase or unrelated change is included.
+**Implemented and bounded verification completed October 18, 2026.** The user released this
+sprint to **Development Orchestration**, retaining YAGNI and MECE implementation.
+The authorized scope includes NWS retrieval, tracking, persistence, sounds and
+the reviewed screens, including all later approved menu changes; behavior
+tests, ESP32-P4 builds, flashing the attached device and unattended checks.
+The release superseded the preparation hold. Preparation changed only
+documentation; implementation and verification results are recorded below. No commit, push, merge,
+NVS erase or unrelated change is included.
 
 ### Objective and authoritative references
 
@@ -6566,6 +6567,148 @@ capacity, NVS record/page budget, request/parse stack use, internal RAM/PSRAM an
 cleanup under repeated updates and failures. Review source additions/renames
 against the approved tree and any explicit permissions before closing a slice.
 
+### Execution progress — October 18, 2026
+
+Implementation is integrated in the existing owners. Audio remains on core 1
+at priority 4, the weather worker remains on core 1 at priority 4, and LVGL plus
+the UI heartbeat remain on core 0. Alert reconciliation uses an ordinary task
+mutex so it does not disable interrupts during record comparison/allocation;
+HTTP and storage remain outside that lock. No new permanent task or source
+path has been added.
+
+The first integrated firmware build passes with 24% of the application partition
+free. All 49 native cases pass, including the new alert owner/audio/settings and
+actual-LVGL navigation/detail checks. This is software evidence. Final stack/timing,
+complete visual comparison and the uninterrupted combined run remain in progress.
+The old
+provider-threshold storm implementation, exclusive fixture/test and right-edge
+artwork are retired. House Messages and its left-edge artwork remain.
+
+The application-only capacity build passed write verification and normal boot.
+The real NWS HTTPS check succeeded with no local alerts; the existing forecast
+request also succeeded. On-device storage measurements then wrote five constructed
+overlapping full-text events through production serialization: 12,085 bytes in
+total, with individual records from 1,633 to 3,489 bytes. Their text lengths follow
+public storm/flood examples; these were not five observed simultaneous local
+alerts. The first writes and two rounds replacing all five records succeeded in
+the unchanged 24 KiB NVS partition. Settled use reached 469 entries; this is not a
+measurement of transient peak use. Removing the five exact test keys returned
+use to 74 entries, and the saved-preference fingerprint was unchanged. No text
+was truncated and no partition was resized or erased. The existing NVS library
+already skips physical writes for unchanged serialized blobs.
+
+Temporary measurements export counts and fingerprints, not credential/API-key
+values. A prior full-settings read was rejected by automatic approval review;
+that read is not being retried or worked around. All temporary code must be
+removed and normal firmware restored before closure.
+
+The first combined script was stopped from acceptance because two test inputs
+were wrong: a supposed same-event revision lacked its NWS relationship, and a
+preview correctly stopped Sound Machine before a later timer check. The corrected
+CAP sequence passes a native qualification using the production parser and
+owner, including unchanged identity and the real ten-minute sound separation.
+An attempted debugger adjustment reset the discarded run; paused or restarted
+time will not count toward the required uninterrupted run. No alarm had rung or
+entered Snooze in that run, and its Off/idle branch does not write alarm records;
+there is no evidence that it changed them. Lost temporary RAM prevents an exact
+pre/post record comparison for that discarded run. The corrected test preserves
+only the two alarm operating records on-device under temporary keys, with exact
+read-back restoration and removal before returning to normal firmware.
+
+Independent owner and audio/UI reviews found one credible handoff race: a tap
+after publication but before sound submission could dismiss an alert's headline
+while its sound still started. The correction captures the dismissal sequence
+under the same short lock as publication and checks it before and after submission. The
+maintained native case covers dismissal during response cleanup, a tap before a
+genuinely new arrival, and a later eligible revision that may still sound after
+visual dismissal. No delayed replay or second event owner was added.
+
+After removing the first temporary probes, the full 49-case suite passes again
+(16.87 seconds), as do all 53 forecast and three location fixtures and the message
+checks. The clean ESP-IDF 5.5.5 build passes: application size `0xf463d0`, with
+24% of its partition free. The official mockup hash remains unchanged from the
+released reference. Retired storm references in the live mapping/fixture guides
+and ownership summaries were corrected without changing forecast mappings.
+The corrected uninterrupted board run completed 1,850 seconds (30 minutes
+50 seconds), with 30 successful scheduled real NWS HTTPS checks and four forecast
+refreshes. A separate successful startup response opened the timed window.
+Controlled CAP events supplied active-alert cases; they were not local official
+warnings. The run alternated both faces and Day/Night presentation, exercised
+list/detail navigation, finite watch/warning completion and early dismissal,
+preview preemption, original Sound Machine timer expiry and scheduled wake-alarm
+priority. It recorded no panic, watchdog reset or codec write error.
+
+The same Freeze Warning sounded again after 610.022487 actual seconds; its
+earlier revisions remained silent and its headline remained dismissed. A warning
+started six seconds before Sound Machine's original deadline and finished after
+that deadline; Sound Machine stayed stopped. The scheduled wake alarm then
+stopped a fresh Sound Machine session, rejected a weather sound while ringing,
+and left both stopped after Off, without deferred replay. A constructed returned
+save error retained live alerts and set the failure flag; the next complete check
+cleared it. Native tests separately establish the normal retry deadline.
+
+Long-window minimum spare stack was audio 1,012, weather 1,832 and UI 8,784 bytes;
+minimum free internal memory was 46,592 bytes. A later nested diagnostic check
+reached 1,096 bytes spare weather stack, so that focused measurement is distinct
+from the production-path workload. Steady Sound Machine write-entry intervals
+reached about 38 ms. Such intervals include the preceding blocking write and do
+not measure empty audio buffers or prove acoustic continuity. UI heartbeat gaps
+remained near its intended one-second cadence. The exact original alarm blobs
+and the saved-preference fingerprint matched at restoration.
+
+The first short retained-confirmation attempt was invalidated by a legitimate
+empty NWS response clearing the test events before restart; this is a test-order
+issue, not a demonstrated retention failure. The corrected short sequence saved
+and dismissed five controlled events, restarted immediately, restored all five
+with the startup question-mark state and no headline, then confirmed identical
+events after validated HTTPS without a sound request. A subsequent real check
+returned to the actual empty local set.
+
+The actual-LVGL bounds pass completed 70 distinct screen instances, including
+both clock faces/appearances and 30 menu families in Day/Night. It recorded public
+labels, geometry, clipping and font/color metadata without credentials or text
+field contents. An initial row/detail probe targeted a nonclickable inner
+container; the corrected small pass used injected pointer drags and taps. Both
+appearances scrolled the five-event list to its 280px limit and opened details;
+long detail content reached its 806px scroll limit. Direct-scroll metadata is
+kept separate from those pointer observations. These are actual software input
+and object measurements on the board, not physical touch or panel-pixel approval.
+
+After those checks, the saved-preference fingerprint and both alarm-record
+hashes still match. NVS use returned to 74 entries; only the production alert
+location binding and the two original alarm keys remain in those namespaces.
+All seven temporary test keys are absent.
+
+Final normal firmware was rebuilt and application-only flashed with successful
+write verification. Its running full ELF SHA256 matches the host image:
+`8a994b644263dfc2400f111ea85ceae4919107b77f73229d2111b646e8f49e14`.
+A read-only debugger snapshot confirms a successful current NWS check, no active
+local events or save error, valid forecast/Radar, usable clock, ready/idle audio
+and idle alarm. Debugger attachment pauses execution; explicit resume advanced
+the UI clock four seconds over a four-second wait. The debugger was stopped,
+then a final normal restart reloaded actual RTC time and again obtained live
+weather successfully. This observation is separate from the uninterrupted run.
+
+All seven production files touched by the probes match the clean source that
+passed the 49 native cases. Temporary code/data and task-owned processes are
+removed; the existing stack monitor remains. No added/renamed maintained source
+path, partition change, commit or remote action was made. The official mockup
+remains the approved, unchanged reference. Local evidence is in
+`.reviews/nws-sprint-2026-10-18/`, including `device-acceptance.md` and
+`combined-summary.json`.
+
+Closure review covered the changed owners, UI, tests, generators and guides.
+One event/catalog owner, the existing audio request/receipt, ordinary per-event
+records and on-demand UI copies each serve current approved behavior. No new
+task, event catalog copy, generic job/persistence framework or compatibility path
+was introduced. The non-generated firmware C/header diff is 2,443 added and 407
+removed lines (net 2,036), covering the complete alert behavior and approved UI
+changes. Removed generated artwork/font and obsolete fixture lines are excluded
+from that cost. A smaller line count alone is not the simplicity argument.
+Physical panel pixels/readability, finger input, audible character/continuity,
+complete power removal and genuine local severe-weather events remain unverified;
+controlled CAP and powered restarts must not be described as those checks.
+
 ### Flash and unattended device acceptance after release
 
 Use the existing flash/monitor/OpenOCD and ESP-IDF/LVGL facilities. Select the
@@ -6639,7 +6782,10 @@ gpt-6.1-sol/medium UI inventory reviews. Both reviewed the completed draft and
 identified no consequential coverage omission or required correction. This is
 a planning review, not implementation verification. Only the work document is
 changed by preparing this sprint. Firmware, official mockups, build outputs and the device
-are unchanged by preparation; the sprint has not been dispatched to another chat.
+were unchanged by preparation. The user released the sprint on October 18 and
+it was sent to **Development Orchestration** for implementation and the specified
+tests, builds, flash and unattended device checks, retaining YAGNI and MECE.
+Dispatch is not evidence of completed implementation or verification.
 
 ## Obsolete weather generator removal — October 18, 2026
 
@@ -6659,9 +6805,847 @@ generated assets are preserved. No new source paths, flash or board tests were
 needed; the temporary dependency environment was removed. Local check logs
 remain under `.reviews/main/obsolete-weather-generator-2026-10-18/`.
 
+## NWS Night sound permission correction — October 19, 2026
+
+Authorized the recommended F1 correction from the local October 18 adversarial
+review. Before this fix, the weather owner used a Day/Night value copied before
+HTTP. A request spanning a fixed or solar transition could therefore sound after
+Night began despite Night Alert Sounds Off, or suppress a newly received sound
+after Day began. The correction reads the existing Night owner's current value
+at sound selection. It removes the stale cached value and the no-longer-needed
+Night argument from alert maintenance and its callers. No additional state,
+worker, queue, storage mechanism or source file is introduced.
+
+Permitted files: existing `main/weather_client.c/.h`, `main/main.c`,
+`tests/test_weather_service.c`, the native test guide, architecture and this work
+record. Alert history, dismissal, ten-minute separation, no delayed replay,
+playback priorities, alarm state/restart/snooze recovery and approved appearance
+retain their existing behavior. The architecture clarifies the permission timing;
+the test guide describes the regression coverage. The official visual reference
+does not need a layout change.
+
+The added regression failed on the previous production code at its sound-count
+assertion. It uses the real request scheduler and alert owner with a controlled
+Night change inside HTTP, covering dusk and dawn with Night Alert Sounds both
+Off and On. It checks retained visual alerts and a repeated unchanged poll.
+Post-fix checks pass: all 49 native cases in 16.97 seconds, including the new
+transition cases and the existing alert, audio, alarm/restart/snooze recovery,
+Night and UI checks. ESP-IDF 5.5.5 builds the 16,016,336-byte application with
+24% of its partition free. Independent gpt-6.1-sol/high source review found no
+actionable issue and independently reran the weather-service check successfully.
+Whitespace and added/renamed source-path checks pass. No new maintained source
+path, temporary production diagnostic or change outside the seven permitted
+files was introduced. The direct owner read removes a stale state copy without
+adding another policy or mechanism; no further separation is needed for F1.
+
+Software verification is complete for this correction. Local evidence is in
+`.reviews/nws-f1-2026-10-19/`. The board was not flashed, so its installed firmware
+still precedes this fix. No physical sound, touch, screen or power-cut result is
+claimed; prior device results retain their existing limits. No commit or remote
+action was performed. Other sprint changes and saved settings are preserved.
+
+## Clock and validation presentation corrections — October 19, 2026
+
+The user approved correcting the four differences found in the source/mockup
+comparison, revising the unavailable-time shortcuts, retaining Weather's Save
+label during checks and using the shared subtitle style. Product rules are in
+[architecture](architecture.md#ui-and-visual-reference); appearance is owned by
+the [official mockup](../mockups/alarm-design.html).
+
+Completed in the existing UI files:
+
+- `clock_views.c`: Ringing, Snoozed and dismissal confirmation use title-case
+  weekday/month labels and the reviewed date position. The unavailable-time
+  screen exposes Sound Machine, NWS alerts and Settings on the Digital shortcut
+  row. A shorter Alarm Settings button and the missed notice above the sync
+  message keep all controls separate. Backup-clock warning access is retained;
+  time-dependent alert headlines remain hidden without usable time.
+- `settings.c`: missing time, missing applied location and unavailable solar
+  events have distinct guidance and refresh without replacing open controls or
+  drafts. Trustworthy RTC time remains sufficient. Location/provider checking
+  and provider failure use the shared subtitle band. Save retains its label and
+  existing pending disabled state. The concise provider messages are
+  “Checking Weather…” and “Check failed. Try again.”; their measured widths
+  clear Back. Validation requests, saving, retries and appearance fallback are
+  unchanged.
+- The official reference includes these changes. The chat comparison includes
+  both location lookup and provider validation, both appearances, and the
+  unavailable-time screen with and without a missed notice. It reconstructs
+  firmware layout from source; it is not a physical-screen capture.
+
+Verification: all 49 native tests pass. Added/updated checks cover header
+geometry, shortcut access/counts/navigation in both clock faces and appearances,
+missed-notice spacing, reason-specific solar guidance and in-place recovery,
+usable RTC inputs, retained Save/disabled state, ellipsis glyphs and subtitle
+width/height clearance. The ESP-IDF 5.5.5 firmware build passes; application size
+is `0xf46520`, leaving 24% of its partition free. JavaScript syntax and
+`git diff --check` pass. Browser checks exercised 26 comparison state/appearance
+combinations, checked the actual official unavailable-time layout and confirmed
+the shortened validation text clears Back. Evidence is under
+`.reviews/clock-presentation-2026-10-19/`.
+
+No new maintained source paths, dependencies, modules or persistence were added.
+This slice was not flashed and has no new board/panel/touch verification; prior
+device evidence retains its original scope. Unrelated working changes remain.
+
+## Six-frame compressed Radar animation experiment — October 19, 2026
+
+**Complete within the verification limits below.** The user authorized
+a temporary feasibility test of six compressed frames alongside audio and clock
+hands. This does not approve permanent animation or change the latest-image
+product rule in the [Radar specification](architecture.md#radar-source-and-palette).
+The practical tested starting point is **three seconds per frame**, or eighteen
+seconds for six frames, using the existing rendering path.
+
+The board retained twelve real 512px, provider-smoothed RainViewer PNGs: two
+tiles for each of six ten-minute samples, 07:30–08:20 CDT. The first and last
+sample are fifty minutes apart. The RAM-only test location in Florida supplied
+changing precipitation; saved weather coordinates were retained. All six
+800px output hashes match an independent reconstruction of the approved palette,
+sampling and shared USGS background. A visible Radar descriptor and real LVGL
+flushes were checked before arming. One compressed history, one basemap and the
+existing two output slots were used; no decoded history was retained.
+
+Eight declared steady intervals total 900 seconds, excluding eight seconds of
+setup per phase. Static Analog and Radar controls used Rain; playback tests used
+Rain through actual recording repeats and generated White Noise. The normal
+task placement, one-second UI heartbeat and bounded Radar steps were retained.
+Ordinary forecast and NWS scheduling remained active, with a successful live
+forecast update during replay. Historical imagery was already cached; this
+does not test a permanent history-download feature. No debugger pauses occurred
+within the timed sequence.
+
+| Requested Radar interval | Steady interval | Frames prepared | Preparation deadlines missed |
+|---|---:|---:|---:|
+| 1 second | 120 seconds | 35 | 35 |
+| 0.5 second | 60 seconds | 29 | 29 |
+| 2 seconds | 120 seconds | 60 | 1 |
+| 3 seconds | 120 seconds | 40 | 0 |
+
+The faster requests produced approximately two-second map changes. The first
+animated phase also waited about fifty seconds for the existing weather worker
+to wake; that activation delay is separate from active rendering throughput.
+One stress-case map interval reached 3.975 seconds while ordinary forecast work
+ran. Three-second playback painted all forty new maps, with a median interval
+of 2.999923 seconds and maximum 3.004097 seconds. Frame preparation includes
+step scheduling and other work, rather than just PNG decoding CPU time.
+
+- **Memory:** compressed payloads total 326,937 bytes; actual retained PSRAM
+  allocations total **442,368 bytes (432 KiB)**. Phase minimum free memory was
+  4,563,072 PSRAM bytes and 73,723 internal bytes. These minima include setup
+  as well as steady operation. No Radar allocation failure was recorded through
+  the timed phases and cache-release snapshot. The weather owner released the
+  cache after its active publication settled. A later debugger observation
+  found one allocation-failure count after normal saved-location map loading
+  resumed; that post-window event is separate and does not establish a cause.
+- **Audio:** first-to-last steady samples cover 112,661 completed output buffers
+  across 891.99 sampled seconds,
+  with no new zero/constant buffers, write errors, skipped scans or queue
+  overflows. Rain completed eleven repeats across those sample intervals.
+  Startup and the intentional Rain-to-Noise transition have separate queue
+  overflow counts (91 and 2); they are not steady-playback results. White Noise
+  has no separate static control, so comparisons between sounds are limited.
+- **Hands:** each visible Analog phase accounts for all 120 sampled seconds,
+  including background processing requested every one and three seconds. There
+  were no skipped angle steps or UI lock misses. The longest software-rendered
+  hand interval was 1.042016 seconds under load, versus 1.012163 seconds in the
+  static control; the largest UI heartbeat interval was 1.001734 seconds.
+
+The 49 native checks and temporary firmware builds pass. The cleaned checkout
+also passes all 49 checks and a fresh firmware build. Root independently
+checked fixture/output hashes and raw-log measurements; a read-only reviewer
+confirmed the bounded conclusions. Results use half-open declared steady
+windows, so phase-boundary publications and paints are counted separately.
+The raw log includes two SDIO driver diagnostics; this is not an error-free-log
+claim. Rendering evidence is software submission with actual flush callbacks,
+not physical panel observation. Buffer scans do not prove acoustic continuity
+or detect every possible partial-buffer defect. Denser precipitation, different
+tile counts, other sounds and uninstrumented timing remain outside this test.
+
+Evidence, protocol, independent results and raw logs are local under
+[`.reviews/main/radar-six-frame-test-2026-10-19/`](../.reviews/main/radar-six-frame-test-2026-10-19/).
+Temporary probes used existing approved source paths and are removed. Three
+files match their starting bytes; the two UI files preserve the concurrent
+Application Screen Mockups changes, with only appended test helpers removed.
+Root independently verifies all five cleanup hashes against the appropriate
+targets. The original 16,016,336-byte application is restored with matching
+on-device image fingerprint and embedded ELF identity; normal startup initializes
+display/touch, reconnects Wi-Fi and retrieves live weather. The newer working
+source, including the concurrent UI changes, remains unflashed.
+
+The whole NVS partition fingerprint changed. Ordinary successful NWS checks
+save their latest-success time in `wac_nws/location`, so retaining that service
+means whole-partition byte equality is not a valid unchanged-preferences check.
+No test path saves user preferences, and saved Wi-Fi/location work after
+restoration; a separate before/after proof for every preference was not captured.
+No settings bytes were exported or rolled back. The application-only writes
+leave the sound-data partition in place. The final normal-startup capture also
+passes. Task-owned debugger and serial sessions have ended, and the temporary
+original-application BIN is removed after independent hash verification. Useful
+logs, fixtures and exported results remain as local evidence. No new maintained
+source paths, permanent animation, commit, push or merge were introduced.
+
+## RTC warning placement follow-up — October 19, 2026
+
+The user approved hiding the RTC warning on Time Unavailable and confirmed its
+only location is to the left of the day/date. This supersedes the prior slice's
+retained upper-right indicator on the unavailable-time screen. Product behavior
+is recorded in [architecture](architecture.md#ui-and-visual-reference).
+
+Firmware now hides the indicator and popup without usable time, preserving the
+time owner's warning. Losing usable time closes an open popup without
+acknowledgment; recovery restores only the indicator beside the date. Hidden
+indicator events cannot open a popup. The obsolete upper-right geometry and
+mockup helper are removed. The official reference and chat comparison reflect
+the change; the three bottom shortcuts remain available.
+
+The affected `ui_shell` native test passes (6.52 seconds), covering startup with
+unavailable time, ignored hidden input, warning retention after network recovery,
+popup closure without dismissal, return beside the date, both clock faces and
+Day/Night shortcut cases. The ESP-IDF 5.5.5 firmware build, both JavaScript syntax
+checks and `git diff --check` pass. Browser review confirms the comparison in
+Day/Night with and without a missed notice, with no console errors. Follow-up
+logs are in `.reviews/clock-presentation-2026-10-19/`.
+
+No new maintained source paths, dependencies or storage were added. No flash or
+physical display/touch verification was performed; the comparison reconstructs
+firmware layout from source. Existing unrelated changes remain intact.
+
+## Unavailable-time spacing — October 19, 2026
+
+The user requested more separation between Alarm Settings and the shortcut row.
+The unavailable-time title, placeholder, sync text, alarm caption/button and
+optional missed notice are raised together by 40px in firmware and the official
+reference. Shortcuts retain the Digital row position. The clear gap below Alarm
+Settings grows from 12px to 52px. Fonts, control sizes/actions, notices and time
+behavior are unchanged. Product rules remain in
+[architecture](architecture.md#ui-and-visual-reference).
+
+The rebuilt `test_ui_shell` target and its native `ui_shell` test pass (6.77
+seconds), including the updated positions, missed-notice clearance and a minimum
+48px button-to-shortcut gap across both clock faces and appearances. The current
+checkout's ESP-IDF 5.5.5 build passes. A broader native build attempt encountered
+`driver/i2s_std.h` in temporary audio observation code from the user's concurrent
+test in another chat; that work was left untouched. The successful focused UI
+target was rebuilt explicitly afterward, rather than using its older binary.
+This slice makes no claim that the broader suite passed in that temporary state.
+
+Browser review confirms the updated comparison in Day/Night with and without the
+missed notice. JavaScript syntax and whitespace checks pass. Logs and hashes are
+under `.reviews/clock-presentation-2026-10-19/`. No new source paths, libraries or
+storage were added. No flash or physical display/touch check was performed; the
+firmware preview is reconstructed from source. The other chat's test and
+unrelated changes remain intact.
+
+## Radar color lookup and six-frame playback — authorized October 19, 2026
+
+The user authorized the exact radar color lookup, six ten-minute samples from
+the latest hour, two seconds per frame, unattended board testing and flashing.
+The [architecture](architecture.md#radar-source-and-palette) owns the behavior.
+The implementation uses the existing weather owner, worker and two output image
+slots, with bounded compressed history. It preserves the approved colors,
+provider smoothing, source validation and background processing.
+
+Implementation is complete in the existing Radar owner, application worker
+and UI files. No source paths, tasks, persistent history or background-color
+lookup were added. The color table takes 1,024 bytes plus its count and keeps
+77 distinct exact replacements. Compressed tile records and retained response
+capacities share a 4 MiB cap, with actual-geometry tile arrays in PSRAM. A rolling
+request count bounds this clock's RainViewer requests to 100 per minute; it
+cannot count unrelated devices sharing the same public IP.
+
+Parent verification passes all 49 native checks and the ESP-IDF firmware build.
+Additional checks match all six real 800×800 frames against their previous
+reference pixels, and six real 512px smoothed tiles against the original mapper.
+The six-frame fixture retains 442,656 bytes (including tile records), with zero
+HTTP requests during cached playback. Constructed tests cover all source rows
+and all 256 alpha values, unknown visible colors outside sampled output,
+chronology, cache reuse/cap, request limits, exact displayed-frame Pause,
+resume/Latest, controls coinciding with metadata checks, offline controls and
+newest-versus-older history failures. These inputs are constructed cases, not
+claims that each failure occurred at the live provider.
+
+Day/Night native captures verify the Play/Pause control and Paused timestamp.
+Their clock title/time is illustrative test data over the retained real Florida
+map, not a live location/time match. The official reference adds the same control
+and presentation states while preserving every embedded map image byte; its
+recorded Colorado sample does not become a live or simulated radar animation.
+Browser interaction checks cover Play/Pause and Night/unavailable states.
+
+The paired board benchmark is complete. Rain was active; one warmup round was
+excluded, followed by three balanced old/new rounds over the same six real
+frames (18 timed pairs). Mean image-processing time falls from **1,242.752 ms to
+709.806 ms**, saving **532.945 ms (42.88%)**. Recoloring falls from 626.313 ms to
+94.228 ms; decode and composition remain effectively unchanged. These totals
+exclude HTTP and the normal waits between worker steps. All 48 warmup/measured
+full-image hashes match the independent references; all 12 input hashes and
+old/new recolored-tile pairs match. The parent independently recomputed all 48
+full-image comparisons and the 18 timed pairs from the raw board log. The board
+fixture retained 442,368 compressed-capacity bytes plus 144 tile-record bytes;
+the native fixture's wider pointers account for its different record total.
+
+The first live-background preflight then failed a 3,841,202-byte decoder
+allocation while both benchmark output slots were retained. This was outside
+all sustained windows. The same buffer state occurs after ordinary location
+changes, so it was corrected in the owner rather than dismissed as a probe-only
+failure: wait for the UI to detach the invalidated publication, free both
+obsolete outputs, then decode the new background. A native regression observes
+both real frees, the acknowledgment barrier and complete unchanged image pixels.
+The same review corrects entering Radar cancelling its initial metadata/latest
+preparation. Commands now preserve that necessary work while Latest still
+cancels obsolete historical preparation. All 49 clean native checks and a clean
+firmware build pass again after both fixes. The corrected board run subsequently
+exercised real two-slot location changes before steady measurements.
+
+A subsequent preflight stopped at its first publication because a temporary
+`ANIM_PUB` diagnostic formatted text inside the command critical section. The
+matching stack establishes the newlib lock abort. This was probe code, not the
+clean feature source, and no sustained window had started. Probe output was moved
+outside critical/display locks; the unchanged clean feature remains covered by
+the preceding all-49/build checks. Only the later corrected, uninterrupted run
+is accepted as sustained evidence.
+
+The observer-induced abort also left USB serial/JTAG unresponsive to supported
+software resets. A user-performed physical restart restored access; the corrected
+observer image then flashed and rendered live maps normally. These preflights
+are excluded from sustained evidence. Actual two-output Leander→Florida→Leander
+switches release both old slot addresses only after matching invalid-generation
+acknowledgments, then retrieve/decode new backgrounds successfully without an
+allocation failure. Both locations loaded six distinct real source frames.
+Actual pointer input verifies chronological wrap, an approximately eleven-second
+in-flight Pause, resume-next, swipe/Settings stop and Latest restoration.
+
+A first uninterrupted sequence completed all four static baselines and 82.999
+seconds of paired Rain animation samples before a timing correction. Its retained
+record is `pre-ui-wake-board-run.log` / `pre-ui-wake-results.json`: no observed
+audio-delivery fault, allocation failure or record loss in those intervals, but
+39 changed-frame paints average 2.1574 seconds, with five gaps above 2.5 seconds
+and a 4.0159-second maximum. The UI's one-second polling quantizes otherwise-ready
+Radar images; network work may cause an additional hold. The feature now wakes
+the same UI task on a copied Radar publication, outside the state lock, while
+retaining its regular one-second deadline. It adds no task and does not change
+audio scheduling. Parent all-49/native, clean firmware, real-frame and real-tile
+checks pass again; independent review covers notification ordering, deadline
+handling and task-handle setup.
+
+The fresh post-correction eight-phase board sequence is complete. Four 45-second
+static baselines precede 300 seconds each of Radar playback with Rain and White
+Noise, followed by 60 seconds each back on Analog. Radar alone uses the denser
+Florida location in RAM; forecast/NWS and saved preferences remain Leander.
+No debugger halt, source change or build interrupted these windows. The parent
+and an independent reader separately parsed the raw same-sample UI/audio pairs:
+900 seconds declared steady, **891.266 seconds** between accepted paired
+snapshots, 115,104 completed DMA buffers and 58,933,476 successful PCM bytes.
+Every observed strict-window audio fault delta is zero: write errors, whole-zero
+or constant completed buffers, skipped buffers, bad addresses, queue overflows,
+completion gaps and recording-loop errors. Eight Rain recording loops occur in
+its animation window. These counters do not establish acoustic continuity or
+exact partial-buffer samples. Setup/format guards and their excluded counters
+remain separate; six SDK already-disabled I2S channel diagnostics occur during
+phase setup, outside the accepted steady windows.
+
+Completed changed-frame draws, measured at the end of LVGL refreshes with actual
+flushes, give the following results. These are software draw completion times,
+not physical LCD scanout observations.
+
+| Animation sound | Changed-frame draws | Median interval | 95th percentile | Longest interval |
+|---|---:|---:|---:|---:|
+| Rain | 145 | 2.034 s | 2.054 s | 5.758 s |
+| White Noise | 142 | 2.073 s | 2.086 s | 4.766 s |
+
+The respective means are 2.067 and 2.114 seconds. All four intervals longer than
+2.5 seconds overlap logged Radar HTTP work: one metadata check, then a later
+metadata check and the two new tiles for a genuine newer frame. This establishes
+overlap, not exclusive causation. Unchanged history is reused, chronological order
+is preserved through the new frame and wrap, and playback stays active while
+the complete history briefly changes from six to five and back to six frames.
+The two-second setting is a target; ordinary serialized network work still holds
+the current image longer. Phase-start to the first oldest-frame completed draw
+is 1.299 seconds. At this checkpoint, a possible 1.5-second setting remained an
+estimate; no one-second or 1.5-second playback run had been performed.
+
+All four Analog windows have the expected rendered second-hand steps; the two
+post-animation windows each contain 60 changed hand draws with no skipped angle.
+Leaving Radar stops playback. No allocation failure or firmware observer-buffer
+loss occurs in the fresh run. One malformed UART text row is excluded from paired
+metrics; cumulative counters span the surrounding valid snapshots, but that
+row's interval maximum is unavailable. Phase-local memory minima include setup;
+the Rain animation phase retains at least 81,207 bytes internal RAM and 4,559,332
+bytes PSRAM. Largest-block samples are boundary observations, not continuous
+measurements. The six-frame tile cache retains 442,512 bytes on this board.
+
+After the uninterrupted sequence, a board-only Wi-Fi stop/restart succeeds with
+15 seconds between driver operations, reconnects approximately four seconds
+later and completes ordinary metadata HTTP 200 requests using retained history.
+No credentials, router settings or saved location were changed. Failure cases
+not reached during that short outage remain native evidence.
+
+Evidence is retained under `.reviews/main/radar-animation-2026-10-19/`, including
+the approved `board-test-protocol.md`, raw `live-board-run.log`,
+`parent-steady-verification.json` and `independent-live-verification.json`.
+The two-second checkpoint is closed: all six probe files match the clean
+canonical hashes, all 49 native checks and a fresh firmware build pass, and an
+application-only flash installs the 16,023,824-byte normal feature image
+(`f27c59af…` ELF). Written/boot identity matches. All 36 `wac_cfg` keys retain
+their combined logical digest without exporting values; bootloader, partition
+table and sound-storage fingerprints are unchanged. Normal NWS operating-record
+writes are not preference changes. This image also includes the approved,
+previously unflashed clock presentation and NWS sound-permission changes already
+in the checkout; it does not establish their separately unreported physical or
+dedicated fault observations.
+
+The existing disconnected worker can wait for Wi-Fi before consuming image
+steps. A submitted Pause freezes the UI's displayed frame immediately, but
+owner confirmation and cached Latest preparation can be delayed until that wait
+ends. No separate reconnect/animation worker is introduced in this slice.
+
+Follow-up authorization: after these two-second measurements, the user requested
+**1.5 seconds per frame**. The built-in deadline and its native before/at-deadline
+check are updated; the architecture and user guide own the revised nine-second
+six-frame loop. The two-second results above remain that checkpoint's evidence.
+All 49 native checks and a new firmware build pass at the revised rate. The user
+then explicitly requested a quick check. Scope is therefore 30 seconds each of
+Rain and White Noise playback plus a 15-second post-exit Analog check, with the
+ordinary setup guards kept separate, before the final 1.5-second normal flash.
+The quick instrumented attempt reset before any timed phase was armed. Repeated
+application startups and USB disconnects continued briefly after the debugger was
+stopped; no panic or cause was captured. The attempt is stopped within the user's
+quick-check scope. No 1.5-second timing or audio result is accepted from it.
+The clean 1.5-second normal image is now installed by application-only flash:
+16,023,824 bytes, binary SHA-256 `59dd10cd…`, ELF SHA-256 `34a0dba6…`.
+It exactly reproduces the clean pre-probe build; all six restored source hashes
+and the native test source match their handoff, and probe symbols are absent.
+Written application/header identity matches. A continuous 65-second normal
+capture reaches more than 71 seconds uptime without restart, disconnect or panic;
+a final 25-second post-verification startup confirms the same normal identity,
+display/touch initialization, saved Leander location and a live weather update.
+The 36-key logical preference digest and bootloader, partition-table and sound
+storage fingerprints match their original baselines. No rollback of NWS
+operating records was performed. Owned debugger/serial processes are stopped.
+Evidence is under `rate-1500ms/`, including `quick-result.json`,
+`independent-quick-rate-verification.json`,
+`parent-final-source-binary-verification.json` and
+`final-device-verification.json`. The full two-second observations above remain
+separate: **1.5-second animation cadence and combined audio remain unverified**.
+Unchanged static baselines, palette comparisons, controls, location replacement
+and Wi-Fi recovery checks are retained without repeating those completed cases.
+
+The scoped structure review covers the Radar owner, worker, UI, related tests and
+their documentation. The lookup replaces measured repeated calculation; the
+compressed cache supplies the requested history while the existing two output
+slots remain sufficient. Cache and playback state stay with the weather owner;
+the UI owns interaction and acknowledgment of the image it actually accepted.
+The short mailbox and existing-task notifications serve those current controls
+without another worker or general job mechanism. All maintained source edits use
+existing approved paths. Temporary measurement code is removed from the normal
+image; unrelated checkout changes are preserved.
+
+## Rendered firmware visual review — October 19, 2026
+
+The requested replacement for the source-based visual review is complete. The
+existing native UI harness now has two optional capture targets that execute the
+production LVGL screens with their actual compiled fonts and artwork. Controlled
+owner snapshots produced 527 image/measurement pairs: 258 settings and 269 other
+device states. The official browser reference supplied 366 device captures;
+all screen families and Day/Night appearances were reviewed, along with keyboard,
+long-text, selection and combined-warning examples. The browser messaging page
+was checked separately, with the narrower coverage limits stated in the report.
+
+The local [full review](../.reviews/rendered-ui-parity-2026-10-19/review.md)
+records 16 appearance differences and their paired evidence. Three concern
+readability: the Warning Sounds heading, long Wi-Fi scan names and long Messaging
+summaries. The remaining findings concern measured placement, spacing, selection
+colors, backgrounds, control geometry and Radar icon artwork. The text font
+source is byte-identical to the reference; ordinary bitmap/browser smoothing and
+RGB565 color rounding are distinguished from confirmed differences. These are
+proposed corrections for user review, not approved implementation or new product
+requirements.
+
+The approved concurrent Radar playback change was included by refreshing its
+official reference and rerendering the complete native set. Six existing Radar
+images changed and four playback-state images were added; the other 517 existing
+images stayed pixel-identical. Production UI and compiled capture inputs were
+stable during the rerun; a concurrent weather-owner edit left its extracted NWS
+catalog unchanged. Source hashes and capture inventories are retained in the
+review folder.
+
+The 13 affected UI/settings native checks and both capture builds pass. A fresh
+ESP-IDF firmware build also passes. Every retained native PNG was checked against
+its original 800×800 rendered pixels. This is software rendering and compilation
+evidence, not physical LCD, touch, brightness or audio verification. No board was
+flashed and no messages or real device preferences were changed by this review.
+Capture support uses the existing test source/build files, with no new maintained
+source path or production UI change. The test guide documents the opt-in commands.
+
+Presentation follow-up: the numbered comparison gallery shows all 16 findings
+through 25 examples and 46 available Day/Night combinations, using the retained
+actual renders and official screenshots. It includes enlarged affected areas and
+labels the unmatched long Wi-Fi sample explicitly. Browser checks cover every
+choice and image load; gallery input hashes and checks remain with the review
+evidence. No firmware or official mockup was changed for this presentation.
+
+## Radar playback stops at newest — October 19, 2026
+
+The user observed repeated playback and requested one pass ending on the newest
+image. The [Radar specification](architecture.md#radar-source-and-palette) now
+owns that behavior. The existing weather owner selects only later frames and
+publishes completion in normal Latest mode, so the UI offers Play again without
+Paused. Manual Pause/resume and another Play from completion are covered; the
+1.5-second interval, automatic checks, palette and provider smoothing remain.
+
+All 49 native checks and the ESP-IDF firmware build pass. Focused regressions
+exercise all six frames in order, the explicit stopped-state publication,
+holding the newest image without more requests, another Play, resuming a manual
+Pause at the newest frame, partial history and the UI's Play/timestamp state.
+The six retained real images still match every original reference pixel; that
+fixture also completes and holds its newest image. These are software checks.
+A bounded read-only review found no additional UI or ownership change needed.
+
+The change stays in the existing owner and tests, with no new state, module,
+task or source path. This is the smaller structure for the requested behavior;
+the UI already renders the completed state. Application-only flash passes its
+device checksum verification, installing the 16,023,824-byte image with ELF
+SHA-256 `80ba17d6…`. A 30-second normal startup capture confirms that identity,
+display/touch initialization and a live weather update, with no unexpected
+restart, disconnect or panic. Settings and sound partitions were not flashed.
+Actual on-panel end-of-pass behavior was not observed in this slice; its
+completion checks are native software evidence. Prior physical and 1.5-second
+combined-audio
+verification limits remain separate; no diagnostic firmware or extended board
+run is used for this follow-up.
+
+Evidence: `.reviews/main/radar-single-pass-2026-10-19/`.
+
+## Approved rendered presentation corrections — October 19, 2026
+
+The user resolved all sixteen review items and authorized their implementation
+in firmware and the official reference, including the common scrollbar layout.
+The [architecture](architecture.md#ui-and-visual-reference) owns the resulting
+appearance rules. Firmware now handles long summaries, headings, selection
+fills, the shared outside scrollbar lane, alarm text/color, Night unread tint,
+alert backgrounds and centered alert text. The reference also follows the
+retained native slider travel, Radar glyphs and shared keyboard widths. The
+repeated alarm-volume subtitle is removed from the three child sound menus.
+No new library, task, persistence mechanism or maintained source path was added.
+The two small Radar backdrop assets use the existing asset collection and image
+renderer. Existing product behavior and the concurrent Radar playback work are
+preserved.
+
+All 49 native checks and the ESP-IDF firmware build pass. The final application
+is 16,049,232 bytes, with 23% of its partition free. Final rendered comparison
+evidence is retained under `.reviews/approved-presentation-2026-10-19/`, including
+source hashes, logs, 527 native PNGs/layout records, 47 official browser captures
+and 58 reviewed Day/Night comparison combinations. The numbered view preserves
+the sixteen review items and adds the requested sound-submenu caption cleanup.
+All comparison choices and image loads pass browser checks. The existing artwork
+generator now owns the two Radar backgrounds; regeneration preserves all 38
+asset maps, and fresh Day/Night Radar renders retain identical pixels. This
+is actual production LVGL software rendering with controlled test inputs, not a
+second HTML implementation of the firmware. Browser font smoothing and the
+firmware's RGB565 color rounding remain distinct from layout corrections.
+Physical LCD appearance, touch, brightness and audio have not been checked for
+this change. No board flash, commit or remote action was performed in this slice.
+
+After reviewing the comparisons, the user authorized flashing the updated
+firmware. Application-only flashing to the ESP32-P4 revision 1.3 on
+`/dev/cu.usbmodem8331401` passed its written-data hash verification, installing
+the exact retained 16,049,232-byte reviewed image (binary SHA-256 `2317bcf3…`,
+ELF SHA-256 `9adafa975…`). The flasher did not write the bootloader, partition
+table, NVS or sound storage. A 35-second normal startup capture confirms the
+matching firmware identity, LCD initialization, touch-driver registration and a
+successful live weather update, with no error, panic, watchdog or serial
+disconnect logged. This confirms installation and normal startup; the physical
+appearance, touch, brightness and audio checks above remain separate. Logs and
+`flash-verification.json` are retained with the same review evidence.
+
+## Broader weather ownership assessment — October 19, 2026
+
+Status at this assessment checkpoint: complete, with implementation then
+**not approved or started**. The user subsequently authorized the
+[implementation sprint below](#sprint-audit-fixes-and-ownership-consolidation--authorized-october-19-2026),
+which now records its completed work and verification.
+The user requested a broader YAGNI/MECE assessment after the audit's F4 identified
+that main retained a full runtime object but stored only weather and Radar.
+The [local ownership assessment](../.reviews/yagni-mece-2026-10-19/ownership-assessment.md)
+replaces the original two-file storage cleanup as the preferred final design:
+move the existing weather worker and retained weather/Radar publication into the
+existing weather owner, keeping main's task creation and display assembly.
+Remove the intermediate Radar descriptor while preserving frozen-candidate retry,
+actual display acknowledgment, raw nonpublishing Settings validation, deadlines,
+task settings and approved product behavior. Application-wide central state is
+not recommended. No new source path, task, queue or persistence is proposed.
+
+The revised scope is medium-sized with moderate implementation risk, particularly
+image lifetime and scheduling-test migration. The current selective native
+substitutions would not survive a simple whole-source move; retiring main-source
+extraction requires equivalent checks through the real relocated worker. One
+main-private static display staging record can also replace the separate startup
+and heartbeat buffers with the existing sequential handoff. The assessment
+explicitly discloses a proposed failure-isolation correction: a failed weather
+copy should not suppress independent clock/message copies.
+
+Two gpt-6.1-sol/high read-only reviews and parent source/history/map/test tracing
+support the assessment. No firmware, maintained tests, architecture requirements,
+mockups, saved settings or board state changed. The earlier 49-test/build result
+is baseline evidence only; no test or build was rerun for this unimplemented
+proposal. Existing physical and timing limits remain open. The local audit report
+now carries the revised F4 recommendation and risk; other findings remain
+separate. No implementation completion or authorization is inferred from this
+record.
+
+## Sprint: audit fixes and ownership consolidation — authorized October 19, 2026
+
+Status: implementation and verification complete. The user authorized all
+preferred F1–F7 fixes, optional housekeeping, the separate F4 display-buffer
+cleanup, and unattended flash/board tests. Normal firmware is installed after
+the completed scripted run. No commit or remote action was performed.
+
+Permitted source scope is existing messaging/browser/test files; weather client,
+main, runtime/header and native worker tests; UI renderers/interfaces, generated
+icon outputs and their producer; audio's ineffective conditional; BSP forward
+declarations; and existing artwork tools. No new source path, task, queue,
+persistence mechanism or product UI was added. Relevant architecture, work and
+test/build documentation is updated; the approved appearance is preserved.
+
+Disclosed behavior corrections: failed shared-cache polls retain the ordinary
+15-second spacing; browser failures retain existing cards and show the existing
+error status; a failed weather copy no longer suppresses independent clock/message
+copies. Raw validation fetches remain nonpublishing. Other edits preserve behavior,
+including alarm/restart recovery, weather dates/age/retries, Radar Pause/image
+acknowledgment/history and task settings. Unused developer-only blur CLI handling
+is removed while the edge-artwork blur helper remains.
+
+Acceptance: focused messaging, real weather scheduling/publication/validation,
+UI and artwork checks; all native/fixture/message checks; ESP-IDF 5.5.5 build;
+source-path and complete item closure review; then authorized unattended board
+startup, responsive display/audio/Radar/weather checks, saved-preference
+fingerprint preservation, removal of temporary diagnostics and restoration of
+normal firmware. Physical touch, acoustic and power-removal limits stay distinct
+from scripted/device-counter evidence. Prior rejection of a full-settings read
+is respected; no credential/settings dump will be attempted.
+
+Local evidence is retained under `.reviews/yagni-fixes-2026-10-19/`.
+
+Implementation verification:
+
+| Audit item | Implemented result and check |
+|---|---|
+| F1 | Failed shared-message polls retain the cache and respect the existing interval. Actual worker/refresh checks cover transport, HTTP and JSON failures, recovery and explicit refresh. |
+| F2 | Browser request failures retain cards and existing error feedback. Actual page JavaScript checks cover failed, recovered and genuinely empty responses and Deactivate. |
+| F3 | Unused weather request columns, normalization arrays and published fields are removed. Provider dates, source-time validation, final conditions/icons and download age remain covered. |
+| F4 | The existing weather owner now contains its worker, deadlines, retained weather and completed Radar publication. Actual-worker tests replace main-source extraction and cover independent deadlines, raw nonpublishing validation, frozen publication retry and accepted-image lifetime. |
+| F4 staging cleanup | Startup hands one static UI staging record to the heartbeat; main's real collection function is executed with a failed weather copy and fresh independent owner replies. |
+| F5 | Removed the audio conditional whose two paths both continued; the existing audio suite passes. |
+| F6 | Removed the NULL-only image wrapper from callers, generated output, header, producer and test substitute; UI checks pass. |
+| F7 | Removed only the two unreachable utility image variants and producer entries. All 36 retained generated asset blocks remain byte-identical. |
+| Optional housekeeping | Simplified Forecast visibility, removed duplicate shell clock fields, two unused BSP declarations and the unused image-generator local. Removed the unused blur CLI route while retaining the imported edge blur helper. Removed the uncached Radar sampling route and copied path; useful pixel/seam cases now use cached frames. |
+
+Fresh parent checks pass: all 49 native tests, all 53 forecast cases, all three
+location cases, and all six messaging/browser test groups. The additional
+executed-main failure-isolation case passes in the existing alarm-command target.
+The final normal-source native rerun passes all 49 checks in 16.36 seconds.
+The ESP-IDF 5.5.5 normal firmware build passes: 16,046,768 bytes, with 23% of its
+application partition free. Full Analog regeneration preserves all thirteen
+outputs byte-for-byte; focused utility regeneration preserves both complete
+generated files. Independent source/caller/test review finds no actionable
+defect within this scope. No new or renamed source path, task, queue or storage
+mechanism remains. The official mockup, unrelated pending changes, alarm/time/
+Night implementations and build configuration retain their task-start hashes.
+
+The authorized unattended device run completes **800 seconds**: Rain for 650,
+White Noise for 120 and a 30-second stopped/restored interval. Both twelve-view
+Day/Night presentation passes complete, including clock faces, Forecast, Radar,
+Sound Machine and key settings menus. It submits no Save, scan or alarm action.
+The actual preference fingerprint matches before/after, playback ends Stopped,
+and no real alarm interrupts the run. Both startup and the ordinary ten-minute
+Visual Crossing refresh succeed. There are 840 completed UI updates, a maximum
+1.215-second gap, no display-lock misses, and 40 accepted/detached Radar
+generation changes. Both Radar Play/Pause/Resume passes finish on the newest
+image; measured steady advances take 1.526–1.560 seconds.
+
+Audio returns success for all 38,446 writes. These counters do not measure DMA
+underruns or acoustic continuity. Rain's largest write-entry interval is
+38.642 ms; White's 81.930 ms aggregate may include the intentional codec rate
+change and an in-flight previous write, so it does not isolate steady playback.
+The existing codec format-change path logs one already-disabled-channel message,
+then reopens and completes playback without a returned error. No dependency
+change is made for that observation. Minimum spare stack is 9,060 bytes for UI
+and 2,556 for weather. No panic, watchdog warning, unexpected restart or serial
+disconnect occurs.
+
+All twelve temporary source blocks are removed; their four source files exactly
+match the recorded normal hashes and no temporary symbol/report marker remains
+in the normal ELF. The final application-only flash passes written-data checksum
+verification; its normal boot identity matches ELF SHA-256 `717da2e54…`.
+A 75-second normal capture confirms LCD/touch initialization, live weather and
+continued operation without a panic, watchdog warning or unexpected restart.
+Settings, bootloader, partition table and sound storage are not flashed.
+Task-owned temporary builds, the artwork environment and redundant compiled
+copies are removed; useful logs/reports remain local. Physical appearance,
+touch, listening and power-removal checks remain distinct from this scripted
+device evidence. See the [complete item closure](../.reviews/yagni-fixes-2026-10-19/closure.md)
+and adjacent build/test/device logs.
+
+## YAGNI and MECE rerun — October 19, 2026
+
+Fresh read-only review of the current checkout is complete. Three independent
+service, UI/messaging and documentation/tool reviews, parent verification and
+a separate challenge find one browser-recipient bug (F1), one stale authoritative
+subtitle instruction (F2), and five small optional housekeeping items. No further
+architectural refactor is recommended. The
+[local report](../.reviews/yagni-mece-rerun-2026-10-19/summary.md)
+owns the findings, scope, realistic triggers, proposed corrections and limits;
+at this review checkpoint the recommendations were **not approved or implemented**.
+The user subsequently authorized the [bounded fixes below](#fresh-audit-fixes-and-closure--october-19-2026).
+
+Both F1 paths are reproduced by executing the actual browser refresh/Send
+functions with controlled responses: an ordinary 502 error and a valid list
+temporarily missing the chosen room both change the destination to All clocks.
+These are constructed checks with illustrative rooms, not real messages or
+observations on the user's network. Parent checks also pass syntax for seven
+Python tools and fifteen shell helpers, match the direct firmware source list,
+and trace all 72 generated image/font exports to current consumers. The previous
+native/build/device run remains prior evidence; no full suite, firmware build
+or board operation is rerun. Firmware, official mockup and settings are unchanged.
+Only local reports and this work record are updated.
+
+## Fresh audit fixes and closure — October 19, 2026
+
+Status: implementation and software verification complete; closure audit finds
+no remaining issue in these seven items. This follow-up is not flashed or committed.
+The user authorized preferred F1/F2 fixes and all five O1–O5 cleanups from the
+[fresh audit](#yagni-and-mece-rerun--october-19-2026). Scope remains existing
+browser/message-test files; UI and weather private interfaces; the Analog SVG
+producer and screen-asset script; architecture/weather/changelog/test guidance
+and this work record. No new source path, worker, queue or persistence is added.
+
+The disclosed behavior correction preserves the chosen browser recipient across
+failed destination refreshes and successful lists temporarily omitting that room,
+including choices made while a request is pending. A permanently departed room
+may remain selected under existing named-target acceptance; the refresh no longer
+substitutes All clocks. Other edits preserve behavior and approved appearance:
+remove the unused Night color helper, make the two NWS worker operations private,
+correct contradictory/obsolete documentation, remove unused Analog palette entries
+and clean disposable raster intermediates with the existing exit-trap pattern.
+
+Verification passes:
+
+- All 49 native checks pass in 17.24 seconds, including weather, UI/settings and
+  alarm/restart recovery. All six existing message/browser harness groups pass,
+  including actual-page refresh/Send checks for both recipient-loss cases,
+  choices made during either request wait, recovery and ordinary explicit choices.
+  These use controlled responses and illustrative rooms; no real messages are sent.
+- Independent source closure finds no actionable issue. Four deliberate in-memory
+  regressions are rejected by the new browser assertions; no variant is saved.
+- Full screen and Analog artwork generation passes. Compared image/descriptor/SVG
+  content is unchanged across 74 files. Existing aggregate declaration-order-only
+  churn is restored from memory, leaving every compared file byte-for-byte at its
+  task-start content. Temporary raster directories are empty after both full runs;
+  the actual cleanup stanza also removes disposable data on normal and nonzero exits.
+- ESP-IDF 5.5.5 firmware compilation passes: application 16,047,024 bytes with 23%
+  of the application partition free. Python/shell syntax and whitespace checks pass.
+- No source path is added or renamed. Approved mockup/artwork, alarm/audio/time/
+  settings implementations and unrelated pending changes are preserved. Task-owned
+  temporary native/artwork environments are removed; useful evidence is retained.
+
+The [complete closure report](../.reviews/yagni-rerun-fixes-2026-10-19/closure.md)
+records all seven items, evidence and limits. This request does not include flashing
+or a commit; the new image is built but not installed. These software checks do not
+establish browser rendering, live message delivery or physical-board behavior.
+
+## Adversarial review after audit fixes — October 19, 2026
+
+The requested report-only full-branch review is complete, including pending
+changes and the earlier local branch commits. Two Optimizers and two independent
+Skeptics find no actionable issue. A possible temporary alert-location binding
+reset remains unverified as consequential; it is evidence, not a new work item.
+Fresh checks pass: 49/49 native cases, all six message/browser groups, 53/53
+forecast and 3/3 location fixtures, Python/shell syntax and ESP-IDF 5.5.5 firmware
+compilation. No source, official mockup, artwork or board settings change; no
+flash, commit or PR comment. Temporary native build removed. Physical and live
+network verification limits remain unchanged. The
+[local report](../.reviews/main/adversarial-2026-10-19-post-cleanup/summary.md)
+records scope, independent verdicts, evidence and limits.
+
+## Reviewed implementation checkpoint — October 19, 2026
+
+The user authorized committing the reviewed application after the audit fixes
+and report-only adversarial review. This checkpoint includes NWS watches and
+warnings, bounded six-frame Radar playback, approved presentation corrections,
+weather ownership consolidation, browser recipient preservation and the reviewed
+cleanup/documentation changes. All 57 pending tracked paths match the reviewed
+scope; no source changed after the review.
+
+The latest software verification remains 49/49 native checks, all six message/
+browser groups, 53/53 forecast and 3/3 location fixtures, syntax checks and the
+ESP-IDF 5.5.5 build, with 23% application partition space free. Local review
+evidence and editor settings are excluded. This checkpoint does not flash the
+latest follow-up or change the board's saved settings; existing hardware
+verification limits remain recorded separately above.
+
 ## Current work
 
-Reconciled October 18, 2026.
+The [audit-fix sprint](#sprint-audit-fixes-and-ownership-consolidation--authorized-october-19-2026)
+is complete, including the preferred full weather-worker ownership
+consolidation from the [assessment](#broader-weather-ownership-assessment--october-19-2026).
+All F1–F7 items, six optional housekeeping items and the separate staging-buffer
+cleanup are addressed and verified. Normal firmware is restored after the
+unattended run; saved-preference fingerprints match and temporary probes are gone.
+
+The subsequent [fresh YAGNI/MECE audit](#yagni-and-mece-rerun--october-19-2026)
+led to separately authorized [bounded fixes and closure](#fresh-audit-fixes-and-closure--october-19-2026),
+now complete with source review, native/message checks, artwork comparison and
+firmware compilation. This follow-up is included in the
+[reviewed implementation checkpoint](#reviewed-implementation-checkpoint--october-19-2026).
+It has not been flashed; the board still has the earlier normal image. The
+earlier audit-fix implementation remains complete.
+
+The subsequent [adversarial review](#adversarial-review-after-audit-fixes--october-19-2026)
+finds no actionable issue and adds no work item; its fresh software checks pass.
+It does not flash the newly built follow-up image or close existing physical
+verification limits.
+
+The [rendered firmware visual review](#rendered-firmware-visual-review--october-19-2026)
+is complete. The user subsequently selected and authorized its corrections;
+the [implementation follow-up](#approved-rendered-presentation-corrections--october-19-2026)
+records delivery, the authorized flash and normal-startup verification. Physical
+appearance checks remain unreported. The actual-render evidence supersedes the
+earlier source-only comparison for visual parity claims.
+
+The [Radar color lookup and six-frame playback](#radar-color-lookup-and-six-frame-playback--authorized-october-19-2026)
+is implemented and flashed, with the final rate set to 1.5 seconds. Its full
+two-second measurements and normal 1.5-second startup/saved-data checks are
+complete. The original quick 1.5-second follow-up restarted before timed phases;
+the later [audit-fix run](#sprint-audit-fixes-and-ownership-consolidation--authorized-october-19-2026)
+now supplies bounded cadence and combined Rain/navigation observations at that
+rate. Its write counters do not establish acoustic continuity. The requested
+[single-pass follow-up](#radar-playback-stops-at-newest--october-19-2026)
+is implemented, software-verified, flashed and checked through normal startup.
+The earlier
+[six-frame experiment](#six-frame-compressed-radar-animation-experiment--october-19-2026)
+is complete; its restored application and three-second result describe that
+checkpoint, not completion of the current playback implementation.
+
+The [unavailable-time spacing update](#unavailable-time-spacing--october-19-2026)
+is implemented in firmware and the official reference, with focused UI/build
+verification complete and included in the Radar feature's normal-firmware flash.
+Its record distinguishes the broader native
+build interruption caused by the concurrent audio test from the passing UI test.
+Its separate physical appearance check remains unreported.
+
+The [RTC warning placement follow-up](#rtc-warning-placement-follow-up--october-19-2026)
+is implemented and software/build verified. Its pending warning is hidden on
+Time Unavailable and returns only beside the day/date when usable time returns.
+It is included in the Radar feature's normal-firmware flash; its separate
+physical appearance check remains unreported.
+
+The [October 19 clock and validation presentation corrections](#clock-and-validation-presentation-corrections--october-19-2026)
+are implemented in firmware source and the official reference. All 49 native
+checks and the firmware build pass; the updated comparison is source-based.
+It is included in the Radar feature's normal-firmware flash; its separate
+physical appearance check remains unreported.
+
+Reconciled October 19, 2026.
 
 This is the current work list. Dated entries above retain the observations and
 limits at their own checkpoints; their old remaining-work statements do not
@@ -6739,9 +7723,8 @@ from its software/device counters.
 
 The [obsolete weather generator cleanup](#obsolete-weather-generator-removal--october-18-2026)
 closes the later review's minor conflicting-writer finding. Regeneration preserves
-all asset bytes and the firmware build passes. These completed slices and the
-approved design records below are included in this checkpoint; NWS/menu firmware
-implementation remains pending.
+all asset bytes and the firmware build passes. Those completed slices and
+approved design records establish the baseline for the NWS execution below.
 
 The later [NWS alerts decision record](#nws-alerts-decision-record--october-17-2026)
 records the approved replacement direction, and the
@@ -6749,26 +7732,19 @@ records the approved replacement direction, and the
 is complete. Neither checkpoint implements the firmware replacement.
 Storm preservation statements in the Conditions-removal checkpoint describe
 what that earlier slice retained; the architecture now owns the approved NWS
-replacement and fixed weather-page order awaiting firmware implementation.
+replacement and fixed weather-page order. They are integrated in the current
+sprint. Its [execution record](#execution-progress--october-18-2026) closes the
+implementation, software tests, bounded board checks and normal-image restoration.
+Audio remains on core 1 and drawing on core 0. Physical panel/touch/acoustic and
+power-removal limits remain distinct from those completed checks.
+The [Night sound permission correction](#nws-night-sound-permission-correction--october-19-2026)
+addresses the subsequent review's F1 timing gap; its current checks and device
+verification limits are recorded in that entry. It is included in the Radar
+feature's normal-firmware flash; that inclusion does not establish its separate
+F1 timing case on the board.
 
 ### Approved work still unfinished
 
-- **NWS alerts and all approved screen/menu changes:** the
-  [prepared sprint](#sprint-nws-alerts-and-approved-screenmenu-parity--prepared-october-18-2026)
-  covers retrieval, event tracking, operating persistence, sounds, reviewed
-  clocks/list/details/settings and every later approved Wi-Fi/shared-menu
-  change, including the selected shorter-arrow time editors with large digits.
-  It includes behavior tests, firmware build, flash and unattended device
-  acceptance after release. The sprint is held for review, not dispatched or
-  released; preparation changed documentation only. Firmware implementation
-  remains pending. Product rules remain in
-  [architecture](architecture.md#nws-watches-and-warnings) and the current
-  [official visual reference](../mockups/alarm-design.html); the completed
-  [NWS](#official-nws-mockup-follow-up--october-18-2026),
-  [Wi-Fi](#wi-fi-mockup-alignment--october-18-2026) and
-  [shared-menu](#shared-menu-appearance--october-18-2026) browser/source checks
-  establish mockup integration, not firmware or board completion. No additional
-  product decision currently blocks the bounded implementation work.
 - **Sound Machine verification:** implementation, source-equation restoration,
   recording/noise balance and the prompted short listening checks are complete.
   The [October 14 accounting](../.reviews/sound-machine-sprint-2026-10-13/board/timing-closure.md)
@@ -6776,7 +7752,10 @@ replacement and fixed weather-page order awaiting firmware implementation.
   [drawing](#drawing-delays-and-efficiency-sweep--authorized-october-16-2026) and
   [attached RTC checks](#attached-rtc-unattended-checks--authorized-october-16-2026)
   cover their measured workloads; they do not prove uninterrupted audible output
-  under every condition. Remaining checks concern timer expiry/fade, the full
+  under every condition. The [NWS combined run](#execution-progress--october-18-2026)
+  additionally closes finite weather interruption/resumption, original timer
+  expiry during interruption, preview preemption and wake-alarm priority in its
+  measured workload. Remaining checks concern ordinary timer expiry/fade, the full
   sound/navigation/priority combinations and unmeasured physical behavior. Keep
   the completed gain/listening and repeat checks closed. MP3 remains the approved
   format; no ADPCM replacement or image cache is approved. Temporary probes are
@@ -6784,18 +7763,21 @@ replacement and fixed weather-page order awaiting firmware implementation.
   untested/unpublished, and its prepared bundle must be rebuilt from the intended
   source before distribution. Product rules remain in the
   [specification](architecture.md#sound-machine-playback).
-- **Radar:** the [full-screen 75-mile revision](#full-screen-radar-revision--approved-design-october-15-2026)
-  and [horizontal heading/plain-language key follow-up](#horizontal-radar-heading-and-plain-language-key--october-15-2026)
-  are implemented. The latest official reference and firmware use a horizontal
-  title/date, equal-width centered Light/Moderate/Heavy key and no bottom panels.
-  All 44 native checks, fixtures, independent review and firmware build pass;
-  prior actual-map checks cover unchanged image preparation. Application-only
-  flash and passive startup pass. The user confirms the latest appearance and
-  swipe-back behavior. The full-screen decoder-allocation defect is fixed and
-  covered by native tests enforcing the firmware bound. Subsequent combined-load
-  and RTC runs include Radar alongside weather/audio and UI activity within
-  their recorded limits. They do not establish every resource/fault/recovery
-  combination or unobserved physical state. Detailed product rules remain in the
+- **Radar verification:** the approved full-screen map, horizontal heading/key,
+  512px provider smoothing and
+  [color lookup/six-frame playback](#radar-color-lookup-and-six-frame-playback--authorized-october-19-2026)
+  are implemented and flashed. Playback now
+  [stops at the newest image](#radar-playback-stops-at-newest--october-19-2026).
+  The final fixed rate is 1.5 seconds; source,
+  all 49 native checks, build, normal startup and saved-data checks pass.
+  Full combined audio/drawing measurements cover the earlier two-second setting.
+  The later audit-fix run observes both 1.5-second Play/Pause/Resume passes under
+  Rain, with no returned audio-write error; it closes that bounded cadence gap,
+  while physical audio continuity and unmeasured combinations remain unverified.
+  Retain the prior confirmed
+  map appearance/swipe-back observations and completed resource/recovery checks;
+  these do not establish every fault combination or physical display, touch and
+  acoustic behavior. Product rules remain in the
   [Radar specification](architecture.md#radar-source-and-palette).
 - **Immediate Alarm Settings On/Off verification:** implemented, checked in
   software and included in subsequent firmware loads. Its separate physical

@@ -14,16 +14,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("size", type=int, nargs="?", help="Optional square output size in pixels")
     parser.add_argument("--width", type=int, help="Explicit output width in pixels")
     parser.add_argument("--height", type=int, help="Explicit output height in pixels")
-    parser.add_argument(
-        "--blur",
-        type=float,
-        default=0.0,
-        help=(
-            "Gaussian blur radius in pixels, applied to the rasterized PNG after rendering. "
-            "cairosvg does not implement SVG <filter>/feGaussianBlur (it silently drops them), "
-            "so any blur must happen here as a post-process step instead of in the SVG itself."
-        ),
-    )
     return parser.parse_args()
 
 
@@ -100,26 +90,12 @@ def main() -> int:
         if output_height is None:
             output_height = dimensions[1]
 
-    if args.blur > 0:
-        from io import BytesIO
-
-        from PIL import Image
-
-        png_bytes = cairosvg.svg2png(
-            url=str(input_path),
-            output_width=output_width,
-            output_height=output_height,
-        )
-        image = Image.open(BytesIO(png_bytes))
-        blurred = apply_gaussian_blur_rgba(image, args.blur)
-        blurred.save(output_path)
-    else:
-        cairosvg.svg2png(
-            url=str(input_path),
-            write_to=str(output_path),
-            output_width=output_width,
-            output_height=output_height,
-        )
+    cairosvg.svg2png(
+        url=str(input_path),
+        write_to=str(output_path),
+        output_width=output_width,
+        output_height=output_height,
+    )
     return 0
 
 

@@ -45,12 +45,11 @@ render_stage_asset() {
 render_alpha_asset() {
   local svg_name="$1"
   local symbol="$2"
-  local blur="${3:-0}"
-  local format="${4:-argb8888}"
+  local format="${3:-argb8888}"
   local svg_path="$PROJECT_DIR/assets-src/analog/${svg_name}.svg"
   local png_path="$PNG_DIR/${svg_name}.png"
 
-  "$PYTHON_BIN" "$PROJECT_DIR/tools/rasterize_svg.py" "$svg_path" "$png_path" --blur "$blur"
+  "$PYTHON_BIN" "$PROJECT_DIR/tools/rasterize_svg.py" "$svg_path" "$png_path"
   "$PYTHON_BIN" "$PROJECT_DIR/tools/generate_lvgl_image.py" \
     --input "$png_path" \
     --symbol "$symbol" \
@@ -78,9 +77,9 @@ if ! $hands_only; then
   render_stage_asset day analog_stage_day
   render_stage_asset night analog_stage_night
 fi
-render_alpha_asset hour_hand analog_hour_hand 0 rgb565a8
-render_alpha_asset minute_hand analog_minute_hand 0 rgb565a8
-render_alpha_asset second_hand analog_second_hand 0 rgb565a8
+render_alpha_asset hour_hand analog_hour_hand rgb565a8
+render_alpha_asset minute_hand analog_minute_hand rgb565a8
+render_alpha_asset second_hand analog_second_hand rgb565a8
 if $hands_only; then
   echo "Analog hands regenerated."
   exit 0

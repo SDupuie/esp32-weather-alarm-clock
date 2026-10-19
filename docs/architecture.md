@@ -1,10 +1,10 @@
 # Weather alarm clock architecture and product specification
 
-Revised October 18, 2026. This is the main authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. Detailed weather condition mappings and their decision status are maintained in [weather.md](weather.md). Neither document is an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
+Revised October 19, 2026. This is the main authoritative specification for approved product behavior, defaults, accepted tradeoffs, module/resource/task ownership, integration and source placement. Detailed weather condition mappings and their decision status are maintained in [weather.md](weather.md). Neither document is an implementation sequence or evidence of completed firmware. Undecided behavior is not implicitly approved.
 
 Build the weather alarm clock for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C using the existing ESP-IDF application. Only ESP32-P4 is supported. There is no requirement to maintain Raspberry Pi behavior, another firmware implementation, or backward compatibility with their settings or interfaces.
 
-Keep the existing weather, location selection, Wi-Fi and House Messages capabilities, including the browser messaging page. The approved [NWS watches and warnings](#nws-watches-and-warnings) replace the former provider-threshold storm feature; the official mockup integration is complete through October 18, 2026, and firmware implementation remains pending. No multiple-alarm feature, ambient-light sensor, battery-voltage monitor, outage log or separate diagnostics screen is introduced.
+Keep the existing weather, location selection, Wi-Fi and House Messages capabilities, including the browser messaging page. The approved [NWS watches and warnings](#nws-watches-and-warnings) replace the former provider-threshold storm feature; the official mockup owns their reviewed appearance. Implementation and verification are recorded in [work.md](work.md#current-work). No multiple-alarm feature, ambient-light sensor, battery-voltage monitor, outage log or separate diagnostics screen is introduced.
 
 [AGENTS.md](../AGENTS.md) defines working rules. [README.md](../README.md) provides the user-facing project overview, features, hardware, setup and user guide. Development status and verification records belong in [docs/work.md](work.md). Detailed build and test instructions remain in [targets/esp32-p4/README.md](../targets/esp32-p4/README.md) and [targets/esp32-p4/tests/README.md](../targets/esp32-p4/tests/README.md).
 
@@ -394,6 +394,62 @@ The official reference owns the complete appearance and exact
 exceptions, while [work.md](work.md#shared-menu-appearance--october-18-2026)
 records integration and firmware parity status.
 
+**Rendered presentation corrections, approved October 19, 2026:** keep long
+Wi-Fi network names and compact Messaging values on one line with an ellipsis;
+the editors retain their complete values. Warning Sounds has a single-line
+heading centered in its existing heading area. Night Alert Sounds also stays on
+one line. Only the parent Alerts menu shows **Uses alarm volume**; its Watch,
+Warning and Update Sounds children omit that repeated subtitle. Selected radio
+rows use the selected fill, accent border and dot; individual NWS checkbox rows
+retain their existing border selection.
+
+Scrolling lists share 520px content at x140, a 12px gap and a 10px scrollbar at
+x672. Show the scrollbar only when the content exceeds its viewport; retain
+each list's existing viewport height, row layout and text wrapping. This covers
+Sound Machine sounds, Wi-Fi networks, Watch/Warning Sounds, Active Alerts and
+Alert Details. Sound Machine retains its interactive scrollbar; the other bars
+are visual indicators with ordinary content scrolling. Alert title and expiry
+are centered together inside each row, using the complete measured text height.
+Active Alerts and Alert Details use the shared menu stage background; unavailable
+Radar uses its reference's subtle radial background.
+
+All keyboard fields use the existing 520×96 active field at (140,256). The four
+shared keyboard pages retain their keys and actions; their bottom row uses the
+existing LVGL width weights 5:3:14:3:3:3, giving 85/51/240/51/51/52px keys on the
+800px surface. The official reference follows those rendered widths. Sliders
+retain their existing ranges, steps and 450×8 rail at x175, with a 36px knob whose
+center reaches both rail endpoints. Radar retains the native Play/Pause glyphs.
+
+Digital's weather condition-to-high/low gap is 12px, matching the Analog high/low
+gap. Ringing, Snoozed and dismissal confirmation use the normal Day Digital time
+and AM/PM positions in both appearances; the enlarged Night Digital clock remains
+its separate approved layout. Disabled Snooze retains its blue or maroon fill at
+40% opacity. The unread-message Night edge uses the reference's muted pink tint;
+important-message coloring and pulsing are unchanged. These corrections change
+presentation without changing saves, input limits, alarm decisions, playback or
+retry behavior. The [work record](work.md#approved-rendered-presentation-corrections--october-19-2026)
+separates rendered checks from physical board verification.
+
+**Clock and validation presentation, approved October 19, 2026:** Ringing,
+Snoozed and dismissal confirmation use the reference's title-case weekday/month
+and shared date position. Without usable time, keep Sound Machine, NWS alerts
+and Settings reachable below Alarm Settings, using the Digital clock's shortcut
+row. Raise the unavailable-time content above that fixed row, leaving clear
+space between Alarm Settings and the shortcuts. Keep the missed-alarm notice
+above the sync message so it does not compete with that row. The RTC warning indicator appears only to the left of the day/date
+on the clock faces; hide it and its popup on Time Unavailable, retaining the
+warning. If time becomes unavailable with the popup open, close it without
+acknowledgment. When usable time returns, show the retained warning's indicator
+beside the date, opening the notice only when tapped.
+This changes presentation and exposes the existing shortcuts; it does not make
+time usable, enable time-dependent alert headlines or change alarm eligibility.
+
+Weather's Save button keeps its label during location lookup and provider/key
+validation, retaining the existing disabled state while a save is pending.
+Both checking messages and provider-validation failure use the common short
+subtitle position and size. Keep provider failure guidance on one line so it
+clears the first row. Validation, retained drafts and retry behavior are unchanged.
+
 Messaging's distinct
 Device ID guidance is vertically centered in the fourth-row space, with its
 three controls kept in their standard positions; normal messages replace that
@@ -402,8 +458,7 @@ Device Setup's Weather entry opens the Weather editor with the common single-lin
 heading placement. The official layout has four rows in this order:
 **Weather Location, Provider, Alerts, Units**. Alerts replaces the separate API
 Key row and sits directly below Provider; API-key entry moves inside the
-Provider editor. This rearrangement is present in the official mockup; firmware
-integration remains pending. Tapping the whole Weather Location row opens its usual
+Provider editor. This rearrangement follows the official mockup. Tapping the whole Weather Location row opens its usual
 input/keyboard; location, units, lookup and independent save/restart behavior
 remain.
 
@@ -458,6 +513,15 @@ Night Shift modes remain Off, Always On, Fixed Schedule and Sunset to Sunrise. F
 Local solar calculation uses the saved coordinates and usable clock time, independently of weather downloads. Keep each event's full UTC date/time, using local calendar days rather than adding 24 hours across daylight-saving changes. Apply offsets as elapsed minutes to those events. Night begins at the shifted sunset and ends at the following shifted sunrise; if the offsets remove that interval by moving its start to or beyond its end, there is no Night interval for that pair. Missing required events use the existing appearance-retention/startup fallback rules.
 
 The Sunrise/Sunset Offsets page shows tonight's start and tomorrow's end from the Night owner's copied raw events, formatted with the selected 12/24-hour preference. Draft offsets preview those displayed times without changing the running appearance or writing storage. Refresh the times in place; retain the approved unavailable layout when they cannot be calculated.
+
+When solar scheduling lacks usable time, identify the wait for time sync. With
+usable time but no applied weather location, identify the missing location and
+direct the user to set one. If both inputs exist but the required solar events
+are unavailable, retain the generic unavailable-events guidance. Show the same
+reason in the Night Shift summary when Sunset to Sunrise is selected; refresh
+open views without discarding drafts. Trustworthy backup-clock time remains
+sufficient even while network synchronization is pending. These notices describe
+the existing appearance/brightness fallback; they do not change its behavior.
 
 Defaults: Off, fixed endpoints 22:00/06:00, zero solar offsets and Day/Night brightness 80%/30%. Solar-offset choices are -120..+120 minutes in five-minute steps; brightness choices are 20..100%.
 
@@ -573,19 +637,15 @@ retry interval. See the [provider's error guidance](https://www.visualcrossing.c
 
 #### Storm detection
 
-The approved [NWS replacement](#nws-watches-and-warnings) supersedes the earlier
-requirement to retain provider-threshold storm detection, the right-edge storm
-glow and storm-first weather navigation. Those paths still exist in the current
-firmware pending replacement; their earlier preservation during Conditions
-removal is not a requirement to keep them alongside NWS alerts. Retire their
-exclusive calculations, indicator and tests when the replacement is integrated
-and verified. Current-weather classification, forecasts and daily-picture
-selection retain their existing owners and [weather mapping rules](weather.md).
+The approved [NWS alerts](#nws-watches-and-warnings) replace the former
+provider-threshold storm decisions, right-edge glow and storm-first navigation.
+Keep no competing threshold alert result. Current-weather classification,
+forecasts and daily-picture selection retain their existing owners and
+[weather mapping rules](weather.md).
 
 #### NWS watches and warnings
 
-**Approved decisions through October 18, 2026; official mockup integration
-complete through October 18, firmware implementation pending.** This section
+**Approved decisions through October 18, 2026.** This section
 records the final decisions from the alert design discussion. It supersedes
 earlier experimental alternatives and the old
 ad hoc storm feature, without changing unrelated approved screens or services.
@@ -721,12 +781,10 @@ sound categories: **Watches**, **Warnings**, **Watches + Warnings**, or **Silent
 Silent means both sound families are Off; it does not disable visual alerts or
 mean that no watches or warnings are active.
 
-The Alerts screen has the following settings, plus the note **Uses alarm volume**.
-Alerts, Watch Sounds, Warning Sounds and Update Sounds use the standard settings
-title placement and short-subtitle treatment for that note, as shown in the
-official visual reference.
+The Alerts screen has the following settings. Headings and subtitles follow the
+[shared presentation rules](#ui-and-visual-reference).
 The approved October 18 update-sound addition is included in the official
-mockup; firmware integration remains pending. The requested order is:
+mockup. The order is:
 
 - **Watch Sounds:** a scrollable multi-select list with **Off**, **All watches**
   and the named NWS watch types. Off and All watches are exclusive choices;
@@ -748,6 +806,8 @@ mockup; firmware integration remains pending. The requested order is:
   Night Shift; Off suppresses those sounds during Night Shift. It does not hide
   visual alert indicators or alter daytime sound selections. This final label
   replaces Night Alerts and Night Audible Alerts.
+  If a download spans a Day/Night transition, use the Night owner's current
+  appearance when selecting an eligible sound, rather than its pre-download value.
 
 Watch and warning selections are independent. Use the alarm volume, with no
 separate alert volume control. Retain full NWS Watch/Warning names in the
@@ -852,7 +912,7 @@ it does not narrow the separately approved visual headline behavior below.
 
 These reviewed changes, including the October 18 Night alert-text follow-up, are
 integrated into the official normal Analog and Digital faces, in Day and Night
-appearance where applicable; firmware implementation remains pending. The
+appearance where applicable. The
 official visual reference owns the exact reviewed geometry. The
 native pixel sizes below record explicit
 uniformity decisions, not permission to redesign surrounding elements.
@@ -998,7 +1058,8 @@ status must not be presented as a successful check finding no active alerts.
   designation. Use NWS update relationships rather than treating every updated
   message identifier as a genuinely new weather event; the
   [NWS alert documentation](https://www.weather.gov/media/alert/CAP_v12_guide_05-16-2017.pdf)
-  describes those relationships. Exact comparisons are still to be specified.
+  describes those relationships. The [ownership rules](#ownership) define event
+  matching and update comparison.
 - A genuinely **new watch or warning reopens the text even if lower priority**
   than a dismissed event. Select the highest NWS priority among new or escalated
   events not covered by dismissal. An older, higher-priority dismissed event
@@ -1019,21 +1080,19 @@ failure presentation, restart retention, save failures, unreadable-data fallback
 headline dismissal, sound patterns/durations/defaults, update-sound rules,
 minimum separation and audio interactions are settled above.
 
-Event/update matching, equal-priority headline ties, bounded storage layout,
-playback coordination and owner placement remain implementation details to
-specify and test. They must preserve the approved behavior and use NWS update
+The [ownership rules](#ownership) define event/update matching, equal-priority
+ties, bounded storage layout and playback coordination. They use NWS update
 relationships rather than prototype shortcuts. The official mockup is updated
-through October 18; the [work record](work.md#official-nws-mockup-follow-up--october-18-2026)
-contains its source and browser checks. This review does not implement firmware
-or establish build/device verification.
+through October 18. Implementation, source/browser checks and device verification
+are recorded in the [work record](work.md#current-work); the specification alone
+does not establish passing firmware or device checks.
 
 No new settings beyond those listed, permanent service/task, new source path,
 general persistence framework or alert history is approved merely by this
 record. Reuse the existing facilities and obtain any required source-path
-approval before implementing a path outside the planned tree. Weather-artwork
-storage optimization remains the separate
-[deferred consideration](work.md#deferred-or-unapproved-work), not part of NWS
-alert integration.
+approval before implementing a path outside the planned tree. Preserve the
+separately approved [weather-artwork format](#weather-icons) during alert
+integration.
 
 #### Location resolution
 
@@ -1126,7 +1185,7 @@ shows original colors on the left and the approved palette on the right, with
 a background map and town labels. It is a palette reference, not an approved
 clock screen layout or a location default.
 
-**Approved October 17, 2026; firmware integration pending:** use the fixed weather order
+**Approved October 17, 2026:** use the fixed weather order
 **Clock → Forecast → Radar** at supported U.S. locations, with the existing
 left/right swipes and the reverse order when returning. Active watches,
 warnings and their dismissal do not reorder these pages. This replaces the
@@ -1144,10 +1203,8 @@ The Conditions screen is retired by the October 17, 2026 decision. Remove its
 renderer, private interfaces, exclusive assets, generators, display-only data
 and calculations, tests and official mockup page. No inactive screen, fallback
 route, settings switch, alternate build mode or backup copy is retained. Keep
-current weather and forecast selection. The storm paths retained during that
-removal are superseded by the separately approved [NWS replacement](#nws-watches-and-warnings)
-when it is integrated; Conditions retirement does not authorize removing
-working storm behavior before that replacement is ready.
+current weather and forecast selection. Official watches and warnings follow
+the separately approved [NWS rules](#nws-watches-and-warnings).
 
 Use the dark USGS National Map USGSTopo background with brighter printed town
 labels, roads and terrain, following the Weather Radar page in the
@@ -1194,22 +1251,57 @@ inset map. This is a ground-distance coverage
 requirement, not a provider zoom-level number. Keep this coverage when units or
 latitude change. Use a small marker for that location, automatic updates and a
 visible frame timestamp. The marker represents the resolved weather location, not the
-clock's precise physical position. Show only the latest image; no animation,
-timeline, zoom or pan controls are introduced. Preserve the selected appearance,
-town labels, legend and source credits. After a failed update, keep the last
+clock's precise physical position. Opening Radar shows the latest still image.
+Preserve the selected appearance, town labels, legend and source credits. After a failed update, keep the last
 image with its original timestamp and clearly mark it as old. For an enabled
 Radar page with no image yet received, show “Radar unavailable.” These first-version choices were
-approved on October 15, 2026; they do not establish a completed implementation.
+approved on October 15, 2026; the playback addition below supersedes the original
+latest-image-only restriction. Implementation evidence belongs in work.md.
 
 Check RainViewer for a newer frame every **five minutes** after the initial
 attempt when Wi-Fi and the saved location are ready. Download replacement radar
-imagery only when needed for a newer frame, the current location or a retry of
-an incomplete image; an unchanged frame is not a download failure and does not
-make its timestamp newer. The displayed time is the provider's frame timestamp,
+imagery only when needed for a newer frame, the current location, the six-frame
+history below or a retry of an incomplete image. Reuse unchanged cached frames;
+an unchanged frame is not a download failure and does not make its timestamp newer. The displayed time is the provider's frame timestamp,
 not the time this clock checked for updates. This interval does not change
 forecast/current-condition refresh, retry or quota behavior. The fixed coverage
 and interval were selected on October 15, 2026. They are built-in values; no
 radar settings or zoom slider are introduced for this pass.
+
+**Approved October 19, 2026:** retain up to six distinct ten-minute RainViewer
+frames from the latest hour and offer Play/Pause on Radar. Six ten-minute samples
+have a fifty-minute span between the first and last timestamps; do not fabricate
+an extra image or describe that endpoint span as sixty minutes. Fetch the latest
+image first, then fill older history. Playback runs oldest to newest **once**,
+at a target of **1.5 seconds per frame**, revised from two seconds by the user
+on October 19. On reaching the newest available frame, stop in the ordinary
+latest-image state: hold that image, show Play again and omit the Paused label.
+The existing five-minute checks keep that still image current. Another Play
+starts a new pass from the oldest available frame. This single-pass behavior
+replaces looping by the user's October 19 follow-up. Prepare
+the next image ahead; if work runs late, hold the current image until ready,
+without a catch-up burst or skipping through intermediate frames.
+
+Use one 80-pixel round Play/Pause control centered at `(400, 612)`, with a
+104-pixel touch target, above the existing legend. Keep horizontal swipes working
+when they start on the control. Play from latest still mode starts at the oldest
+available frame; Pause holds the frame actually shown and appends **Paused** to
+its timestamp. Resuming advances to the next chronological frame; if already at
+the newest available frame, finish in the latest-image state without rewinding.
+Leaving Radar,
+opening settings or alarm preemption stops playback and returns to the latest
+still image; returning to Radar starts in that mode. No timeline, zoom, pan,
+playback-speed setting or saved playback preference is introduced.
+
+The control remains disabled until history loading finishes and at least two
+complete frames are available. A failed older-image download must not discard a
+good latest image; a partial history may play once loading finishes. Metadata
+checks continue every five minutes during playback. Keep frame timestamps and
+existing failed-update/old-image handling, without labeling intentionally selected
+historical frames old solely because they precede the latest frame. There is one
+bounded in-memory cache of compressed source tiles, shared by both output image
+slots; no flash history or six-image decoded cache is introduced. Location changes
+discard the previous compressed history before preparing the new background.
 
 Use green below 35 dBZ, yellow from 35 through 44 dBZ and red at 45 dBZ and
 above. dBZ measures radar echo strength; these colors are not a direct rainfall
@@ -1244,7 +1336,11 @@ blending with the background, retaining the provider's smoothed transparency.
 Verify the smoothed source colors against the published table; transparency
 changes must not invalidate an otherwise supported color. Unknown visible
 colors must retain the existing failed-update handling rather than be assigned
-an invented echo strength. Some source colors represent several echo strengths,
+an invented echo strength. The exact source RGB-to-output RGB lookup preserves
+the previous mapping, including the first/lower echo strength for duplicate
+source colors, zero-alpha handling and validation of every visible source pixel
+before output sampling. It does not alter smoothing, transparency or blending.
+Some source colors represent several echo strengths,
 so the mapping must not imply exact strength within those ranges. Keep the
 existing output sampling for this change; no clock-side blur or bilinear filter
 is introduced. A separate snow presentation has not been selected. The
@@ -1272,6 +1368,10 @@ background and names in RAM; no persistent map store is introduced. Implementati
 #### Message Contract
 
 - Message polling interval: every 15 seconds
+- Failed shared-client polls retain the last good cache and use the same
+  15-second interval. The first poll after runtime reset and an explicit refresh
+  after acknowledgment remain immediate. Selecting a replacement hub does not
+  reset an existing poll interval.
 - Each device has:
   - `deviceId`
   - `roomName`
@@ -1292,6 +1392,15 @@ background and names in RAM; no persistent map store is introduced. Implementati
   - acknowledges the current message for the local device
   - returns to the previous home view
 - The browser's Active Messages list shows all active, unexpired messages, including messages targeted to an individual clock. Dismissal on a clock does not remove a message from this list. The browser's Deactivate action makes the message inactive for every clock. Its existing `deviceId=all&includeDismissed=true` request selects the browser list; normal clock polling and device views remain filtered to messages addressed to that device or to all clocks, including when a clock's own ID is `all`.
+- A failed browser list refresh retains any displayed cards and uses the existing
+  error feedback. Only a successful response with a messages array can replace
+  the list or report that no active messages exist.
+- Refreshing browser destinations preserves the user's current selection. A
+  failed response retains the current options; a successful list temporarily
+  missing the selected room keeps that room and its label available. Refreshing
+  discovery data must not silently change a room message to All clocks. A named
+  destination need not be currently discovered for the existing service to
+  accept a message for it.
 
 #### Shared-Clock Message Behavior
 
@@ -1319,12 +1428,11 @@ UI screen assignments follow the [approved visual reference](#ui-and-visual-refe
 
 | Owner | Responsibility and authoritative state |
 |---|---|
-| `main.c` | Startup and application task creation. Its existing weather worker owns forecast refresh/retry and independent Radar check deadlines, the retained forecast payload and copied Radar publication. It reports an offline due Radar check to the image owner. The UI heartbeat assembles copied owner snapshots and acknowledges safe image replacement; UI selects their presentation. Alarm, time-trust and appearance decisions remain with their feature owners. |
+| `main.c` | Startup and application task creation, clock-control and UI integration. The UI heartbeat assembles independent copied owner snapshots and acknowledges actual safe Radar image replacement. Startup and the heartbeat use one static display staging record with a sequential ownership handoff. Main retains no authoritative weather/Radar store; UI selects presentation. |
 | `device_config.c/.h` | Applied user settings, defaults, validation, serialized settings writes and publication after successful saves. Settings UI owns drafts. |
 | `connectivity.c/.h` | Network initialization, connection and scan state, and network-time synchronization transport/completion. Time trust and system timezone application belong to `clock_time`. |
-| `weather_client.c/.h` | Serialized weather/Radar requests, provider and PNG decoding, in-memory forecast-key quota admission, and the current Radar preparation/image buffers. Forecast/Radar scheduling and copied publication belong to the existing weather worker in `main.c`. |
+| `weather_client.c/.h` | The existing weather worker and forecast/retry, Radar and NWS deadlines; serialized requests, provider/PNG decoding and in-memory forecast-key quota admission. Owns retained applied weather, completed Radar publication/actual display acknowledgment, image preparation/buffers, bounded compressed history/playback and the single NWS catalog/event/dismissal/sound-history/operating-record state. Raw fetch remains nonpublishing for Settings validation. The worker consumes short Radar controls and prepares frames; UI performs no HTTP or image processing. |
 | `forecast_representative.c/.h` | Representative forecast calculation; no live weather state. |
-| `storm_conditions.c/.h` | Existing pure fixed-limit storm calculation, retained only until the approved NWS replacement is integrated and verified; it is not the future official-alert authority. No live weather state or screen formatting. |
 | `location_lookup.c/.h` | Geocoding requests and lookup results. `device_config` owns saved location values. |
 | `location_scoring.c/.h` | Query parsing, candidate ranking, resolved-label formatting and country-token checks; no saved location state. |
 | `timezone_table.c/.h` | Timezone mapping data used for validation and conversion. `clock_time` applies the selected mapping to the system clock's local-time rules. |
@@ -1336,15 +1444,47 @@ UI screen assignments follow the [approved visual reference](#ui-and-visual-refe
 | `ds3231.c/.h` | RTC register access through the board's existing I2C bus. RTC trust/correction decisions belong to `clock_time`; board facilities own the bus. |
 | `alarm.c/.h` | Live alarm state, dated one-time target/completion, snooze, dismissal, missed notice and their operating-record storage. Occurrence calculations belong to `alarm_schedule`. |
 | `alarm_schedule.c/.h` | Recurring and next one-time occurrence calculations, including DST; no live alarm state, storage or execution task. |
-| `audio.c/.h` | Sound definitions, speaker/codec access, MP3 and generated-noise playback, Sound Machine timer/fade and status, volume progression, preview lifetime and ringing/preview/Sound Machine priority. Alarm owns whether ringing is required. |
+| `audio.c/.h` | Sound definitions, speaker/codec access, MP3 and generated-noise playback, Sound Machine timer/fade and status, volume progression, preview lifetime and ringing/weather-alert/preview/Sound Machine priority. Owns finite weather playback and completion receipts; the weather owner selects eligible events and the alarm owner decides when ringing is required. |
 | `night.c/.h` | Effective appearance, its remembered value and backlight transitions. Owns the private adjacent-day solar cache and publishes raw events for Settings. Saved preferences belong to `device_config`; solar calculations belong to `solar_times`. |
 | `solar_times.c/.h` | Solar-event calculations and unavailable-event results. `night` decides their effect on appearance. |
 | `ui/ui.c` | UI lifetime, active view and navigation, including return destinations, gestures and first-use entry; overlays, alarm preemption, input routing and presentation selection. Also holds the small drawing helpers shared by the renderers. Touch actions go to the correct feature owner; feature decisions remain with those owners. |
 | `ui/clock_views.c` | Rendering and object handles for analog/digital faces, unavailable time, ringing/snoozed clock surfaces, next alarm, missed alarm, clock status and backup-clock indicator/notice. Active-view and navigation state belong to `ui.c`. |
-| `ui/weather_views.c` | Rendering and private object handles for Forecast, Radar, messages and empty/important styling; storm treatment and weather status/warnings. Consumes supplied snapshots and presentation inputs without retaining another weather/message model or active-view state. Navigation, retained display snapshots, displayed-message identity and dismissal completion decisions belong to `ui.c`; message operations belong to `message_service`. Clock-edge objects remain with `clock_views.c`. |
+| `ui/weather_views.c` | Rendering and private object handles for Forecast, Radar, House Messages, NWS alert lists/details and their status presentation. Consumes supplied snapshots and presentation inputs without retaining another weather/message model or active-view state. Navigation, retained display snapshots, displayed-message identity and dismissal completion decisions belong to `ui.c`; message operations belong to `message_service`. Clock-edge objects remain with `clock_views.c`. |
 | `ui/settings.c` | Rendering and controls for Settings entry; Device Setup; Display settings and Messaging; Weather; Wi-Fi list, credentials and progress; Alarm, Time, Repeat/Custom Days, Sound and Snooze editors; Sound Machine and its selectors; Night Shift mode, fixed/solar schedule, offsets and brightness. Owns drafts, nested editing, immediate Sound Machine controls, validation/save/lookup presentation and submission of user changes, with its row/button, time-input and keyboard helpers kept in this file. Applied settings belong to `device_config`. |
 
-A copied value is a snapshot for a consumer, not another authority. Runtime fields about time and appearance come from their owners. Screens do not calculate alarm eligibility, infer RTC health, or drive the backlight. Feature-owner headers declare their own data; `app_runtime.h` holds data used for display, including values required by the approved weather age/stale presentation. Intermediate forecast calculations stay with `weather_client`; the display consumes the selected icon. Until NWS integration, the existing weather snapshot retains one storm-alert result; the view does not retain another weather model or recalculate storm decisions. NWS retrieval, event/dismissal state and storage must each have a single owner; their implementation placement is not selected by the experimental UI or this decision record. There is no general `wac_types.h` container. DS3231 access reuses the board bus and existing driver facilities without creating a second bus or an application fork of downloaded drivers.
+A copied value is a snapshot for a consumer, not another authority. Runtime fields about time and appearance come from their owners. Screens do not calculate alarm eligibility, infer RTC health, or drive the backlight. Feature-owner headers declare their own data; `app_runtime.h` holds data used for display, including values required by the approved weather age/stale presentation. Intermediate forecast calculations stay with `weather_client`; the display consumes the selected icon. The forecast snapshot contains no competing storm-alert decision. The October 18 execution allocation below selects the NWS owners; the experimental UI is not its implementation. There is no general `wac_types.h` container. DS3231 access reuses the board bus and existing driver facilities without creating a second bus or an application fork of downloaded drivers.
+
+**NWS execution allocation, October 18, 2026:** keep the catalog and complete
+active-event data in `weather_client`, with a task mutex separate from HTTP
+and NVS operations. Reconciliation remains interruptible by audio; it does not
+disable interrupts around parsing, memory allocation or record copies. UI receives a small summary and copies ordered rows or full
+selected details only when needed; it never retains pointers into mutable owner
+data. Dismissal covers all events present at the tap without storage I/O in the
+callback. The weather worker performs pending operating saves.
+
+Match CAP references, expired references and validated operational VTEC
+relationships, retaining event identity across message revisions. Equal published
+priority sorts by stable event identity. Reject incomplete or oversized candidate
+collections as failures without truncating protective text. Evaluate cutoffs and
+dismissal under the short state lock even while request/save work is blocked.
+
+Use ordinary per-event NVS blobs rather than rewriting a whole alert collection;
+replacement temporarily needs the old and new blob together. Keep records bound
+to the saved location and forget removed events, rather than keeping history.
+Store complete area/headline/description/instructions and a SHA-256 fingerprint
+of canonical non-display comparison fields, without retaining duplicate geometry
+and parameter text solely to identify a substantive update.
+The existing 24 KiB budget and actual replacement behavior must be measured;
+this allocation does not approve compression, partition changes or text loss.
+
+Audio receives only the selected pattern and owns one bounded request/receipt,
+retained until the event owner consumes its actual-start time. Event eligibility
+and separation remain with the event owner. Normal checks are farther apart than
+either pattern; skip an exceptional busy request without queuing a delayed sound.
+Reuse Sound Machine's original timer and session during weather interruption,
+and discard its resume intent when a wake alarm or hardware playback failure
+stops it. Keep the existing stopped/error behavior after a hardware failure.
+No new source module, worker, catalog copy or persistence framework is selected.
 
 Scan failures, validation errors, keyboards, previews, day/night styles and waiting states are states of the assigned views. They do not require separate files or managers. Keep only one set of each live UI object's handles and one active-view owner. Clock object handles remain private to `clock_views.c`; its private interface receives display inputs and callbacks from `ui.c` without exporting the shell's state or retaining another service/configuration model. Forecast, Radar, message and weather-status object handles remain private to `weather_views.c`; the shell supplies current drawing inputs and visibility, without directly manipulating those objects. `ui/ui_private.h` contains declarations shared only by these UI files, not a second state model.
 
@@ -1384,11 +1524,33 @@ without changing sampling, palette or alpha arithmetic. The final image is opaqu
 physical screen clips its square corners. A complete image stays immutable
 while published. The heartbeat replaces or detaches the UI image source and
 evicts its cached descriptor under the display lock, then acknowledges that
-generation. Only then may the client reuse the previous slot, including when
-Radar is hidden. Keep a failed short-copy publication pending instead of losing
+generation. The weather owner retains the completed display publication and
+actual accepted generation under its short copied-state mutex, separate from
+mutable worker preparation. A failed publication freezes the worker candidate
+and retries it before another Radar mutation; no intermediate descriptor is
+retained in main. Candidate finalization may run under the command critical
+section, but a potentially waiting publication mutex is acquired only after
+that section is released. Radar publications wake the existing UI task after
+releasing the copied-state mutex; its independent one-second clock deadline remains. This
+avoids rounding Radar updates to one-second polling without adding a UI
+task or increasing every ordinary heartbeat to animation speed. Only after the
+acknowledgment may the client reuse the previous slot, including when Radar is hidden. On a location change, acknowledge the invalid image publication
+before freeing both obsolete output slots, then decode the new background with
+that memory available. Playback-mode commands retain pending metadata and an
+already-running latest-image preparation; they cancel obsolete historical-image
+preparation when Latest is selected. Keep a failed short-copy publication pending instead of losing
 its buffer handoff. The existing weather worker advances one bounded image step
-between opportunities to service forecast and time work; no new worker, queue,
-image store or general job mechanism is introduced.
+between opportunities to service forecast and time work. A short control mailbox
+wakes that same worker for Play/Pause/Latest; no new worker or general job
+mechanism is introduced. Keep at most six frame records and compressed tile data,
+with the tile arrays and retained HTTP capacities included in a 4 MiB PSRAM cap.
+Allocate tile records for the current coverage rather than reserving maximum
+geometry in internal RAM. The two final images remain the only decoded output
+slots. Pause names the displayed frame; a publication copied just before that tap
+must not overwrite it or release its buffer early. The UI acknowledges only the
+generation it actually accepted or safely detached. The five-minute metadata
+deadline remains independent of active playback. Ordinary serialized network work
+can delay preparation; the current image stays visible during that delay.
 
 ### Execution
 
@@ -1526,6 +1688,10 @@ Alarm editor. No second draft or saved return route is created.
 For House Messages dismissal, UI submits copied displayed-message and device IDs to the existing message worker. `message_service` performs local acknowledgment or the shared-hub request and returns completion data. UI waits for successful acknowledgment before returning to the prior home view; failure retains the message and is reported. Completion must not override alarm preemption or navigate a view the user has already left. `ui.c` owns this navigation; `message_service` owns the acknowledgment and updated message snapshot. Disable duplicate dismissal while pending and report submission failure. No additional permanent worker or general job system is needed.
 
 The existing UI heartbeat gathers owner snapshots before taking the display lock.
+Weather-copy failure does not suppress independent clock or message reads.
+Startup finishes using its static display staging record before creating the
+heartbeat; only that task then writes the same record. UI consumers copy retained
+inputs synchronously and do not retain a pointer to the outer staging object.
 Schedule its updates at fixed one-second intervals, including its work in that
 period. After an overrun, update current state without replaying missed frames.
 Retain the UI task's minimum-stack observation after valid weather updates,
@@ -1576,14 +1742,13 @@ Paths are relative to the repository root. This is the structural allocation, no
 ```text
 targets/esp32-p4/
   main/
-    main.c                              Startup, application tasks and weather/Radar scheduling
+    main.c                              Startup, task creation, clock-control and UI integration
     app_runtime.h                       Copied status for display
     app_ui.h                            Sole public UI interface
     device_config.c / .h                Settings defaults, validation and NVS saves
     connectivity.c / .h                 Wi-Fi connections/scans and network time
-    weather_client.c / .h               Weather/Radar requests, decoding and image buffers
+    weather_client.c / .h               Weather worker/schedules/retention; Radar images; NWS events/records
     forecast_representative.c / .h      Representative forecast calculations
-    storm_conditions.c / .h             Shared storm-alert calculation
     location_lookup.c / .h              Geocoding requests and lookup results
     location_scoring.c / .h             Location query parsing, ranking and resolved labels
     timezone_table.c / .h               Timezone mapping data
@@ -1596,19 +1761,19 @@ targets/esp32-p4/
     ds3231.c / .h                       DS3231 register access on the board I2C bus
     alarm.c / .h                        Alarm, one-time target, snooze and missed notices; NVS records
     alarm_schedule.c / .h               Recurring/one-time occurrence and DST calculations
-    audio.c / .h                        Alarm/preview and Sound Machine playback, timer and volume
+    audio.c / .h                        Alarm/weather/preview and Sound Machine playback, timer and volume
     night.c / .h                        Day/Night appearance, fallback and backlight
     solar_times.c / .h                  Sunrise/sunset and unavailable-event calculations
     ui/
       ui.c                              Navigation, alarm preemption and input routing
       ui_private.h                      Declarations shared only by these UI files
       clock_views.c                     Clock, ringing and clock-status rendering
-      weather_views.c                   Weather, message and indicator rendering
+      weather_views.c                   Forecast, Radar, Alerts, message and status rendering
       settings.c                        Settings editors, drafts and save/lookup feedback
       controls.c                        Optional shared LVGL helpers; not currently needed
     assets/
       weather_icons.c / .h              Icon-name lookup and original-canvas crop metadata
-      wac_icons.c / .h                  Shared storm glow, UI and weather icon assets
+      wac_icons.c / .h                  Shared UI and weather icon assets
       wac_fonts.c / .h                  Generated only for needed added glyphs
   tests/
     README.md                           Test commands and instructions
@@ -1617,14 +1782,13 @@ targets/esp32-p4/
     test_device_config.c                Settings validation and save-failure checks
     test_time.c                         Time trust, timezone and RTC correction checks
     test_connectivity.c                 Wi-Fi/scan concurrency and network-time completion checks
-    test_weather_service.c              Weather decoding and independent download/time retry checks
+    test_weather_service.c              Weather decoding, NWS owner and independent request schedules
     test_forecast_representative.c      Daily-picture calculation and fixture checks
-    test_storm_conditions.c             Storm thresholds, hourly matching and fixture checks
     test_location_scoring.c             Qualified location query and ranking checks
     test_message_ack.py                 Message acknowledgment and shared-store handoff checks
     test_alarm.c                        Alarm/snooze, dismissal and restart-recovery checks
     test_alarm_schedule.c               Recurring occurrences and DST boundary checks
-    test_audio.c                        Alarm/preview priority and Sound Machine playback checks
+    test_audio.c                        Alarm/weather/preview priority and Sound Machine playback checks
     test_night.c                        Day/Night, fallback and brightness checks
     test_solar_times.c                  Solar-event and unavailable-event checks
     test_ui.c                           Navigation, draft and alarm-preemption checks
@@ -1639,7 +1803,6 @@ Weather/location checks compile the ESP32-P4 C calculations against the retained
 Existing fixtures for native C checks:
 
 - Forecast: [forecast-representative-cases.json](../shared/test-data/forecast-representative-cases.json).
-- Storm detection: [storm-conditions-cases.json](../shared/test-data/storm-conditions-cases.json).
 - Location: [location-resolution-cases.json](../shared/test-data/location-resolution-cases.json).
 
 During implementation, use focused tests for settings validation/save errors, DST and catch-up boundaries, dismissal/snooze/missed-notice restart behavior, RTC status/correction, solar/fallback/brightness decisions, preview preemption, and draft/navigation behavior. Include qualified location searches, rejection of unusable timezones, Shared-mode identity validation and background message-dismissal success/failure. Test ordinary interrupted-save outcomes against the accepted partial-save behavior and operating-record failures against their accepted in-memory/restart behavior.

@@ -25,7 +25,7 @@ typedef struct {
   device_config_alarm_sound_t sound;
   uint8_t volume;
 } preview_command_t;
-typedef enum { PLAY_IDLE, PLAY_PREVIEW, PLAY_RING, PLAY_MACHINE } playback_t;
+typedef enum { PLAY_IDLE, PLAY_PREVIEW, PLAY_RING, PLAY_MACHINE, PLAY_WEATHER } playback_t;
 
 enum { BELL_MODES = 7, BELL_STRIKE_SAMPLES = SAMPLE_RATE / 21, BELL_ATTACK_SAMPLES = 128 };
 static const float bell_frequencies[BELL_MODES] = {1610, 2440, 3370, 4690, 6220, 8010, 9560};
@@ -54,6 +54,8 @@ static wac_audio_snapshot_t s_status;
 static bool s_initialized;
 /* Independent from preview Stop, which ordinary editor navigation submits. */
 static bool s_machine_command, s_machine_start;
+static bool s_weather_requested;
+static uint32_t s_weather_generation, s_weather_next_token;
 static bool s_mp3_registered, s_spiffs_mounted;
 
 enum { MP3_INPUT_BYTES = 2048, MP3_OUTPUT_BYTES = 4608, MACHINE_MAX_SAMPLES = 882 };
@@ -165,7 +167,7 @@ static bool machine_interrupted(void)
   wac_alarm_copy(&alarm);
   portENTER_CRITICAL(&s_lock);
   preview_command_t preview;
-  const bool interrupted = s_machine_command ||
+  const bool interrupted = s_machine_command || s_weather_requested ||
     (xQueuePeek(s_commands, &preview, 0) == pdTRUE && preview.start);
   portEXIT_CRITICAL(&s_lock);
   return interrupted || alarm.phase == WAC_ALARM_RINGING;
@@ -482,6 +484,64 @@ static void fill_chunk(int16_t *pcm, uint64_t frame, device_config_alarm_sound_t
   }
 }
 
+/* Integer half-second positions make the approved gaps exact. */
+static float weather_sample(wac_audio_weather_kind_t kind, uint32_t frame)
+{
+  const uint32_t half = SAMPLE_RATE / 2;
+  static const uint8_t warning_start[] = {0, 5, 8, 11, 16, 19};
+  static const uint8_t warning_length[] = {4, 2, 2, 4, 2, 2};
+  const unsigned bursts = kind == WAC_AUDIO_WEATHER_WATCH ? 3 : 6;
+  for (unsigned burst = 0; burst < bursts; ++burst) {
+    const uint32_t start = kind == WAC_AUDIO_WEATHER_WATCH ? burst * SAMPLE_RATE :
+      warning_start[burst] * half;
+    const uint32_t count = kind == WAC_AUDIO_WEATHER_WATCH ? half :
+      warning_length[burst] * half;
+    if (frame < start || frame >= start + count) continue;
+    const uint32_t age = frame - start;
+    const float seconds = (float)age / SAMPLE_RATE;
+    const float envelope = fminf(1, fminf((float)age / (SAMPLE_RATE * .012f),
+                                       (float)(count - age) / (SAMPLE_RATE * .02f)));
+    /* Bell's bounded pre-gain peak is approximately .805. Dual tones share
+     * that magnitude range; the ordinary .82 alarm gain remains downstream. */
+    if (kind == WAC_AUDIO_WEATHER_WATCH)
+      return .805f * envelope * sinf(2 * PI * 1050 * seconds);
+    return .4025f * envelope * (sinf(2 * PI * 853 * seconds) + sinf(2 * PI * 960 * seconds));
+  }
+  return 0;
+}
+
+static uint32_t weather_frames(wac_audio_weather_kind_t kind)
+{
+  return kind == WAC_AUDIO_WEATHER_WATCH ? SAMPLE_RATE * 5 / 2 : SAMPLE_RATE * 21 / 2;
+}
+
+static bool weather_valid(uint32_t generation)
+{
+  wac_alarm_snapshot_t alarm;
+  wac_alarm_copy(&alarm);
+  portENTER_CRITICAL(&s_lock);
+  const bool valid = s_weather_requested && generation == s_weather_generation;
+  portEXIT_CRITICAL(&s_lock);
+  return valid && alarm.phase != WAC_ALARM_RINGING;
+}
+
+static void weather_finish(uint32_t token, wac_audio_weather_state_t state, esp_err_t error)
+{
+  portENTER_CRITICAL(&s_lock);
+  if (s_status.weather_token == token &&
+      (s_status.weather_state == WAC_AUDIO_WEATHER_PENDING ||
+       s_status.weather_state == WAC_AUDIO_WEATHER_PLAYING ||
+       (state == WAC_AUDIO_WEATHER_FAILED &&
+        (s_status.weather_state == WAC_AUDIO_WEATHER_FINISHED ||
+         s_status.weather_state == WAC_AUDIO_WEATHER_CANCELED)))) {
+    s_status.weather_state = state;
+    s_status.weather_error = error;
+    s_weather_requested = false;
+    ++s_weather_generation;
+  }
+  portEXIT_CRITICAL(&s_lock);
+}
+
 static bool same_occurrence(const wac_alarm_occurrence_t *a, const wac_alarm_occurrence_t *b)
 {
   return a->valid == b->valid && a->utc == b->utc &&
@@ -501,6 +561,10 @@ static void audio_worker(void *argument)
   int16_t pcm[CHUNK_SAMPLES];
   bell_state_t bell = {0};
   machine_t machine = {0};
+  bool machine_paused = false;
+  uint32_t weather_generation = 0, weather_token = 0;
+  wac_audio_weather_kind_t weather_kind = WAC_AUDIO_WEATHER_WATCH;
+  esp_err_t weather_saved_error = ESP_OK;
   esp_err_t error = ESP_OK;
   for (;;) {
     const char *operation = "playback";
@@ -520,19 +584,71 @@ static void audio_worker(void *argument)
     const bool machine_commanded = s_machine_command;
     machine_start = s_machine_start;
     s_machine_command = false;
+    const bool weather_requested = s_weather_requested;
+    const uint32_t requested_generation = s_weather_generation;
+    const uint32_t requested_token = s_status.weather_token;
+    const wac_audio_weather_state_t requested_state = s_status.weather_state;
+    const wac_audio_weather_kind_t requested_kind = s_status.weather_kind;
     if (commanded || ringing) s_status.preview_active = !ringing && commanded && command.start;
     portEXIT_CRITICAL(&s_lock);
 
+    if (!weather_requested && requested_state == WAC_AUDIO_WEATHER_PENDING && playback != PLAY_WEATHER)
+      weather_finish(requested_token, WAC_AUDIO_WEATHER_CANCELED, ESP_OK);
     playback_t next = playback;
-    bool restart = false, fresh_machine = false;
+    bool restart = false, fresh_machine = false, resuming_machine = false;
+    if (machine_commanded && !machine_start) machine_paused = false;
+    if (machine_paused && config_error == ESP_OK) {
+      if (machine.timer_minutes != config.sound_machine_timer_minutes) {
+        machine.timer_minutes = config.sound_machine_timer_minutes;
+        machine.deadline = esp_timer_get_time() + (int64_t)machine.timer_minutes * 60000000;
+      }
+      if (machine.timer_minutes && machine.timer_started && esp_timer_get_time() >= machine.deadline)
+        machine_paused = false;
+      if (machine.sound != config.sound_machine_sound) {
+        recording_close(&machine.recording);
+        machine.sound = config.sound_machine_sound;
+        machine.noise = (noise_state_t){ .seed = 0x9e3779b9u };
+      }
+    }
     if (ringing) {
+      machine_paused = false;
+      if (weather_requested || playback == PLAY_WEATHER)
+        weather_finish(requested_token, WAC_AUDIO_WEATHER_SKIPPED_RING, ESP_OK);
       if (new_ring) { next = PLAY_RING; restart = true; }
-      else if (playback == PLAY_PREVIEW || playback == PLAY_MACHINE) next = PLAY_IDLE;
+      else if (playback == PLAY_PREVIEW || playback == PLAY_MACHINE || playback == PLAY_WEATHER)
+        next = PLAY_IDLE;
+    } else if (weather_requested && !(playback == PLAY_WEATHER &&
+               frame >= weather_frames(weather_kind))) {
+      if (playback != PLAY_WEATHER) {
+        machine_paused = (playback == PLAY_MACHINE && !(machine_commanded && !machine_start)) ||
+                         (machine_commanded && machine_start);
+        if (playback != PLAY_MACHINE && machine_paused) {
+          machine.sound = config.sound_machine_sound;
+          machine.timer_minutes = config.sound_machine_timer_minutes;
+          machine.timer_started = false;
+          machine.noise = (noise_state_t){ .seed = 0x9e3779b9u };
+        }
+        weather_saved_error = error;
+        weather_generation = requested_generation;
+        weather_token = requested_token;
+        weather_kind = requested_kind;
+        next = PLAY_WEATHER;
+      }
+    } else if (playback == PLAY_WEATHER) {
+      weather_finish(weather_token, weather_requested ? WAC_AUDIO_WEATHER_FINISHED :
+                     WAC_AUDIO_WEATHER_CANCELED, ESP_OK);
+      fresh_machine = machine_commanded && machine_start;
+      resuming_machine = machine_paused && !fresh_machine;
+      next = machine_paused || fresh_machine ? PLAY_MACHINE : PLAY_IDLE;
+      machine_paused = false;
+      if (commanded && command.start) {
+        next = PLAY_PREVIEW; preview = command; restart = true;
+        resuming_machine = fresh_machine = false;
+      }
     } else if (commanded && command.start) {
       next = PLAY_PREVIEW; preview = command; restart = true;
     } else {
-      /* A preview Stop is deliberately scoped to preview, including during
-       * a Sound Machine setup. It cannot discard the separate pending Play. */
+      /* Preview navigation cannot stop the machine or weather playback. */
       if (commanded && playback == PLAY_PREVIEW) next = PLAY_IDLE;
       if (playback == PLAY_RING) next = PLAY_IDLE;
       if (machine_commanded) {
@@ -542,7 +658,10 @@ static void audio_worker(void *argument)
         }
       }
     }
-    if (playback == PLAY_PREVIEW &&
+    if (playback == PLAY_WEATHER && !machine_paused && !resuming_machine)
+      recording_close(&machine.recording);
+    if (machine_paused) machine_publish(&machine, true, false);
+    if (next == PLAY_PREVIEW && playback == PLAY_PREVIEW &&
         (frame >= 5 * SAMPLE_RATE || esp_timer_get_time() - started >= 5000000) && !restart)
       next = PLAY_IDLE;
     if (next == PLAY_MACHINE && config_error != ESP_OK) {
@@ -560,25 +679,34 @@ static void audio_worker(void *argument)
     }
 
     if (next != playback || restart) {
-      if (next != PLAY_MACHINE) machine_publish(&machine, false, false);
+      const bool weather_transition = playback == PLAY_WEATHER || next == PLAY_WEATHER;
+      if (next != PLAY_MACHINE && !machine_paused) machine_publish(&machine, false, false);
       if (opened) {
         const esp_err_t closed = esp_codec_dev_close(speaker);
         if (closed != ESP_OK) {
           ESP_LOGE(TAG, "Speaker close failed: %s", esp_err_to_name(closed));
           error = closed;
+          if (playback == PLAY_WEATHER || next == PLAY_WEATHER) {
+            weather_finish(weather_token, WAC_AUDIO_WEATHER_FAILED, closed);
+            machine_paused = resuming_machine = false;
+            if (next != PLAY_RING) next = PLAY_IDLE;
+          }
         }
         opened = false;
       }
-      recording_close(&machine.recording);
+      if ((!machine_paused && !resuming_machine) ||
+          (next == PLAY_WEATHER && machine.recording.input && !machine.recording.decoder))
+        recording_close(&machine.recording);
       if (fresh_machine) {
         machine.timer_minutes = config.sound_machine_timer_minutes;
         machine.timer_started = false;
         machine.deadline = 0;
       }
-      if (next == PLAY_MACHINE) {
+      if (next == PLAY_MACHINE && !resuming_machine) {
         machine.sound = config.sound_machine_sound;
         machine.noise = (noise_state_t){ .seed = 0x9e3779b9u };
       }
+      if (weather_transition && next != PLAY_WEATHER) error = weather_saved_error;
       playback = next;
       bell.active = false;
       frame = 0;
@@ -589,6 +717,10 @@ static void audio_worker(void *argument)
       publish(false, error, false);
       vTaskDelay(pdMS_TO_TICKS(20));
       continue;
+    }
+    if (config_error != ESP_OK && playback == PLAY_WEATHER) {
+      error = config_error;
+      goto playback_failed;
     }
     if (config_error != ESP_OK && playback == PLAY_RING) {
       ESP_LOGE(TAG, "Alarm audio settings unavailable: %s", esp_err_to_name(config_error));
@@ -602,7 +734,7 @@ static void audio_worker(void *argument)
     } else if (!opened) {
       if (playback == PLAY_MACHINE) {
         machine_publish(&machine, false, true);
-        if (machine.sound < DEVICE_CONFIG_SOUND_MACHINE_WHITE_NOISE) {
+        if (machine.sound < DEVICE_CONFIG_SOUND_MACHINE_WHITE_NOISE && !machine.recording.file) {
           operation = "recording setup";
           error = recording_open(&machine.recording, machine.sound);
           if (error != ESP_OK) {
@@ -617,8 +749,14 @@ static void audio_worker(void *argument)
         speaker = bsp_audio_codec_speaker_init();
         if (!speaker) ESP_LOGE(TAG, "Speaker creation failed; audio unavailable until restart");
       }
+      if (playback == PLAY_WEATHER && !weather_valid(weather_generation)) continue;
       if (!speaker) {
         error = ESP_ERR_INVALID_STATE;
+        if (playback == PLAY_WEATHER) {
+          weather_finish(weather_token, WAC_AUDIO_WEATHER_FAILED, error);
+          machine_paused = false;
+          error = weather_saved_error;
+        }
         recording_close(&machine.recording);
         playback = PLAY_IDLE;
         machine_publish(&machine, false, false);
@@ -630,9 +768,14 @@ static void audio_worker(void *argument)
         .sample_rate = playback == PLAY_MACHINE && machine.recording.file ? machine.recording.rate : SAMPLE_RATE,
       };
       if (playback == PLAY_MACHINE && machine_interrupted()) continue;
+      if (playback == PLAY_WEATHER && !weather_valid(weather_generation)) continue;
       operation = "speaker open";
       error = esp_codec_dev_open(speaker, &format);
       if (error == ESP_OK && playback == PLAY_MACHINE && machine_interrupted()) {
+        opened = true;
+        continue;
+      }
+      if (error == ESP_OK && playback == PLAY_WEATHER && !weather_valid(weather_generation)) {
         opened = true;
         continue;
       }
@@ -650,13 +793,15 @@ static void audio_worker(void *argument)
         portENTER_CRITICAL(&s_lock);
         preview_command_t pending;
         const bool pending_command = xQueuePeek(s_commands, &pending, 0) == pdTRUE;
+        const bool pending_weather = s_weather_requested;
         portEXIT_CRITICAL(&s_lock);
         if (playback == PLAY_MACHINE) {
-          if (machine_interrupted()) continue;
           /* Observe applied sound/timer changes after slow setup, too. */
           continue;
         }
-        if (pending_command || latest_alarm.phase != alarm.phase ||
+        if (playback == PLAY_WEATHER) {
+          if (!weather_valid(weather_generation)) continue;
+        } else if (pending_command || pending_weather || latest_alarm.phase != alarm.phase ||
             (ringing && !same_occurrence(&latest_alarm.current, &alarm.current))) continue;
       }
       else {
@@ -703,6 +848,35 @@ static void audio_worker(void *argument)
       publish(false, ESP_OK, false);
       continue;
     }
+    if (playback == PLAY_WEATHER) {
+      if (!weather_valid(weather_generation)) continue;
+      const float level = config.alarm_volume / 100.0f;
+      const float gain = level * level * .82f;
+      for (unsigned i = 0; i < CHUNK_SAMPLES; ++i)
+        pcm[i] = (int16_t)lrintf(fmaxf(-1, fminf(1,
+          weather_sample(weather_kind, (uint32_t)frame + i) * gain)) * INT16_MAX);
+      if (!weather_valid(weather_generation)) continue;
+      portENTER_CRITICAL(&s_lock);
+      const bool valid = s_weather_requested && s_weather_generation == weather_generation;
+      if (valid) {
+        if (s_status.weather_state == WAC_AUDIO_WEATHER_PENDING)
+          s_status.weather_started_us = esp_timer_get_time();
+        s_status.weather_state = WAC_AUDIO_WEATHER_PLAYING;
+      }
+      portEXIT_CRITICAL(&s_lock);
+      if (!valid) continue;
+      operation = "speaker write";
+      error = esp_codec_dev_write(speaker, pcm, sizeof(pcm));
+      frame += CHUNK_SAMPLES;
+      if (error == ESP_OK) continue;
+      goto playback_failed;
+    }
+    if (playback == PLAY_PREVIEW) {
+      portENTER_CRITICAL(&s_lock);
+      const bool weather_pending = s_weather_requested;
+      portEXIT_CRITICAL(&s_lock);
+      if (weather_pending) continue;
+    }
     publish(playback == PLAY_PREVIEW, error, false);
     device_config_alarm_sound_t sound = playback == PLAY_RING ? config.alarm_sound : preview.sound;
     fill_chunk(pcm, frame, sound,
@@ -715,7 +889,8 @@ static void audio_worker(void *argument)
 playback_failed:
     if (error != ESP_OK) {
       ESP_LOGE(TAG, "%s playback failed during %s: %s",
-               playback == PLAY_RING ? "Alarm" : playback == PLAY_PREVIEW ? "Preview" : "Sound Machine",
+               playback == PLAY_RING ? "Alarm" : playback == PLAY_PREVIEW ? "Preview" :
+               playback == PLAY_WEATHER ? "Weather" : "Sound Machine",
                operation, esp_err_to_name(error));
     }
     if (opened) {
@@ -723,6 +898,11 @@ playback_failed:
       if (closed != ESP_OK) ESP_LOGE(TAG, "Speaker close failed: %s", esp_err_to_name(closed));
       opened = false;
     }
+    if (playback == PLAY_WEATHER) {
+      weather_finish(weather_token, WAC_AUDIO_WEATHER_FAILED, error);
+      error = weather_saved_error;
+    }
+    machine_paused = false;
     recording_close(&machine.recording);
     playback = PLAY_IDLE;
     machine_publish(&machine, false, false);
@@ -732,7 +912,8 @@ playback_failed:
 
 esp_err_t wac_audio_init(void)
 {
-  if (s_initialized) return s_status.ready ? ESP_OK : s_status.error;
+  if (s_initialized) return s_status.ready ? ESP_OK :
+    s_status.error != ESP_OK ? s_status.error : ESP_ERR_INVALID_STATE;
   s_initialized = true;
   s_commands = xQueueCreate(1, sizeof(preview_command_t));
   if (!s_commands) { s_status.error = ESP_ERR_NO_MEM; return s_status.error; }
@@ -750,7 +931,7 @@ esp_err_t wac_audio_init(void)
 static esp_err_t submit(preview_command_t command)
 {
   portENTER_CRITICAL(&s_lock);
-  const esp_err_t result = !s_status.ready ? ESP_ERR_INVALID_STATE :
+  const esp_err_t result = !s_status.ready || (command.start && s_weather_requested) ? ESP_ERR_INVALID_STATE :
                           xQueueOverwrite(s_commands, &command) == pdPASS ? ESP_OK : ESP_FAIL;
   portEXIT_CRITICAL(&s_lock);
   return result;
@@ -780,7 +961,7 @@ esp_err_t wac_audio_sound_machine_play(void)
   preview_command_t pending;
   const bool preview = s_status.preview_active ||
     (s_commands && xQueuePeek(s_commands, &pending, 0) == pdTRUE && pending.start);
-  const esp_err_t error = !s_status.ready || preview ? ESP_ERR_INVALID_STATE : ESP_OK;
+  const esp_err_t error = !s_status.ready || preview || s_weather_requested ? ESP_ERR_INVALID_STATE : ESP_OK;
   if (error == ESP_OK) {
     s_machine_command = true; s_machine_start = true;
     s_status.machine_pending = true;
@@ -824,6 +1005,57 @@ void wac_audio_copy(wac_audio_snapshot_t *out)
     out->machine_continuous = false;
     out->machine_remaining_seconds = 0;
   }
-  if (alarm.phase == WAC_ALARM_RINGING || !out->ready) out->preview_active = false;
+  if (alarm.phase == WAC_ALARM_RINGING || s_weather_requested || !out->ready) out->preview_active = false;
+  portEXIT_CRITICAL(&s_lock);
+}
+
+esp_err_t wac_audio_weather_start(wac_audio_weather_kind_t kind, uint32_t *token)
+{
+  if (!token || (kind != WAC_AUDIO_WEATHER_WATCH && kind != WAC_AUDIO_WEATHER_WARNING))
+    return ESP_ERR_INVALID_ARG;
+  *token = 0;
+  wac_alarm_snapshot_t alarm;
+  wac_alarm_copy(&alarm);
+  portENTER_CRITICAL(&s_lock);
+  const esp_err_t error = !s_status.ready || alarm.phase == WAC_ALARM_RINGING ||
+    s_status.weather_state != WAC_AUDIO_WEATHER_NONE ? ESP_ERR_INVALID_STATE : ESP_OK;
+  if (error == ESP_OK) {
+    if (!++s_weather_next_token) ++s_weather_next_token;
+    *token = s_status.weather_token = s_weather_next_token;
+    s_status.weather_kind = kind;
+    s_status.weather_state = WAC_AUDIO_WEATHER_PENDING;
+    s_status.weather_started_us = 0;
+    s_status.weather_error = ESP_OK;
+    s_status.preview_active = false;
+    preview_command_t discarded;
+    (void)xQueueReceive(s_commands, &discarded, 0);
+    s_weather_requested = true;
+    ++s_weather_generation;
+  }
+  portEXIT_CRITICAL(&s_lock);
+  return error;
+}
+
+esp_err_t wac_audio_weather_stop(uint32_t token)
+{
+  portENTER_CRITICAL(&s_lock);
+  const esp_err_t error = s_status.ready ? ESP_OK : ESP_ERR_INVALID_STATE;
+  if (error == ESP_OK && token && token == s_status.weather_token && s_weather_requested) {
+    s_weather_requested = false;
+    ++s_weather_generation;
+  }
+  portEXIT_CRITICAL(&s_lock);
+  return error;
+}
+
+void wac_audio_weather_ack(uint32_t token)
+{
+  portENTER_CRITICAL(&s_lock);
+  if (token && token == s_status.weather_token && s_status.weather_state >= WAC_AUDIO_WEATHER_FINISHED) {
+    s_status.weather_state = WAC_AUDIO_WEATHER_NONE;
+    s_status.weather_token = 0;
+    s_status.weather_started_us = 0;
+    s_status.weather_error = ESP_OK;
+  }
   portEXIT_CRITICAL(&s_lock);
 }

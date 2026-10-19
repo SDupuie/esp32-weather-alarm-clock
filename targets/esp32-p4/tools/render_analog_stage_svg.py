@@ -8,15 +8,15 @@ from pathlib import Path
 STAGE_SIZE = 800
 CENTER = STAGE_SIZE // 2
 # Baked-in equivalent of the old runtime STAGE_Y_TRIM=-18 lv_obj_align offset
-# in ui/ui.c. Shifting the *asset* instead of shifting the LVGL image object
-# at runtime avoids an LVGL rendering artifact confirmed on-device: an
+# in ui/clock_views.c. Shifting the *asset* instead of shifting the LVGL image
+# object at runtime avoids an LVGL rendering artifact confirmed on-device: an
 # offset-aligned image object consistently produced a bright horizontal line
 # at the bottom of the visible content that disappeared entirely when the
 # image was hidden (everything else about the scene unchanged), pointing at
 # the runtime align-offset mechanism itself rather than anything drawn in
 # the image or anything physical. Only this baked-image circle moves — the
-# procedural ticks/numerals in ui/ui.c were never shifted (confirmed fine
-# as-is) and must stay exactly where they are, at the true canvas center.
+# procedural ticks/numerals in ui/clock_views.c were never shifted
+# (confirmed fine as-is) and must stay at the true canvas center.
 STAGE_Y_TRIM = -18
 FACE_CY = CENTER + STAGE_Y_TRIM
 FACE_RADIUS = 380
@@ -32,11 +32,6 @@ PALETTE_DAY = {
     "glow_mid": "rgba(103, 139, 255, 0.02)",
     "edge": "rgba(255, 255, 255, 0.08)",
     "inner_edge": "rgba(255, 255, 255, 0.04)",
-    "minor_tick": "rgba(255, 255, 255, 0.38)",
-    "major_tick": "rgba(255, 255, 255, 0.68)",
-    "quarter_tick": "rgba(255, 255, 255, 0.78)",
-    "major_numeral": "rgba(244, 248, 255, 0.88)",
-    "minor_numeral": "rgba(224, 233, 247, 0.60)",
 }
 
 PALETTE_NIGHT = {
@@ -51,11 +46,6 @@ PALETTE_NIGHT = {
     "glow_mid": "rgba(110, 28, 28, 0.03)",
     "edge": "rgba(179, 94, 94, 0.18)",
     "inner_edge": "rgba(255, 255, 255, 0.04)",
-    "minor_tick": "rgba(193, 126, 126, 0.32)",
-    "major_tick": "rgba(214, 160, 160, 0.56)",
-    "quarter_tick": "rgba(224, 172, 172, 0.64)",
-    "major_numeral": "rgba(225, 182, 182, 0.82)",
-    "minor_numeral": "rgba(198, 150, 150, 0.68)",
 }
 
 

@@ -186,6 +186,12 @@ def build_settings_icon(variant: str, size: int = 24) -> str:
         "check": ("M20 6 9 17l-5-5",),
         "plus": ("M12 5v14", "M5 12h14"),
         "minus": ("M5 12h14",),
+        "settings_2": ("M14 17H5", "M19 7h-9"),
+        "triangle_outline": ("M13.73 4a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z",),
+        "triangle_alert": (
+            "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3",
+            "M12 9v4", "M12 17h.01",
+        ),
         "volume_2": (
             "M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z",
             "M16 9a5 5 0 0 1 0 6", "M19.364 18.364a9 9 0 0 0 0-12.728",
@@ -238,6 +244,8 @@ def build_settings_icon(variant: str, size: int = 24) -> str:
         inner = '<circle cx="12" cy="12" r="10"/>' + inner
     elif variant == "alarm_clock":
         inner = '<circle cx="12" cy="13" r="8"/>' + inner
+    elif variant == "settings_2":
+        inner += '<circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>'
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{inner}</svg>'
 
 

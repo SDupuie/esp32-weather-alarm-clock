@@ -267,7 +267,6 @@ def render_byte_array(values: list[int]) -> str:
 
 
 def render_header(symbol: str) -> str:
-    guard = symbol_macro(symbol)
     return f"""#pragma once
 
 #include "lvgl.h"
@@ -280,6 +279,7 @@ def render_source(symbol: str, header_name: str, fmt: str, width: int, height: i
     attr_macro = symbol_macro(symbol)
     lv_format = {
         "rgb565": "LV_COLOR_FORMAT_RGB565",
+        "rgb888": "LV_COLOR_FORMAT_RGB888",
         "argb8565": "LV_COLOR_FORMAT_ARGB8565",
         "rgb565a8": "LV_COLOR_FORMAT_RGB565A8",
         "argb8888": "LV_COLOR_FORMAT_ARGB8888",

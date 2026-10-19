@@ -13,6 +13,8 @@
 #include "assets/round_stage_night.h"
 #include "assets/weather_icons.h"
 #include "weather_icon_names.h"
+#include "weather_client.h"
+#include "assets/wac_icons.h"
 
 #define FACE_CONTENT_SIZE 780
 #define FORECAST_TOMORROW_FRAME_TOP 68
@@ -43,6 +45,7 @@ typedef struct {
   bool radar_palette_night;
   lv_obj_t *forecast_view;
   lv_obj_t *radar_view;
+  lv_obj_t *radar_backdrop;
   lv_obj_t *radar_image;
   lv_obj_t *radar_heading;
   lv_obj_t *radar_time;
@@ -51,6 +54,8 @@ typedef struct {
   lv_obj_t *radar_legend;
   lv_obj_t *radar_legend_labels[3];
   lv_obj_t *radar_credit;
+  lv_obj_t *radar_control;
+  lv_obj_t *radar_control_icon;
   lv_image_dsc_t radar_source;
   uint32_t radar_generation;
   lv_obj_t *message_view;
@@ -76,6 +81,26 @@ typedef struct {
 } weather_views_t;
 
 static weather_views_t s_weather;
+
+/* Presentation cache only: service records and navigation remain with their
+ * owners. Row callback data points to a full ID, never a pointer-sized cast. */
+typedef struct {
+  lv_obj_t *list, *detail, *subtitle, *rows, *checking;
+  lv_obj_t *list_back, *notice, *notice_primary, *notice_secondary;
+  lv_obj_t *detail_heading, *detail_content;
+  lv_obj_t *list_track, *detail_track;
+  weather_alert_row_t *row_data;
+  size_t row_count;
+  uint32_t rows_revision, detail_revision;
+  uint64_t detail_id;
+  bool rows_valid, detail_valid, rows_night, detail_night;
+  bool rows_24h, detail_24h;
+  bool list_palette_valid, detail_palette_valid, list_palette_night, detail_palette_night;
+  lv_event_cb_t row_cb;
+} alert_views_t;
+
+static alert_views_t s_alerts;
+
 
 static const char *const WEEKDAY_SHORT[] = {
   "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
@@ -385,9 +410,11 @@ void wac_weather_set_radar_enabled(lv_obj_t *parent, bool enabled)
     lv_image_cache_drop(&s_weather.radar_source);
     lv_obj_delete(s_weather.radar_view);
     s_weather.radar_view = s_weather.radar_image = NULL;
+    s_weather.radar_backdrop = NULL;
     s_weather.radar_heading = s_weather.radar_time = NULL;
     s_weather.radar_unavailable = s_weather.radar_marker = NULL;
     s_weather.radar_legend = s_weather.radar_credit = NULL;
+    s_weather.radar_control = s_weather.radar_control_icon = NULL;
     memset(s_weather.radar_legend_labels, 0, sizeof(s_weather.radar_legend_labels));
     s_weather.radar_source = (lv_image_dsc_t){0};
     s_weather.radar_generation = 0;
@@ -402,6 +429,11 @@ void wac_weather_set_radar_enabled(lv_obj_t *parent, bool enabled)
   lv_obj_set_style_bg_opa(view, LV_OPA_COVER, 0);
   lv_obj_remove_flag(view, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(view, LV_OBJ_FLAG_HIDDEN);
+  s_weather.radar_backdrop = lv_image_create(view);
+  lv_image_set_src(s_weather.radar_backdrop, &wac_radar_unavailable_glow);
+  lv_image_set_pivot(s_weather.radar_backdrop, 0, 0);
+  lv_image_set_scale(s_weather.radar_backdrop, 3200);
+  lv_obj_set_pos(s_weather.radar_backdrop, 0, 0);
   s_weather.radar_image = lv_image_create(view);
   lv_obj_set_pos(s_weather.radar_image, 0, 0);
   lv_obj_add_flag(s_weather.radar_image, LV_OBJ_FLAG_HIDDEN);
@@ -460,9 +492,29 @@ void wac_weather_set_radar_enabled(lv_obj_t *parent, bool enabled)
     wac_ui_color_text_muted(), LV_TEXT_ALIGN_CENTER, "RainViewer · USGS");
   lv_obj_set_width(s_weather.radar_credit, 320);
   lv_obj_set_pos(s_weather.radar_credit, 240, 731);
+  s_weather.radar_control = lv_obj_create(view);
+  wac_ui_clear_container_chrome(s_weather.radar_control);
+  lv_obj_set_size(s_weather.radar_control, 80, 80);
+  lv_obj_set_pos(s_weather.radar_control, 360, 572);
+  lv_obj_set_style_radius(s_weather.radar_control, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(s_weather.radar_control, 209, 0);
+  lv_obj_set_style_border_width(s_weather.radar_control, 1, 0);
+  lv_obj_set_style_border_opa(s_weather.radar_control, 46, 0);
+  lv_obj_remove_flag(s_weather.radar_control, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+  s_weather.radar_control_icon = wac_ui_create_label(s_weather.radar_control,
+    &lv_font_montserrat_32, wac_ui_color_text_primary(), LV_TEXT_ALIGN_CENTER, LV_SYMBOL_PLAY);
+  lv_obj_align(s_weather.radar_control_icon, LV_ALIGN_CENTER, 2, 0);
   /* A newly eligible location can create this surface after startup. Keep it
    * beneath the existing gesture, status and alarm objects in that case too. */
   lv_obj_move_background(view);
+}
+
+bool wac_weather_radar_control_hit(int32_t x, int32_t y)
+{
+  int32_t dx = x - 400, dy = y - 612;
+  return s_weather.radar_control != NULL
+    && !lv_obj_has_state(s_weather.radar_control, LV_STATE_DISABLED)
+    && dx * dx + dy * dy <= 52 * 52;
 }
 
 void wac_weather_update_radar(const app_radar_snapshot_t *radar,
@@ -492,12 +544,17 @@ void wac_weather_update_radar(const app_radar_snapshot_t *radar,
     lv_color_t muted = night ? wac_ui_color_night_muted() : wac_ui_color_text_muted();
     lv_color_t bg = lv_color_hex(night ? 0x18090c : 0x07101c);
     lv_obj_set_style_bg_color(s_weather.radar_view, bg, 0);
+    lv_image_set_src(s_weather.radar_backdrop,
+      night ? &wac_radar_unavailable_glow_night : &wac_radar_unavailable_glow);
     lv_obj_set_style_bg_color(s_weather.radar_heading, bg, 0);
     lv_obj_set_style_bg_color(s_weather.radar_time, bg, 0);
     lv_obj_set_style_text_color(s_weather.radar_heading, primary, 0);
     lv_obj_set_style_text_color(s_weather.radar_time, muted, 0);
     lv_obj_set_style_text_color(s_weather.radar_unavailable, muted, 0);
     lv_obj_set_style_text_color(s_weather.radar_credit, muted, 0);
+    lv_obj_set_style_bg_color(s_weather.radar_control, bg, 0);
+    lv_obj_set_style_border_color(s_weather.radar_control, primary, 0);
+    lv_obj_set_style_text_color(s_weather.radar_control_icon, primary, 0);
     lv_obj_set_style_bg_color(s_weather.radar_marker, lv_color_hex(night ? 0xe1b6b6 : 0x93d1ff), 0);
     lv_obj_set_style_border_color(s_weather.radar_marker, bg, 0);
     for (unsigned i = 0; i < 3; ++i)
@@ -512,8 +569,25 @@ void wac_weather_update_radar(const app_radar_snapshot_t *radar,
     if (have) lv_obj_remove_flag(data_objects[i], LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(data_objects[i], LV_OBJ_FLAG_HIDDEN);
   }
-  if (have) lv_obj_add_flag(s_weather.radar_unavailable, LV_OBJ_FLAG_HIDDEN);
-  else lv_obj_remove_flag(s_weather.radar_unavailable, LV_OBJ_FLAG_HIDDEN);
+  if (have) {
+    lv_obj_add_flag(s_weather.radar_unavailable, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_weather.radar_backdrop, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_remove_flag(s_weather.radar_unavailable, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_weather.radar_backdrop, LV_OBJ_FLAG_HIDDEN);
+  }
+  bool control_enabled = have && (radar->playing
+    || (radar->history_count >= 2 && !radar->history_loading));
+  if (control_enabled) lv_obj_remove_state(s_weather.radar_control, LV_STATE_DISABLED);
+  else lv_obj_add_state(s_weather.radar_control, LV_STATE_DISABLED);
+  lv_opa_t control_opa = control_enabled ? LV_OPA_COVER : LV_OPA_40;
+  if (lv_obj_get_style_opa(s_weather.radar_control, 0) != control_opa)
+    lv_obj_set_style_opa(s_weather.radar_control, control_opa, 0);
+  const char *symbol = radar->playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY;
+  if (strcmp(lv_label_get_text(s_weather.radar_control_icon), symbol) != 0) {
+    wac_ui_set_label_text(s_weather.radar_control_icon, symbol);
+    lv_obj_align(s_weather.radar_control_icon, LV_ALIGN_CENTER, radar->playing ? 0 : 2, 0);
+  }
 
   char heading[80];
   /* Use the resolved place name, omitting the address qualifiers in the title. */
@@ -546,7 +620,8 @@ void wac_weather_update_radar(const app_radar_snapshot_t *radar,
       snprintf(hour, sizeof(hour), "%d:%02d %s %s", frame.tm_hour % 12 ? frame.tm_hour % 12 : 12,
         frame.tm_min, frame.tm_hour >= 12 ? "PM" : "AM", zone);
     }
-    snprintf(stamp, sizeof(stamp), "%s · %s%s", date, hour, radar->stale ? " (Old)" : "");
+    snprintf(stamp, sizeof(stamp), "%s · %s%s%s", date, hour,
+      radar->stale ? " (Old)" : "", radar->paused ? " · Paused" : "");
   }
   wac_ui_set_label_text(s_weather.radar_time, stamp);
 
@@ -690,10 +765,9 @@ static void update_weather_labels(const app_weather_snapshot_t *weather, const s
 }
 
 void wac_weather_update_status(const app_weather_snapshot_t *weather,
-  bool night, wac_weather_surface_t surface)
+  bool night, bool forecast_visible)
 {
-  bool forecast = surface == WAC_WEATHER_SURFACE_FORECAST;
-  if (!night && forecast && weather->valid && weather->stale) {
+  if (!night && forecast_visible && weather->valid && weather->stale) {
     lv_obj_set_width(s_weather.status_stack, 440);
     lv_obj_align(s_weather.status_stack, LV_ALIGN_TOP_LEFT, 180, 120);
     if (lv_obj_get_style_text_font(s_weather.weather_status_label, 0) != &lv_font_montserrat_22)
@@ -731,6 +805,8 @@ void wac_weather_set_message_dismiss_text(const char *text)
 void wac_weather_reset(void)
 {
   if (s_weather.radar_source.data != NULL) lv_image_cache_drop(&s_weather.radar_source);
+  free(s_alerts.row_data);
+  memset(&s_alerts, 0, sizeof(s_alerts));
   memset(&s_weather, 0, sizeof(s_weather));
 }
 
@@ -767,4 +843,406 @@ void wac_weather_update(const app_weather_snapshot_t *weather, const struct tm *
 {
   if (weather->valid) update_weather_labels(weather, local_calendar);
   else update_pending_weather_labels();
+}
+
+static lv_color_t alert_color(bool night, uint32_t day, uint32_t dark)
+{
+  return lv_color_hex(night ? dark : day);
+}
+
+static void alert_visible(lv_obj_t *obj, bool visible)
+{
+  if (visible) lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+static lv_obj_t *alert_label(lv_obj_t *parent, const char *text, int x, int y,
+  int width, const lv_font_t *font, lv_color_t color, lv_text_align_t align)
+{
+  lv_obj_t *label = wac_ui_create_label(parent, font, color, align, text);
+  lv_obj_set_pos(label, x, y);
+  lv_obj_set_width(label, width);
+  lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+  lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
+  return label;
+}
+
+static lv_obj_t *alert_icon(lv_obj_t *parent, const lv_image_dsc_t *asset,
+  int size, lv_color_t color)
+{
+  lv_obj_t *icon = lv_image_create(parent);
+  lv_image_set_src(icon, asset);
+  lv_image_set_scale(icon, (uint32_t)size * LV_SCALE_NONE / asset->header.w);
+  lv_obj_set_style_image_recolor(icon, color, 0);
+  lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+  lv_obj_remove_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+  return icon;
+}
+
+static void alert_button_palette(lv_obj_t *obj, bool night)
+{
+  lv_obj_set_style_bg_color(obj, alert_color(night, 0x17263b, 0x321c20), 0);
+  lv_obj_set_style_border_color(obj, alert_color(night, 0x253a57, 0x633737), 0);
+  lv_obj_set_style_text_color(obj, alert_color(night, 0xf5f8ff, 0xecc0c0), 0);
+}
+
+static lv_obj_t *alert_button(lv_obj_t *parent, int x, int y, int w, int h,
+  lv_event_cb_t callback, void *data)
+{
+  lv_obj_t *obj = lv_button_create(parent);
+  lv_obj_remove_style_all(obj);
+  lv_obj_set_pos(obj, x, y);
+  lv_obj_set_size(obj, w, h);
+  lv_obj_set_style_radius(obj, 24, 0);
+  lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(obj, 1, 0);
+  lv_obj_set_style_pad_all(obj, 0, 0);
+  lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+  alert_button_palette(obj, false);
+  lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, data);
+  return obj;
+}
+
+static lv_obj_t *alert_scroll(lv_obj_t *parent, int y, int height, lv_obj_t **track)
+{
+  *track = lv_obj_create(parent);
+  lv_obj_remove_style_all(*track);
+  lv_obj_set_pos(*track, 672, y);
+  lv_obj_set_size(*track, 10, height);
+  lv_obj_set_style_radius(*track, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(*track, 97, 0);
+  lv_obj_remove_flag(*track, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(*track, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_t *obj = lv_obj_create(parent);
+  lv_obj_remove_style_all(obj);
+  lv_obj_set_pos(obj, 140, y);
+  lv_obj_set_size(obj, 542, height);
+  lv_obj_set_style_pad_right(obj, 22, 0);
+  lv_obj_set_scroll_dir(obj, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(obj, LV_SCROLLBAR_MODE_AUTO);
+  lv_obj_set_style_width(obj, 10, LV_PART_SCROLLBAR);
+  lv_obj_set_style_radius(obj, LV_RADIUS_CIRCLE, LV_PART_SCROLLBAR);
+  lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_SCROLLBAR);
+  return obj;
+}
+
+static void alert_scroll_track(lv_obj_t *list, lv_obj_t *track)
+{
+  lv_obj_update_layout(list);
+  alert_visible(track, lv_obj_get_scroll_top(list) + lv_obj_get_scroll_bottom(list) > 0);
+}
+
+static lv_obj_t *alert_surface(lv_obj_t *parent, const char *title,
+  const char *bottom, lv_event_cb_t back_cb, lv_obj_t **heading, lv_obj_t **back)
+{
+  lv_obj_t *root = lv_obj_create(parent);
+  lv_obj_remove_style_all(root);
+  lv_obj_set_size(root, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+  lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
+  alert_visible(root, false);
+  lv_obj_t *stage = lv_image_create(root);
+  lv_image_set_src(stage, &round_stage_day);
+  lv_obj_center(stage);
+  *heading = alert_label(root, title, 245, 128, 320, &lv_font_montserrat_36,
+    lv_color_hex(0xf5f8ff), LV_TEXT_ALIGN_CENTER);
+  lv_obj_set_style_text_letter_space(*heading, 1, 0);
+  lv_obj_t *top = alert_button(root, 145, 104, 88, 88, back_cb, NULL);
+  lv_obj_center(alert_icon(top, &wac_icon_chevron_left, 32, lv_color_hex(0xf5f8ff)));
+  *back = alert_button(root, 254, 650, 292, 80, back_cb, NULL);
+  lv_obj_t *label = alert_label(*back, bottom, 0, 0, 292, &wac_font_settings_28,
+    lv_color_hex(0xf5f8ff), LV_TEXT_ALIGN_CENTER);
+  lv_obj_center(label);
+  return root;
+}
+
+void wac_weather_build_alerts(lv_obj_t *parent, lv_event_cb_t back_cb,
+  lv_event_cb_t row_cb)
+{
+  lv_obj_t *heading, *back;
+  s_alerts.row_cb = row_cb;
+  s_alerts.list = alert_surface(parent, "Alerts", "Back to Clock", back_cb,
+    &heading, &s_alerts.list_back);
+  s_alerts.subtitle = alert_label(s_alerts.list, "", 150, 174, 500,
+    &wac_font_settings_28, lv_color_hex(0xa6b6cf), LV_TEXT_ALIGN_CENTER);
+  s_alerts.rows = alert_scroll(s_alerts.list, 220, 408, &s_alerts.list_track);
+  s_alerts.notice = lv_obj_create(s_alerts.list);
+  lv_obj_remove_style_all(s_alerts.notice);
+  lv_obj_set_pos(s_alerts.notice, 150, 646);
+  lv_obj_set_size(s_alerts.notice, 500, 80);
+  lv_obj_remove_flag(s_alerts.notice, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  s_alerts.notice_primary = alert_label(s_alerts.notice, "", 0, 0, 500,
+    &wac_font_settings_28, lv_color_hex(0xf5f8ff), LV_TEXT_ALIGN_CENTER);
+  s_alerts.notice_secondary = alert_label(s_alerts.notice, "", 0, 40, 500,
+    &wac_font_settings_24, lv_color_hex(0xa6b6cf), LV_TEXT_ALIGN_CENTER);
+  s_alerts.detail = alert_surface(parent, "", "Back to Alerts", back_cb,
+    &s_alerts.detail_heading, &back);
+  alert_label(s_alerts.detail, "National Weather Service", 245, 183, 350,
+    &wac_font_settings_24, lv_color_hex(0xa6b6cf), LV_TEXT_ALIGN_CENTER);
+  /* Fixed heading/footer frame a flowing content area. Actual NWS paragraphs
+   * are not constrained to the illustrative mockup's sample text boxes. */
+  s_alerts.detail_content = alert_scroll(s_alerts.detail, 227, 401, &s_alerts.detail_track);
+}
+
+uint64_t wac_weather_alert_event_id(lv_event_t *event)
+{
+  const uint64_t *id = lv_event_get_user_data(event);
+  return id ? *id : 0;
+}
+
+static void alert_time(char *buffer, size_t size, time_t timestamp, bool time_24h,
+  bool with_date)
+{
+  struct tm local;
+  if (timestamp <= 0 || !localtime_r(&timestamp, &local)) {
+    snprintf(buffer, size, "--");
+    return;
+  }
+  char clock[32], date[32] = "";
+  if (time_24h) strftime(clock, sizeof(clock), "%H:%M", &local);
+  else snprintf(clock, sizeof(clock), "%d:%02d %s", local.tm_hour % 12 ? local.tm_hour % 12 : 12,
+    local.tm_min, local.tm_hour >= 12 ? "PM" : "AM");
+  if (with_date) {
+    char month[12];
+    strftime(month, sizeof(month), "%b", &local);
+    snprintf(date, sizeof(date), "%s %d · ", month, local.tm_mday);
+  }
+  snprintf(buffer, size, "%s%s", date, clock);
+}
+
+/* Restyle the fixed frame without changing scroll position or callback data. */
+static void alert_frame_palette(lv_obj_t *root, bool night)
+{
+  bool *valid = root == s_alerts.list ? &s_alerts.list_palette_valid : &s_alerts.detail_palette_valid;
+  bool *applied_night = root == s_alerts.list ? &s_alerts.list_palette_night : &s_alerts.detail_palette_night;
+  if (*valid && *applied_night == night) return;
+  *valid = true;
+  *applied_night = night;
+  lv_color_t primary = alert_color(night, 0xf5f8ff, 0xecc0c0);
+  lv_color_t muted = alert_color(night, 0xa6b6cf, 0xc17a7a);
+  lv_obj_set_style_bg_color(root, alert_color(night, 0x07101c, 0x18090c), 0);
+  for (uint32_t i = 0; i < lv_obj_get_child_count(root); ++i) {
+    lv_obj_t *child = lv_obj_get_child(root, i);
+    if (lv_obj_check_type(child, &lv_image_class)) {
+      lv_image_set_src(child, night ? &round_stage_night : &round_stage_day);
+    } else if (lv_obj_check_type(child, &lv_label_class)) {
+      lv_obj_set_style_text_color(child, child == s_alerts.subtitle
+        || (root == s_alerts.detail && child != s_alerts.detail_heading) ? muted : primary, 0);
+    } else if (lv_obj_check_type(child, &lv_button_class)) {
+      alert_button_palette(child, night);
+      for (uint32_t j = 0; j < lv_obj_get_child_count(child); ++j) {
+        lv_obj_t *content = lv_obj_get_child(child, j);
+        lv_obj_set_style_text_color(content, primary, 0);
+        lv_obj_set_style_image_recolor(content, primary, 0);
+      }
+    }
+  }
+  lv_obj_set_style_bg_color(root == s_alerts.list ? s_alerts.rows : s_alerts.detail_content,
+    alert_color(night, 0x93d1ff, 0xe1b6b6), LV_PART_SCROLLBAR);
+  lv_obj_set_style_bg_color(root == s_alerts.list ? s_alerts.list_track : s_alerts.detail_track,
+    muted, 0);
+}
+
+static bool alert_same_rows(const weather_alert_row_t *rows, size_t count)
+{
+  if (!s_alerts.rows_valid || count != s_alerts.row_count) return false;
+  for (size_t i = 0; i < count; ++i) {
+    const weather_alert_row_t *a = &rows[i], *b = &s_alerts.row_data[i];
+    if (a->id != b->id || a->type != b->type || a->cutoff != b->cutoff) return false;
+  }
+  return true;
+}
+
+static void alert_render_rows(const app_alert_snapshot_t *snapshot, bool time_24h, bool night)
+{
+  size_t count = (size_t)snapshot->warning_count + snapshot->watch_count;
+  weather_alert_row_t *rows = count ? calloc(count, sizeof(*rows)) : NULL;
+  if (count && !rows) return; /* Retry on the next normal UI update. */
+  for (size_t i = 0; i < count; ++i) {
+    if (weather_client_alerts_row_copy(i, &rows[i]) != ESP_OK
+        || rows[i].revision != snapshot->revision) { free(rows); return; }
+  }
+  bool same = alert_same_rows(rows, count);
+  bool checking = !count && !snapshot->has_success && snapshot->status == APP_ALERT_CHECKING;
+  if (same && time_24h == s_alerts.rows_24h && night == s_alerts.rows_night
+      && checking == (s_alerts.checking != NULL)) {
+    free(rows);
+    s_alerts.rows_revision = snapshot->revision;
+    return;
+  }
+  int32_t scroll_y = lv_obj_get_scroll_y(s_alerts.rows);
+  lv_obj_clean(s_alerts.rows);
+  free(s_alerts.row_data);
+  s_alerts.row_data = rows;
+  s_alerts.row_count = count;
+  s_alerts.checking = NULL;
+  size_t catalog_count;
+  const weather_alert_type_t *catalog = weather_client_alert_catalog(&catalog_count);
+  lv_color_t primary = alert_color(night, 0xf5f8ff, 0xecc0c0);
+  lv_color_t muted = alert_color(night, 0xa6b6cf, 0xc17a7a);
+  for (size_t i = 0; i < count; ++i) {
+    if (rows[i].type >= catalog_count) continue;
+    const weather_alert_type_t *type = &catalog[rows[i].type];
+    lv_obj_t *row = alert_button(s_alerts.rows, 0, i * 140, 520, 128,
+      s_alerts.row_cb, &rows[i].id);
+    alert_button_palette(row, night);
+    lv_obj_t *triangle = alert_icon(row, &wac_icon_triangle_alert_32, 32,
+      lv_color_hex(type->warning ? 0xff4d4d : 0xffe04b));
+    lv_obj_set_pos(triangle, 22, 48);
+    lv_obj_t *copy = lv_obj_create(row);
+    lv_obj_remove_style_all(copy);
+    lv_obj_set_size(copy, 370, LV_SIZE_CONTENT);
+    lv_obj_remove_flag(copy, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *title = alert_label(copy, type->name, 0, 0, 370, &wac_font_settings_28,
+      primary, LV_TEXT_ALIGN_LEFT);
+    lv_obj_set_style_text_line_space(title, 4, 0);
+    lv_obj_update_layout(title);
+    char until[96], stamp[64];
+    alert_time(stamp, sizeof(stamp), rows[i].cutoff, time_24h, false);
+    snprintf(until, sizeof(until), "Until %s", stamp);
+    alert_label(copy, until, 0, lv_obj_get_height(title) + 8, 370,
+      &wac_font_settings_24, muted, LV_TEXT_ALIGN_LEFT);
+    lv_obj_align(copy, LV_ALIGN_LEFT_MID, 68, 0);
+    lv_obj_t *chevron = alert_icon(row, &wac_icon_chevron_right, 24, muted);
+    lv_obj_set_pos(chevron, 474, 52);
+  }
+  if (checking) s_alerts.checking = alert_label(s_alerts.rows, "Checking for alerts…", 8, 24,
+    504, &wac_font_settings_28, muted, LV_TEXT_ALIGN_CENTER);
+  lv_obj_update_layout(s_alerts.rows);
+  alert_scroll_track(s_alerts.rows, s_alerts.list_track);
+  lv_obj_scroll_to_y(s_alerts.rows, scroll_y, LV_ANIM_OFF);
+  s_alerts.rows_valid = true;
+  s_alerts.rows_revision = snapshot->revision;
+  s_alerts.rows_24h = time_24h;
+  s_alerts.rows_night = night;
+}
+
+static void alert_update_footer(const app_alert_snapshot_t *snapshot, bool time_24h, bool night)
+{
+  const char *primary = "", *secondary = "";
+  char last_check[104], stamp[64];
+  if (snapshot->status == APP_ALERT_FAILED) {
+    primary = "Unable to update alerts";
+    if (snapshot->has_success) {
+      alert_time(stamp, sizeof(stamp), snapshot->last_success, time_24h, false);
+      snprintf(last_check, sizeof(last_check), "Last successful check: %s", stamp);
+      secondary = last_check;
+    } else secondary = "No successful check yet";
+  } else if (snapshot->status == APP_ALERT_UNSUPPORTED) {
+    primary = "NWS alerts unavailable";
+    secondary = "for this location";
+  } else if (snapshot->save_failed) primary = "Unable to save alerts";
+  alert_visible(s_alerts.list_back, !*primary);
+  alert_visible(s_alerts.notice, *primary);
+  wac_ui_set_label_text(s_alerts.notice_primary, primary);
+  wac_ui_set_label_text(s_alerts.notice_secondary, secondary);
+  lv_obj_set_style_text_color(s_alerts.notice_primary, alert_color(night, 0xf5f8ff, 0xecc0c0), 0);
+  lv_obj_set_style_text_color(s_alerts.notice_secondary, alert_color(night, 0xa6b6cf, 0xc17a7a), 0);
+  lv_obj_set_y(s_alerts.notice_primary, *secondary ? 4 : 24);
+}
+
+static int alert_detail_text(const char *text, int y, int inset, const lv_font_t *font,
+  lv_color_t color, int spacing, lv_text_align_t align)
+{
+  if (!*text) return y;
+  lv_obj_t *label = alert_label(s_alerts.detail_content, text, inset, y, 520 - inset * 2,
+    font, color, align);
+  lv_obj_set_style_text_line_space(label, spacing, 0);
+  lv_obj_update_layout(label);
+  return y + lv_obj_get_height(label);
+}
+
+static void alert_render_detail(uint64_t id, uint32_t revision, bool time_24h, bool night)
+{
+  weather_alert_detail_t detail;
+  size_t needed = 0, capacity = 0;
+  char *text = NULL;
+  esp_err_t result = weather_client_alerts_detail_copy(id, &detail, NULL, 0, &needed);
+  /* A revised event may grow between the size query and copy. Retry with its
+   * complete new size rather than clipping any protective information. */
+  for (int attempt = 0; result == ESP_ERR_INVALID_SIZE && attempt < 3; ++attempt) {
+    char *grown = realloc(text, needed);
+    if (!grown) { free(text); return; }
+    text = grown;
+    capacity = needed;
+    result = weather_client_alerts_detail_copy(id, &detail, text, capacity, &needed);
+  }
+  if (result != ESP_OK) {
+    free(text);
+    if (result == ESP_ERR_NOT_FOUND) {
+      lv_obj_clean(s_alerts.detail_content);
+      alert_scroll_track(s_alerts.detail_content, s_alerts.detail_track);
+      wac_ui_set_label_text(s_alerts.detail_heading, "");
+      s_alerts.detail_valid = false;
+    }
+    return;
+  }
+  size_t count;
+  const weather_alert_type_t *catalog = weather_client_alert_catalog(&count);
+  if (detail.row.type >= count) { free(text); return; }
+  const weather_alert_type_t *type = &catalog[detail.row.type];
+  int32_t scroll_y = s_alerts.detail_valid && id == s_alerts.detail_id
+    ? lv_obj_get_scroll_y(s_alerts.detail_content) : 0;
+  lv_obj_clean(s_alerts.detail_content);
+  wac_ui_set_label_text(s_alerts.detail_heading, type->warning ? "Warning" : "Watch");
+  lv_obj_set_style_text_color(s_alerts.detail_heading,
+    lv_color_hex(type->warning ? 0xff4d4d : 0xffe04b), 0);
+  lv_color_t primary = alert_color(night, 0xf5f8ff, 0xecc0c0);
+  lv_color_t muted = alert_color(night, 0xa6b6cf, 0xc17a7a);
+  int y = alert_detail_text(type->name, 0, 5,
+    &lv_font_montserrat_36, primary, 6, LV_TEXT_ALIGN_CENTER);
+  y = y < 72 ? 92 : y + 20;
+  y = alert_detail_text(text + detail.area_offset, y, 5, &wac_font_settings_26,
+    muted, 8, LV_TEXT_ALIGN_CENTER);
+  char issued[64], until[64], metadata[160];
+  alert_time(issued, sizeof(issued), detail.row.issued, time_24h, true);
+  alert_time(until, sizeof(until), detail.row.cutoff, time_24h, true);
+  snprintf(metadata, sizeof(metadata), "Issued %s · Until %s", issued, until);
+  y = alert_detail_text(metadata, y, 5, &wac_font_settings_26, muted, 8, LV_TEXT_ALIGN_CENTER);
+  y = y < 167 ? 187 : y + 20;
+  y = alert_detail_text(text + detail.description_offset, y, 10, &wac_font_settings_28,
+    primary, 10, LV_TEXT_ALIGN_LEFT);
+  alert_detail_text(text + detail.instruction_offset, y + 20, 10, &wac_font_settings_28,
+    alert_color(night, 0x93d1ff, 0xe1b6b6), 10, LV_TEXT_ALIGN_LEFT);
+  free(text); /* Labels own their complete copies. */
+  lv_obj_update_layout(s_alerts.detail_content);
+  alert_scroll_track(s_alerts.detail_content, s_alerts.detail_track);
+  lv_obj_scroll_to_y(s_alerts.detail_content, scroll_y, LV_ANIM_OFF);
+  s_alerts.detail_valid = true;
+  s_alerts.detail_id = id;
+  s_alerts.detail_revision = revision;
+  s_alerts.detail_night = night;
+  s_alerts.detail_24h = time_24h;
+}
+
+void wac_weather_update_alerts(const app_alert_snapshot_t *snapshot,
+  const device_config_t *config, bool list_visible, bool detail_visible,
+  uint64_t detail_id, bool night)
+{
+  if (!s_alerts.list || !snapshot || !config) return;
+  alert_visible(s_alerts.list, list_visible);
+  alert_visible(s_alerts.detail, detail_visible);
+  if (!list_visible && !detail_visible) return;
+  bool time_24h = wac_ui_strings_equal_ignore_case(config->time_format, "24");
+  if (list_visible) {
+    alert_frame_palette(s_alerts.list, night);
+    char totals[96] = "";
+    unsigned warnings = snapshot->warning_count, watches = snapshot->watch_count;
+    if (warnings || watches) snprintf(totals, sizeof(totals), "%u warning%s · %u watch%s",
+      warnings, warnings == 1 ? "" : "s", watches, watches == 1 ? "" : "es");
+    else if (snapshot->has_success && snapshot->status == APP_ALERT_CURRENT)
+      snprintf(totals, sizeof(totals), "No active weather alerts");
+    wac_ui_set_label_text(s_alerts.subtitle, totals);
+    alert_update_footer(snapshot, time_24h, night);
+    if (!s_alerts.rows_valid || s_alerts.rows_revision != snapshot->revision
+        || s_alerts.rows_night != night || s_alerts.rows_24h != time_24h)
+      alert_render_rows(snapshot, time_24h, night);
+  }
+  if (detail_visible) {
+    alert_frame_palette(s_alerts.detail, night);
+    if (!s_alerts.detail_valid || s_alerts.detail_revision != snapshot->revision
+        || s_alerts.detail_id != detail_id || s_alerts.detail_night != night
+        || s_alerts.detail_24h != time_24h)
+      alert_render_detail(detail_id, snapshot->revision, time_24h, night);
+  }
 }

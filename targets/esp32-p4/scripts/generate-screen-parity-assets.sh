@@ -23,9 +23,10 @@ fi
 
 # Utility and weather icons share one approved output. Keep SVG and PNG
 # conversion in the existing tools, without another maintained asset input.
-"$PYTHON_BIN" - "$PROJECT_DIR" "$weather_only" <<'PY'
+"$PYTHON_BIN" - "$PROJECT_DIR" "$weather_only" "$settings_only" <<'PY'
 import sys
 import tempfile
+import math
 from pathlib import Path
 import cairosvg
 
@@ -35,8 +36,9 @@ from render_screen_stage_svg import build_settings_icon, build_weather_icon
 from generate_lvgl_image import decode_png, convert_rows, crop_transparent_margin, render_header, render_source
 
 weather_only = sys.argv[2] == "true"
+settings_only = sys.argv[3] == "true"
 asset_dir = project / "main/assets"
-# A focused run replaces only weather blocks; utility and storm bytes stay exact.
+# Focused runs preserve the other artwork and its original crop metadata.
 existing_sources = (asset_dir / "wac_icons.c").read_text()
 sources = []
 symbols = []
@@ -64,13 +66,17 @@ with tempfile.TemporaryDirectory(prefix="wac-settings-icons-") as temporary:
         ("chevron_left", "chevron_left", 32), ("chevron_right", "chevron_right", 32),
         ("chevron_up", "chevron_up", 32), ("chevron_down", "chevron_down", 32),
         ("check", "check", 32), ("plus", "plus", 32), ("minus", "minus", 32),
-        ("volume_2", "volume_2", 32), ("volume_off", "volume_off", 32),
+        ("volume_2", "volume_2", 32),
+        ("volume_2", "volume_2_40", 40), ("volume_off", "volume_off_40", 40),
+        ("settings_2", "settings_2_40", 40),
+        ("triangle_outline", "triangle_outline_40", 40),
+        ("triangle_alert", "triangle_alert_32", 32),
         ("play", "play", 32), ("square", "square", 32),
         ("wifi", "wifi_mark", 80), ("wifi_off", "wifi_off_mark", 80),
         ("circle_check", "circle_check_mark", 80),
         ("clock", "clock", 28),
         ("alarm_clock", "alarm_clock", 32), ("alarm_clock_off", "alarm_clock_off", 32),
-        ("alarm_clock", "alarm_clock_small", 28), ("alarm_clock_off", "alarm_clock_off_small", 28),
+        ("alarm_clock", "alarm_clock_small", 28),
         ("close", "close", 24),
     ):
         if weather_only:
@@ -83,6 +89,26 @@ with tempfile.TemporaryDirectory(prefix="wac-settings-icons-") as temporary:
         sources.append(render_source(symbol, "wac_icons.h", "a8", width, height, stride, values))
         symbols.append(symbol)
 
+    # Precompose the subtle Radar glow before RGB565 display conversion. Using
+    # an alpha overlay here would repeatedly round the very dark surface colors.
+    if not weather_only:
+        for symbol, background, accent in (
+            ("wac_radar_unavailable_glow", 0x07101c, 0x93d1ff),
+            ("wac_radar_unavailable_glow_night", 0x18090c, 0xe1b6b6),
+        ):
+            values = []
+            for y in range(64):
+                for x in range(64):
+                    distance = math.hypot(
+                        ((x + .5) * 12.5 - 400) / (400 * math.sqrt(2) * .68),
+                        ((y + .5) * 12.5 - 344) / (456 * math.sqrt(2) * .68))
+                    opacity = .07 * max(0, 1 - distance)
+                    values.extend(round(((background >> shift) & 255) * (1 - opacity)
+                                        + ((accent >> shift) & 255) * opacity)
+                                  for shift in (0, 8, 16))
+            sources.append(render_source(symbol, "wac_icons.h", "rgb888", 64, 64, 192, values))
+            symbols.append(symbol)
+
     for variant, suffix in (
         ("freezing_rain", "freezing_rain"),
         ("hail", "hail"),
@@ -90,6 +116,8 @@ with tempfile.TemporaryDirectory(prefix="wac-settings-icons-") as temporary:
         ("wind", "wind"),
         ("tornado", "tornado"),
     ):
+        if settings_only:
+            continue
         symbol = "wac_weather_" + suffix
         png = Path(temporary) / (suffix + ".png")
         source = render_weather(symbol, suffix.replace("_", "-"),
@@ -101,6 +129,8 @@ with tempfile.TemporaryDirectory(prefix="wac-settings-icons-") as temporary:
     for stem in ("clear-day", "clear-night", "cloudy", "fog", "partlycloudy-day",
                  "partlycloudy-night", "rain", "showers-day", "showers-night", "sleet",
                  "snow", "thunderstorm", "thundersnow"):
+        if settings_only:
+            continue
         symbol = "weather_icon_" + stem.replace("-", "_")
         source = render_weather(symbol, "rain-snow" if stem == "sleet" else stem,
                                 (project.parent.parent / "shared/assets/icons" / (stem + ".svg")).read_bytes(),
@@ -108,18 +138,29 @@ with tempfile.TemporaryDirectory(prefix="wac-settings-icons-") as temporary:
         (asset_dir / (symbol + ".c")).write_text(source)
         (asset_dir / (symbol + ".h")).write_text(render_header(symbol))
 
-    if not weather_only:
-        from render_edge_indicator import render as render_edge_indicator
-        # Both clock faces use this storm glow; it is not a separate weather page.
-        symbol = "weather_edge_indicator"
-        png = Path(temporary) / (symbol + ".png")
-        render_edge_indicator(png, variant="weather")
-        width, height, pixels = decode_png(png)
-        values, stride = convert_rows(pixels, "a8", 4)
-        sources.append(render_source(symbol, "wac_icons.h", "a8", width, height, stride, values))
-        symbols.append(symbol)
 
-if weather_only:
+if settings_only:
+    utility_sources = dict(zip(symbols, sources))
+    blocks = existing_sources.split('#include "lvgl.h"')
+    for index, block in enumerate(blocks):
+        for symbol in tuple(utility_sources):
+            if f"uint8_t {symbol}_map[]" in block:
+                blocks[index] = utility_sources.pop(symbol).removeprefix('#include "lvgl.h"').rstrip("\n") + ("\n\n" if index < len(blocks) - 1 else "\n")
+                break
+    if utility_sources:
+        insert_at = next(index for index, block in enumerate(blocks)
+                         if "uint8_t wac_weather_" in block)
+        additions = [source.removeprefix('#include "lvgl.h"').rstrip("\n") + "\n\n"
+                     for source in utility_sources.values()]
+        blocks[insert_at:insert_at] = additions
+    (asset_dir / "wac_icons.c").write_text('#include "lvgl.h"'.join(blocks).rstrip() + "\n")
+    header = (asset_dir / "wac_icons.h").read_text()
+    for symbol in symbols:
+        declaration = f"extern const lv_image_dsc_t {symbol};\n"
+        if declaration not in header:
+            header += declaration
+    (asset_dir / "wac_icons.h").write_text(header)
+elif weather_only:
     blocks = existing_sources.split('#include "lvgl.h"')
     replaced = set()
     for index, block in enumerate(blocks):
@@ -130,7 +171,7 @@ if weather_only:
                 break
     if replaced != weather_sources.keys():
         raise ValueError("Shared icon output is missing a weather asset block")
-    (asset_dir / "wac_icons.c").write_text('#include "lvgl.h"'.join(blocks))
+    (asset_dir / "wac_icons.c").write_text('#include "lvgl.h"'.join(blocks).rstrip() + "\n")
 else:
     (asset_dir / "wac_icons.c").write_text("\n".join(sources))
     (asset_dir / "wac_icons.h").write_text('#pragma once\n\n#include "lvgl.h"\n\n' + "".join(f"extern const lv_image_dsc_t {symbol};\n" for symbol in symbols))
@@ -163,11 +204,6 @@ const lv_image_dsc_t *weather_icon_image_for_name(const char *icon_name)
   return NULL;
 }
 
-const lv_image_dsc_t *weather_icon_image_for_snapshot(const app_weather_snapshot_t *weather)
-{
-  return weather && weather->valid ? weather_icon_image_for_name(weather->icon_name) : NULL;
-}
-
 const weather_icon_geometry_t *weather_icon_geometry_for_image(const lv_image_dsc_t *image)
 {
   for (size_t i = 0; i < sizeof(weather_icons) / sizeof(weather_icons[0]); ++i) {
@@ -176,7 +212,8 @@ const weather_icon_geometry_t *weather_icon_geometry_for_image(const lv_image_ds
   return NULL;
 }
 '''
-(asset_dir / "weather_icons.c").write_text(lookup_source.replace("__INCLUDES__", "\n".join(includes)).replace("__ROWS__", "\n".join(rows)))
+if not settings_only:
+    (asset_dir / "weather_icons.c").write_text(lookup_source.replace("__INCLUDES__", "\n".join(includes)).replace("__ROWS__", "\n".join(rows)))
 
 PY
 
@@ -185,12 +222,15 @@ if $settings_only || $weather_only; then
   exit 0
 fi
 
+PNG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/wac-screen-assets.XXXXXX")"
+trap 'rm -rf "$PNG_DIR"' EXIT
+
 render_stage_asset() {
   local variant="$1"
   local mode="$2"
   local symbol="$3"
   local svg_path="$PROJECT_DIR/assets-src/${symbol}.svg"
-  local png_path="/private/tmp/${symbol}.png"
+  local png_path="$PNG_DIR/${symbol}.png"
 
   "$PYTHON_BIN" "$PROJECT_DIR/tools/render_screen_stage_svg.py" \
     --variant "$variant" \
@@ -211,7 +251,7 @@ render_alpha_asset() {
   local mode="$2"
   local symbol="$3"
   local svg_path="$PROJECT_DIR/assets-src/${symbol}.svg"
-  local png_path="/private/tmp/${symbol}.png"
+  local png_path="$PNG_DIR/${symbol}.png"
 
   "$PYTHON_BIN" "$PROJECT_DIR/tools/render_screen_stage_svg.py" \
     --variant "$variant" \

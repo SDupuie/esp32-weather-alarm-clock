@@ -117,6 +117,7 @@ void device_config_set_defaults(device_config_t *config)
   strcpy(config->time_format, "12");
   strcpy(config->night_shift_start, "22:00");
   strcpy(config->night_shift_end, "06:00");
+  config->alert_warning_sounds = UINT32_MAX;
   config->night_shift_mode = DEVICE_CONFIG_NIGHT_OFF;
   config->day_brightness = 80;
   config->night_brightness = 30;
@@ -145,6 +146,8 @@ static esp_err_t validate_settings(const device_config_t *config, bool allow_par
       || (unsigned) config->weather_provider > DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
       || (config->weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
           && !has_text(config->weather_api_key))
+      || (config->alert_watch_sounds & ~DEVICE_CONFIG_ALERT_WATCH_MASK) != 0
+      || (unsigned) config->alert_update_sounds > DEVICE_CONFIG_ALERT_UPDATES_ALL
       || !hhmm_valid(config->night_shift_start) || !hhmm_valid(config->night_shift_end)
       || (unsigned) config->night_shift_mode > DEVICE_CONFIG_NIGHT_SOLAR
       || !offset_valid(config->night_sunset_offset_minutes)
@@ -216,6 +219,16 @@ static esp_err_t load_u8(nvs_handle_t handle, const char *key, uint8_t *value, b
   return err;
 }
 
+static esp_err_t load_u32(nvs_handle_t handle, const char *key, uint32_t *value, bool *seeded)
+{
+  esp_err_t err = nvs_get_u32(handle, key, value);
+  if (err == ESP_ERR_NVS_NOT_FOUND) {
+    err = nvs_set_u32(handle, key, *value);
+    if (err == ESP_OK) *seeded = true;
+  }
+  return err;
+}
+
 static esp_err_t load_i16(nvs_handle_t handle, const char *key, int16_t *value, bool *seeded)
 {
   esp_err_t err = nvs_get_i16(handle, key, value);
@@ -279,6 +292,10 @@ esp_err_t device_config_init(void)
   LOAD_STRING("time_fmt", time_format)
   LOAD_STRING("units", units)
   LOAD_STRING("weather_key", weather_api_key)
+  err = load_u32(handle, "watch_sounds", &config.alert_watch_sounds, &seeded);
+  if (err != ESP_OK) { goto done; }
+  err = load_u32(handle, "warn_sounds", &config.alert_warning_sounds, &seeded);
+  if (err != ESP_OK) { goto done; }
   LOAD_STRING("lat", latitude)
   LOAD_STRING("lon", longitude)
   LOAD_STRING("night_st", night_shift_start)
@@ -297,6 +314,15 @@ esp_err_t device_config_init(void)
 #undef LOAD_STRING
 #undef LOAD_U8
 #undef LOAD_I16
+  value = config.alert_update_sounds;
+  err = load_u8(handle, "update_sounds", &value, &seeded);
+  if (err != ESP_OK) { goto done; }
+  config.alert_update_sounds = (device_config_alert_updates_t) value;
+  value = config.alert_night_sounds;
+  err = load_u8(handle, "night_alerts", &value, &seeded);
+  if (err != ESP_OK) { goto done; }
+  if (value > 1) { err = ESP_ERR_INVALID_ARG; goto done; }
+  config.alert_night_sounds = value != 0;
   value = config.leading_zero_12h;
   err = load_u8(handle, "lead_zero", &value, &seeded);
   if (err != ESP_OK) { goto done; }
@@ -429,6 +455,10 @@ static esp_err_t write_settings(settings_save_t group, const device_config_t *co
         SAVE_STRING("weather_key", weather_api_key)
         SAVE_NUMBER(u8, "weather_src", weather_provider)
       }
+      SAVE_NUMBER(u32, "watch_sounds", alert_watch_sounds)
+      SAVE_NUMBER(u32, "warn_sounds", alert_warning_sounds)
+      SAVE_NUMBER(u8, "update_sounds", alert_update_sounds)
+      SAVE_NUMBER(u8, "night_alerts", alert_night_sounds)
       break;
     case SAVE_ALARM:
       SAVE_NUMBER(u8, "alarm_enabled", alarm_enabled)
@@ -545,6 +575,10 @@ esp_err_t device_config_save_weather(const device_config_t *baseline, const devi
   MERGE_STRING(units)
   MERGE_NUMBER(weather_provider)
   MERGE_STRING(weather_api_key)
+  MERGE_NUMBER(alert_watch_sounds)
+  MERGE_NUMBER(alert_warning_sounds)
+  MERGE_NUMBER(alert_update_sounds)
+  MERGE_NUMBER(alert_night_sounds)
   /* Unlike initial defaults, an explicitly saved location must be resolved. */
   if (!has_text(after.location)) {
     xSemaphoreGive(s_save_lock);

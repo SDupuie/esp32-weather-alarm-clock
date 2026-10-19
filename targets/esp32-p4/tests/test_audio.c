@@ -38,7 +38,7 @@ static pthread_mutex_t gate = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
 static unsigned boundary_count;
 static bool permit, finish, at_write;
-static bool pause_open;
+static bool pause_open, pause_creation, pause_volume;
 static int64_t setup_delay;
 static int64_t now;
 static int16_t last_pcm[MACHINE_MAX_SAMPLES];
@@ -103,7 +103,9 @@ static void hardware_thread(void)
 }
 esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void)
 {
-  hardware_thread(); ++creates; return bsp_fail ? NULL : &codec_open;
+  hardware_thread(); ++creates;
+  if (pause_creation) { pause_creation = false; boundary(false); }
+  return bsp_fail ? NULL : &codec_open;
 }
 int esp_codec_dev_open(esp_codec_dev_handle_t handle, esp_codec_dev_sample_info_t *format)
 {
@@ -121,7 +123,9 @@ int esp_codec_dev_open(esp_codec_dev_handle_t handle, esp_codec_dev_sample_info_
 int esp_codec_dev_set_out_vol(esp_codec_dev_handle_t handle, int volume)
 {
   hardware_thread(); assert(handle == &codec_open && codec_open && volume == 100);
-  ++volumes; return volume_error;
+  ++volumes;
+  if (pause_volume) { pause_volume = false; boundary(false); }
+  return volume_error;
 }
 static void boundary(bool writing)
 {
@@ -1069,6 +1073,319 @@ static void cancellation_checks(void)
   assert(!at_write && !snapshot().machine_pending && decoder_opens == decoder_closes);
 }
 
+static void weather_generator_checks(void)
+{
+  const unsigned starts[][6] = {{0, 2, 4}, {0, 5, 8, 11, 16, 19}};
+  const unsigned lengths[][6] = {{1, 1, 1}, {4, 2, 2, 4, 2, 2}};
+  unsigned alarm_peak = 0;
+  for (unsigned sound = 0; sound < 3; ++sound) {
+    bell_state_t bell = {0};
+    int16_t pcm[CHUNK_SAMPLES];
+    for (unsigned chunk = 0; chunk < 250; ++chunk) {
+      fill_chunk(pcm, chunk * CHUNK_SAMPLES, sound, 100, true, 30, &bell);
+      if (peak(pcm) > alarm_peak) alarm_peak = peak(pcm);
+    }
+  }
+  printf("Independent complete alarm-pattern maximum: %u PCM\n", alarm_peak);
+  for (unsigned kind = 0; kind < 2; ++kind) {
+    const unsigned expected_frames = kind ? 231525 : 55125;
+    assert(weather_frames(kind) == expected_frames);
+    double band[4] = {0}, quadrature[4] = {0};
+    const double frequencies[] = {1050, 853, 960, 700};
+    float maximum = 0;
+    for (unsigned i = 0; i < expected_frames + CHUNK_SAMPLES; ++i) {
+      const float value = weather_sample(kind, i);
+      bool audible = false;
+      for (unsigned burst = 0; burst < (kind ? 6u : 3u); ++burst) {
+        unsigned start = starts[kind][burst] * 11025;
+        unsigned end = start + lengths[kind][burst] * 11025;
+        if (i >= start && i < end) audible = true;
+        if (i == start + 200) assert(fabsf(value) > .01f);
+      }
+      if (!audible) assert(value == 0);
+      maximum = fmaxf(maximum, fabsf(value));
+      if (i < 8000) for (unsigned f = 0; f < 4; ++f) {
+        double phase = 2 * 3.14159265358979323846 * frequencies[f] * i / 22050;
+        band[f] += value * cos(phase);
+        quadrature[f] += value * sin(phase);
+      }
+    }
+    assert(maximum > .80f && maximum <= .80501f);
+    assert(fabs(maximum * .82 * INT16_MAX - alarm_peak) < 100);
+    for (unsigned f = 0; f < 4; ++f) band[f] = hypot(band[f], quadrature[f]);
+    if (!kind) assert(band[0] > 20 * band[1] && band[0] > 20 * band[2]);
+    else assert(band[1] > 20 * band[0] && band[2] > 20 * band[0]);
+    assert((kind ? band[1] : band[0]) > 20 * band[3]);
+  }
+}
+
+static uint32_t weather_start(wac_audio_weather_kind_t kind)
+{
+  uint32_t token = 0;
+  assert(wac_audio_weather_start(kind, &token) == ESP_OK && token);
+  assert(snapshot().weather_token == token && snapshot().weather_state == WAC_AUDIO_WEATHER_PENDING);
+  return token;
+}
+
+static void weather_stop_ack(uint32_t token)
+{
+  assert(wac_audio_weather_stop(token) == ESP_OK);
+  step();
+  assert(snapshot().weather_token == token && snapshot().weather_state == WAC_AUDIO_WEATHER_CANCELED);
+  wac_audio_weather_ack(token);
+  assert(snapshot().weather_state == WAC_AUDIO_WEATHER_NONE);
+}
+
+static void weather_checks(void)
+{
+  machine_scenario = true;
+  uint32_t rejected = 999;
+  assert(wac_audio_weather_start(99, &rejected) == ESP_ERR_INVALID_ARG);
+  assert(wac_audio_weather_start(WAC_AUDIO_WEATHER_WATCH, NULL) == ESP_ERR_INVALID_ARG);
+  uint32_t token = weather_start(WAC_AUDIO_WEATHER_WATCH);
+  assert(wac_audio_weather_start(WAC_AUDIO_WEATHER_WARNING, &rejected) == ESP_ERR_INVALID_STATE && !rejected);
+  assert(wac_audio_weather_stop(token) == ESP_OK);
+  step(); assert(!at_write && snapshot().weather_state == WAC_AUDIO_WEATHER_CANCELED);
+  assert(!snapshot().weather_started_us);
+  wac_audio_weather_ack(token);
+
+  pause_creation = true;
+  token = weather_start(WAC_AUDIO_WEATHER_WATCH);
+  const unsigned creation_writes = writes;
+  step(); assert(!at_write && !codec_open && creates == 1);
+  weather_stop_ack(token); assert(writes == creation_writes);
+
+  for (unsigned kind = 0; kind < 2; ++kind) {
+    token = weather_start(kind);
+    setup_delay = 3000000;
+    const unsigned before = writes;
+    step(); assert(at_write && codec_rate == SAMPLE_RATE);
+    const int64_t first = snapshot().weather_started_us;
+    assert(first && first == now - 20000 && snapshot().weather_state == WAC_AUDIO_WEATHER_PLAYING);
+    assert(wac_audio_preview(DEVICE_CONFIG_ALARM_CLASSIC_BEEP, 50) == ESP_ERR_INVALID_STATE);
+    assert(wac_audio_stop_preview() == ESP_OK);
+    while (at_write) step();
+    assert(writes - before == (kind ? 525u : 125u));
+    assert(!codec_open && snapshot().weather_state == WAC_AUDIO_WEATHER_FINISHED);
+    assert(snapshot().weather_started_us == first);
+    const unsigned finished = writes;
+    for (unsigned i = 0; i < 3; ++i) step();
+    assert(writes == finished);
+    assert(wac_audio_weather_start(kind, &rejected) == ESP_ERR_INVALID_STATE);
+    wac_audio_weather_ack(token + 1); assert(snapshot().weather_token == token);
+    wac_audio_weather_ack(token); assert(snapshot().weather_state == WAC_AUDIO_WEATHER_NONE);
+  }
+  /* Applied alarm volume, including zero, never uses a preview draft. */
+  for (unsigned volume = 0; volume < 3; ++volume) {
+    const unsigned levels[] = {0, 37, 100};
+    applied.alarm_volume = levels[volume];
+    token = weather_start(WAC_AUDIO_WEATHER_WATCH);
+    step(); assert(at_write);
+    for (unsigned i = 0; i < CHUNK_SAMPLES; ++i) {
+      const double sample = weather_sample(WAC_AUDIO_WEATHER_WATCH, i) * .82 *
+        levels[volume] * levels[volume] / 10000 * INT16_MAX;
+      assert(abs(last_pcm[i] - (int)lrint(sample)) <= 1);
+    }
+    weather_stop_ack(token); assert(!codec_open);
+  }
+  applied.alarm_volume = 50;
+  /* Weather stops an existing preview and leaves it stopped. */
+  assert(wac_audio_preview(DEVICE_CONFIG_ALARM_CLASSIC_BELL, 37) == ESP_OK);
+  step(); assert(snapshot().preview_active);
+  token = weather_start(WAC_AUDIO_WEATHER_WATCH);
+  assert(!snapshot().preview_active);
+  step(); assert(at_write && !snapshot().preview_active);
+  weather_stop_ack(token); step(); assert(!at_write && !snapshot().preview_active);
+
+  const device_config_sound_machine_sound_t sounds[] = {
+    DEVICE_CONFIG_SOUND_MACHINE_WHITE_NOISE, DEVICE_CONFIG_SOUND_MACHINE_RAIN,
+    DEVICE_CONFIG_SOUND_MACHINE_FOREST};
+  for (unsigned sound = 0; sound < 3; ++sound) {
+    machine_preferences(sounds[sound], 37, 15);
+    assert(wac_audio_sound_machine_play() == ESP_OK); step(); step();
+    assert(snapshot().machine_active);
+    const unsigned rate = codec_rate, decoders = decoder_opens;
+    const int64_t original_end = now - 20000 + INT64_C(900000000);
+    token = weather_start(WAC_AUDIO_WEATHER_WARNING);
+    step(); assert(at_write && codec_rate == SAMPLE_RATE && snapshot().machine_active);
+    assert(wac_audio_sound_machine_play() == ESP_ERR_INVALID_STATE);
+    const int64_t first = snapshot().weather_started_us;
+    while (snapshot().weather_state == WAC_AUDIO_WEATHER_PLAYING) step();
+    assert(at_write && codec_rate == rate && decoder_opens == decoders);
+    step();
+    assert(snapshot().machine_active && snapshot().machine_remaining_seconds <= 890);
+    assert(snapshot().weather_started_us == first && now < original_end);
+    wac_audio_weather_ack(token);
+    assert(snapshot().machine_remaining_seconds < 900);
+    if (sounds[sound] < DEVICE_CONFIG_SOUND_MACHINE_WHITE_NOISE) {
+      /* The simulated recording's output was advanced by the two pre-alert
+       * chunks; resume retains decoder position, independent volume and fade. */
+      uint64_t position = (uint64_t)rate / 50 * 3;
+      unsigned asset = sounds[sound];
+      (void)recording_chunk_check(asset, position, .37 * .37 * .66 * recording_boost(asset));
+    }
+    machine_stop();
+  }
+
+  for (unsigned action = 0; action < 4; ++action) {
+    machine_preferences(DEVICE_CONFIG_SOUND_MACHINE_WHITE_NOISE, 37, 15);
+    assert(wac_audio_sound_machine_play() == ESP_OK); step(); step();
+    token = weather_start(WAC_AUDIO_WEATHER_WARNING); step();
+    assert(snapshot().machine_active);
+    if (action == 0) assert(wac_audio_sound_machine_stop() == ESP_OK);
+    if (action == 1) now += INT64_C(900000000);
+    if (action == 2) machine_preferences(DEVICE_CONFIG_SOUND_MACHINE_BROWN_NOISE, 7, 30);
+    if (action == 3) alarm_phase(WAC_ALARM_RINGING, 200);
+    if (action != 3) {
+      assert(wac_audio_weather_stop(token) == ESP_OK);
+      step();
+      if (action < 2) assert(!at_write && !snapshot().machine_active);
+      else {
+        assert(at_write && (snapshot().machine_active || snapshot().machine_pending) && snapshot().machine_remaining_seconds == 1800);
+        step(); machine_stop();
+      }
+    } else {
+      step(); assert(at_write && !snapshot().machine_active);
+      assert(snapshot().weather_state == WAC_AUDIO_WEATHER_SKIPPED_RING);
+      alarm_phase(WAC_ALARM_SNOOZED, 200); step(); step();
+      assert(!at_write && !snapshot().machine_active);
+      alarm_phase(WAC_ALARM_IDLE, 200);
+    }
+    wac_audio_weather_ack(token);
+    step(); assert(!at_write);
+  }
+  /* A fresh Play submitted after weather Stop replaces the retained session,
+   * including Stop/Play overwritten before the worker observes either. */
+  machine_preferences(DEVICE_CONFIG_SOUND_MACHINE_WHITE_NOISE, 37, 15);
+  assert(wac_audio_sound_machine_play() == ESP_OK); step(); step();
+  now += 100000000;
+  token = weather_start(WAC_AUDIO_WEATHER_WARNING); step();
+  assert(wac_audio_sound_machine_stop() == ESP_OK);
+  assert(wac_audio_weather_stop(token) == ESP_OK);
+  assert(wac_audio_sound_machine_play() == ESP_OK);
+  step(); step();
+  assert(snapshot().machine_active && snapshot().machine_remaining_seconds == 900);
+  wac_audio_weather_ack(token); machine_stop();
+  /* Stop during the resume open cancels the retained machine before PCM. */
+  assert(wac_audio_sound_machine_play() == ESP_OK); step(); step();
+  token = weather_start(WAC_AUDIO_WEATHER_WARNING); step();
+  pause_open = true;
+  assert(wac_audio_weather_stop(token) == ESP_OK);
+  step(); assert(!at_write && codec_open);
+  const unsigned resume_writes = writes;
+  assert(wac_audio_sound_machine_stop() == ESP_OK);
+  step(); assert(!at_write && writes == resume_writes && !codec_open);
+  wac_audio_weather_ack(token);
+  /* Cancel/ack from an earlier request cannot affect its successor. */
+  const uint32_t old = token;
+  token = weather_start(WAC_AUDIO_WEATHER_WARNING);
+  assert(wac_audio_weather_stop(old) == ESP_OK); wac_audio_weather_ack(old);
+  step(); assert(at_write && snapshot().weather_token == token);
+  weather_stop_ack(token);
+  /* Ringing before the worker consumes a pending weather request skips it. */
+  token = weather_start(WAC_AUDIO_WEATHER_WATCH);
+  alarm_phase(WAC_ALARM_RINGING, 201); step();
+  assert(at_write && snapshot().weather_state == WAC_AUDIO_WEATHER_SKIPPED_RING);
+  assert(!snapshot().weather_started_us);
+  assert(wac_audio_weather_start(WAC_AUDIO_WEATHER_WARNING, &rejected) == ESP_ERR_INVALID_STATE);
+  wac_audio_weather_ack(token);
+  alarm_phase(WAC_ALARM_IDLE, 201); step(); step(); assert(!at_write);
+  /* Slow speaker open/volume setup observes cancellation/ringing before PCM. */
+  for (unsigned stage = 0; stage < 4; ++stage) {
+    const unsigned ring = stage % 2;
+    pause_open = stage < 2; pause_volume = stage >= 2;
+    token = weather_start(WAC_AUDIO_WEATHER_WATCH);
+    const unsigned before = writes;
+    step(); assert(!at_write && codec_open && !snapshot().weather_started_us);
+    if (ring) alarm_phase(WAC_ALARM_RINGING, 202);
+    else assert(wac_audio_weather_stop(token) == ESP_OK);
+    step();
+    assert(writes == before + ring);
+    assert(snapshot().weather_state == (ring ? WAC_AUDIO_WEATHER_SKIPPED_RING : WAC_AUDIO_WEATHER_CANCELED));
+    assert(!snapshot().weather_started_us);
+    wac_audio_weather_ack(token);
+    if (ring) { alarm_phase(WAC_ALARM_IDLE, 202); step(); }
+    step(); assert(!at_write);
+  }
+  /* Weather arrives during each slow machine setup/read boundary. Preserve a
+   * pending session without starting its elapsed timer before its first PCM. */
+  for (unsigned stage = 0; stage < 6; ++stage) {
+    machine_preferences(DEVICE_CONFIG_SOUND_MACHINE_RAIN, 37, 15);
+    pause_mount = stage == 0; pause_file_open = stage == 1;
+    pause_decoder_open = stage == 2; pause_open = stage == 3;
+    pause_read = stage == 4; pause_decode = stage == 5;
+    if (stage == 0) s_spiffs_mounted = false;
+    assert(wac_audio_sound_machine_play() == ESP_OK);
+    const unsigned before = writes;
+    step(); assert(!at_write && writes == before);
+    token = weather_start(WAC_AUDIO_WEATHER_WATCH);
+    step(); assert(at_write && codec_rate == SAMPLE_RATE && snapshot().machine_active);
+    assert(snapshot().machine_remaining_seconds == 900);
+    assert(wac_audio_weather_stop(token) == ESP_OK);
+    step(); assert(at_write && codec_rate == 44100);
+    step(); assert(snapshot().machine_active && snapshot().machine_remaining_seconds == 900);
+    wac_audio_weather_ack(token); machine_stop();
+  }
+  /* Weather also preempts preview while its initial speaker open is blocked. */
+  pause_open = true;
+  assert(wac_audio_preview(DEVICE_CONFIG_ALARM_CLASSIC_BELL, 37) == ESP_OK);
+  const unsigned preview_writes = writes;
+  step(); assert(!at_write);
+  token = weather_start(WAC_AUDIO_WEATHER_WATCH);
+  step(); assert(at_write && writes == preview_writes + 1 && !snapshot().preview_active);
+  weather_stop_ack(token); step(); assert(!at_write);
+  assert(allocations_live == 0 && decoder_opens == decoder_closes && !recording_file);
+}
+
+static void weather_failure_checks(bool creation_failure)
+{
+  machine_scenario = true;
+  for (unsigned failure = 0; failure < (creation_failure ? 1u : 4u); ++failure) {
+    if (!creation_failure) {
+      machine_preferences(DEVICE_CONFIG_SOUND_MACHINE_RAIN, 37, 15);
+      assert(wac_audio_sound_machine_play() == ESP_OK); step(); step();
+      assert(snapshot().machine_active);
+    }
+    const esp_err_t previous_preview_error = snapshot().error;
+    uint32_t token = weather_start(WAC_AUDIO_WEATHER_WARNING);
+    bsp_fail = creation_failure;
+    open_error = failure == 0 && !creation_failure ? ESP_FAIL : ESP_OK;
+    volume_error = failure == 1 ? ESP_FAIL : ESP_OK;
+    write_error = ESP_OK;
+    step();
+    if (failure == 2) { write_error = ESP_FAIL; step(); }
+    if (failure == 3) {
+      assert(at_write);
+      close_error = ESP_FAIL;
+      assert(wac_audio_weather_stop(token) == ESP_OK); step();
+    }
+    assert(!at_write && !codec_open && !snapshot().machine_active && !snapshot().machine_pending);
+    assert(snapshot().weather_state == WAC_AUDIO_WEATHER_FAILED);
+    assert(snapshot().weather_error != ESP_OK);
+    assert(snapshot().error == previous_preview_error);
+    assert((snapshot().weather_started_us != 0) == (failure >= 2));
+    const unsigned before = opens;
+    for (unsigned i = 0; i < 3; ++i) step();
+    assert(opens == before && allocations_live == 0 && decoder_opens == decoder_closes);
+    wac_audio_weather_ack(token);
+    open_error = volume_error = write_error = close_error = ESP_OK;
+  }
+  if (creation_failure) {
+    assert(!snapshot().ready && wac_audio_init() == ESP_ERR_INVALID_STATE);
+    return;
+  }
+  /* A failure in the actual machine resume remains a machine error, whereas
+   * a weather attempt failure must not claim the unrelated preview failed. */
+  assert(wac_audio_sound_machine_play() == ESP_OK); step(); step();
+  const uint32_t token = weather_start(WAC_AUDIO_WEATHER_WATCH); step();
+  open_error = ESP_FAIL;
+  assert(wac_audio_weather_stop(token) == ESP_OK); step();
+  assert(!at_write && !snapshot().machine_active && snapshot().error == ESP_FAIL);
+  assert(snapshot().weather_state == WAC_AUDIO_WEATHER_CANCELED && snapshot().weather_error == ESP_OK);
+  wac_audio_weather_ack(token);
+  open_error = ESP_OK;
+}
+
 int main(int argc, char **argv)
 {
   caller_thread = pthread_self();
@@ -1076,6 +1393,7 @@ int main(int argc, char **argv)
   const char *scenario = argv[1];
   if (!strcmp(scenario, "noise")) { noise_checks(); return 0; }
   if (!strcmp(scenario, "metadata")) { metadata_checks(); return 0; }
+  if (!strcmp(scenario, "weathergenerator")) { weather_generator_checks(); return 0; }
   if (!strcmp(scenario, "generator")) { generator_checks(); puts("audio generator passed"); return 0; }
   assert(wac_audio_preview(DEVICE_CONFIG_ALARM_CLASSIC_BEEP, 50) == ESP_ERR_INVALID_STATE);
   assert(wac_audio_stop_preview() == ESP_ERR_INVALID_STATE);
@@ -1098,7 +1416,10 @@ int main(int argc, char **argv)
   close_error = !strcmp(scenario, "closefail") ? ESP_FAIL : ESP_OK;
   assert(wac_audio_init() == ESP_OK && wac_audio_init() == ESP_OK && tasks == 1);
   start_worker(); assert(creates == 0 && !at_write);
-  if (!strcmp(scenario, "playback")) playback_checks();
+  if (!strcmp(scenario, "weather")) weather_checks();
+  else if (!strcmp(scenario, "weatherfail")) weather_failure_checks(false);
+  else if (!strcmp(scenario, "weatherbspfail")) weather_failure_checks(true);
+  else if (!strcmp(scenario, "playback")) playback_checks();
   else if (!strcmp(scenario, "machine")) machine_checks();
   else if (!strcmp(scenario, "recording")) recording_checks();
   else if (!strcmp(scenario, "machinefail")) machine_failure_checks();

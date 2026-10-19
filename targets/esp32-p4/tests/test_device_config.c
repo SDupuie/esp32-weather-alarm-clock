@@ -84,6 +84,8 @@ static void test_defaults_and_read_only_copies(void)
 {
   device_config_t value = fresh();
   assert(value.weather_provider == DEVICE_CONFIG_WEATHER_OPEN_METEO && !value.weather_api_key[0]);
+  assert(value.alert_watch_sounds == 0 && value.alert_warning_sounds == UINT32_MAX);
+  assert(value.alert_update_sounds == DEVICE_CONFIG_ALERT_UPDATES_OFF && !value.alert_night_sounds);
   assert(!strcmp(value.room_name, "Clock"));
   assert(!strcmp(value.device_id, "clock-esp32-p4"));
   assert(!strcmp(value.default_clock_face, "digital"));
@@ -130,6 +132,10 @@ static void test_validation(void)
   INVALID(strcpy(bad.default_clock_face, "calendar"));
   INVALID(strcpy(bad.time_format, "13"));
   INVALID(strcpy(bad.units, "kelvin"));
+  INVALID(bad.alert_watch_sounds = UINT32_C(1) << 23);
+  INVALID(bad.alert_watch_sounds = UINT32_MAX);
+  INVALID(bad.alert_update_sounds = (device_config_alert_updates_t) -1);
+  INVALID(bad.alert_update_sounds = (device_config_alert_updates_t) 3);
   INVALID(strcpy(bad.message_sharing, "unknown"));
   INVALID(strcpy(bad.message_sharing, "shared"));
   INVALID(bad.alarm_hour = 24);
@@ -614,7 +620,8 @@ static void test_unchanged_saves_write_only_selected_group(void)
   const char *device_keys[] = {"msg_share", "device_id", "room_name", "wifi_ssid", "wifi_pass",
     "night_st", "night_end", "night_mode", "sunset_offset", "sunrise_offset"};
   const char *display_keys[] = {"clock_face", "time_fmt", "lead_zero", "day_brightness", "night_bright"};
-  const char *weather_keys[] = {"location", "timezone", "units", "lat", "lon", "weather_src", "weather_key"};
+  const char *weather_keys[] = {"location", "timezone", "units", "lat", "lon", "weather_src", "weather_key",
+    "watch_sounds", "warn_sounds", "update_sounds", "night_alerts"};
   const char *alarm_keys[] = {"alarm_enabled", "alarm_hour", "alarm_minute", "alarm_days",
     "alarm_sound", "alarm_volume", "alarm_snooze"};
   const char *toggle_keys[] = {"alarm_enabled"};
@@ -1039,6 +1046,102 @@ static void test_sound_machine_preferences(void)
   assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
 }
 
+static device_config_t weather_edit(device_config_t value)
+{
+  value = resolved(value);
+  strcpy(value.units, "metric");
+  value.alert_watch_sounds = UINT32_C(1) | (UINT32_C(1) << 22);
+  value.alert_warning_sounds = UINT32_C(1) << 31;
+  value.alert_update_sounds = DEVICE_CONFIG_ALERT_UPDATES_ALL;
+  value.alert_night_sounds = true;
+  return value;
+}
+
+static void test_alert_sound_preferences(void)
+{
+  device_config_t base = fresh(), draft = weather_edit(base);
+  assert(device_config_validate(&draft) == ESP_OK);
+  assert(device_config_save_weather(&base, &draft) == ESP_OK);
+  device_config_t expected = current();
+  assert(expected.alert_warning_sounds == (UINT32_C(1) << 31));
+  fake_nvs_clear_activity();
+  assert(device_config_init() == ESP_OK);
+  device_config_t applied = current();
+  assert_same(&expected, &applied);
+  assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+
+  /* Only an absent preference is seeded; neighboring remembered settings survive. */
+  const char *keys[] = {"watch_sounds", "warn_sounds", "update_sounds", "night_alerts"};
+  for (unsigned i = 0; i < 4; ++i) {
+    base = fresh(); draft = weather_edit(base);
+    assert(device_config_save_weather(&base, &draft) == ESP_OK);
+    expected = current();
+    fake_nvs_remove(keys[i]);
+    fake_nvs_clear_activity();
+    assert(device_config_init() == ESP_OK);
+    if (i == 0) expected.alert_watch_sounds = 0;
+    if (i == 1) expected.alert_warning_sounds = UINT32_MAX;
+    if (i == 2) expected.alert_update_sounds = DEVICE_CONFIG_ALERT_UPDATES_OFF;
+    if (i == 3) expected.alert_night_sounds = false;
+    applied = current(); assert_same(&expected, &applied);
+    assert(fake_nvs_calls(FAKE_SET) == 1 && fake_nvs_calls(FAKE_COMMIT) == 1);
+    fake_nvs_put_str(keys[i], "wrong type");
+    fake_nvs_clear_activity();
+    assert(device_config_init() == ESP_ERR_NVS_TYPE_MISMATCH);
+    applied = current(); assert_same(&expected, &applied);
+    assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+  }
+  for (unsigned i = 0; i < 3; ++i) {
+    base = fresh();
+    if (i == 0) fake_nvs_put_u32("watch_sounds", UINT32_C(1) << 23);
+    if (i == 1) fake_nvs_put_u8("update_sounds", 3);
+    if (i == 2) fake_nvs_put_u8("night_alerts", 2);
+    fake_nvs_clear_activity();
+    assert(device_config_init() == ESP_ERR_INVALID_ARG);
+    applied = current(); assert_same(&base, &applied);
+    assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+  }
+
+  /* A failed Weather Save can be retried while other editors have applied
+   * newer choices; its unchanged alert fields must also retain a newer save. */
+  base = fresh(); draft = weather_edit(base);
+  assert(device_config_save_weather(&base, &draft) == ESP_OK);
+  base = current(); draft = base;
+  draft.alert_watch_sounds = DEVICE_CONFIG_ALERT_WATCH_MASK;
+  fake_nvs_clear_activity(); fake_nvs_fail(FAKE_COMMIT, 1);
+  assert(device_config_save_weather(&base, &draft) == ESP_FAIL);
+  applied = current(); assert_same(&base, &applied);
+  fake_nvs_clear_activity();
+  device_config_t other = base;
+  other.alert_warning_sounds = 0;
+  other.alert_update_sounds = DEVICE_CONFIG_ALERT_UPDATES_INCREASED;
+  other.alert_night_sounds = false;
+  assert(device_config_save_weather(&base, &other) == ESP_OK);
+  other = device_edit(base);
+  /* Unsubmitted Weather controls in a Device draft cannot cross its Save. */
+  other.alert_watch_sounds = 0; other.alert_warning_sounds = UINT32_MAX;
+  assert(device_config_save_device(&base, &other) == ESP_OK);
+  other = display_edit(base); other.alert_night_sounds = true;
+  assert(device_config_save_display(&base, &other) == ESP_OK);
+  other = alarm_edit(base); other.alert_update_sounds = DEVICE_CONFIG_ALERT_UPDATES_ALL;
+  assert(device_config_save_alarm(&base, &other) == ESP_OK);
+  other = sound_machine_edit(base); other.alert_watch_sounds = 0;
+  assert(device_config_save_sound_machine(&base, &other) == ESP_OK);
+  fake_nvs_clear_activity();
+  assert(device_config_save_weather(&base, &draft) == ESP_OK);
+  assert(fake_nvs_calls(FAKE_SET) == 11 && fake_nvs_calls(FAKE_COMMIT) == 1);
+  applied = current();
+  assert(applied.alert_watch_sounds == DEVICE_CONFIG_ALERT_WATCH_MASK);
+  assert(applied.alert_warning_sounds == 0 && !applied.alert_night_sounds);
+  assert(applied.alert_update_sounds == DEVICE_CONFIG_ALERT_UPDATES_INCREASED);
+  assert(!strcmp(applied.room_name, "Bedroom") && applied.day_brightness == 90);
+  assert(applied.alarm_hour == 6 && applied.sound_machine_volume == 65);
+  fake_nvs_clear_activity();
+  assert(device_config_init() == ESP_OK);
+  expected = current(); assert_same(&expected, &applied);
+  assert(fake_nvs_calls(FAKE_SET) == 0 && fake_nvs_calls(FAKE_COMMIT) == 0);
+}
+
 static void test_weather_provider_key_storage(void)
 {
   device_config_t base = fresh(), draft = resolved(base);
@@ -1048,7 +1151,7 @@ static void test_weather_provider_key_storage(void)
   assert(device_config_validate(&draft) == ESP_OK);
   fake_nvs_clear_activity();
   assert(device_config_save_weather(&base, &draft) == ESP_OK);
-  assert(fake_nvs_calls(FAKE_SET) == 7 && fake_nvs_calls(FAKE_COMMIT) == 1);
+  assert(fake_nvs_calls(FAKE_SET) == 11 && fake_nvs_calls(FAKE_COMMIT) == 1);
   assert(device_config_init() == ESP_OK);
   base = current();
   assert(base.weather_provider == DEVICE_CONFIG_WEATHER_VISUAL_CROSSING
@@ -1107,6 +1210,7 @@ int main(void)
   assert(device_config_save_sound_machine(&not_started, &not_started) == ESP_ERR_INVALID_STATE);
   test_defaults_and_read_only_copies();
   test_weather_provider_key_storage();
+  test_alert_sound_preferences();
   test_validation();
   test_sound_machine_preferences();
   test_editor_merges_and_readiness();
@@ -1115,7 +1219,7 @@ int main(void)
   test_rejected_saves_keep_applied_choices();
   test_save_failures(device_config_save_device, device_edit);
   test_save_failures(device_config_save_display, display_edit);
-  test_save_failures(device_config_save_weather, resolved);
+  test_save_failures(device_config_save_weather, weather_edit);
   test_save_failures(device_config_save_alarm, alarm_edit);
   test_save_failures(device_config_save_sound_machine, sound_machine_edit);
   test_startup_failures_and_missing_keys();
