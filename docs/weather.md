@@ -137,40 +137,16 @@ These are product rules, not measured provider confidence or a demonstrated fore
 
 ## Current firmware mapping
 
-Provider records are decoded into shared facts by
-[weather_icon_names.c](../main/weather_icon_names.c), without
-inventing Open-Meteo codes for Visual Crossing. Current pictures/captions follow
-the table above; [forecast_representative.c](../main/forecast_representative.c)
-selects daily pictures. [weather_client.c](../main/weather_client.c)
-prepares provider records and publishes the selected results. The UI renders
-copied results; service and state ownership remain in the [architecture](architecture.md#ownership).
-Within one condition family, multiple Visual Crossing IDs can supply competing
-captions. The decoder currently keeps the last applicable wording in returned
-ID order; it does not perform a separate intensity ranking.
+Provider records are decoded into shared facts by [weather_icon_names.c](../main/weather_icon_names.c), without inventing Open-Meteo codes for Visual Crossing. Current pictures/captions follow the table above; [forecast_representative.c](../main/forecast_representative.c) selects daily pictures. [weather_client.c](../main/weather_client.c) prepares provider records and publishes the selected results. The UI renders copied results; service and state ownership remain in the [architecture](architecture.md#ownership). Within one condition family, multiple Visual Crossing IDs can supply competing captions. The decoder currently keeps the last applicable wording in returned ID order; it does not perform a separate intensity ranking.
 
-Rendering uses the selected icon name and the lookup in
-[weather_icons.c](../main/assets/weather_icons.c); unknown names
-return no picture. All 18 pictures use SVG sources in
-[assets/icons/](../assets/icons/), including two-wave Fog and
-Rain & Snow's `rain-snow.svg`. Freezing Rain, Hail, Generic Ice, Wind and Funnel/Tornado
-reside in the combined `wac_icons` asset output; the other 13 have individual
-compiled image files. The small-pellet Sleet drawing is retained separately as
-[sleet.svg](../assets/icons/sleet.svg) for its documentation preview; it is
-excluded from firmware generation and has no runtime image lookup.
+Rendering uses the selected icon name and the lookup in [weather_icons.c](../main/assets/weather_icons.c); unknown names return no picture. All 18 pictures use SVG sources in [assets/icons/](../assets/icons/), including two-wave Fog and Rain & Snow's `rain-snow.svg`. Freezing Rain, Hail, Generic Ice, Wind and Funnel/Tornado reside in the combined `wac_icons` asset output; the other 13 have individual compiled image files. The small-pellet Sleet drawing is retained separately as [sleet.svg](../assets/icons/sleet.svg) for its documentation preview; it is excluded from firmware generation and has no runtime image lookup.
 
-The Sleet source contains vector paths with a transparent background. To export
-its existing 64×64 documentation PNG, use CairoSVG with the preview's dark
-background. From the project folder, with CairoSVG installed, run:
+The Sleet source contains vector paths with a transparent background. To export its existing 64×64 documentation PNG, use CairoSVG with the preview's dark background. From the project folder, with CairoSVG installed, run:
 
 ```bash
 cairosvg assets/icons/sleet.svg --output-width 64 --output-height 64 --background '#08131d' -o docs/weather-icons/sleet.png
 ```
 
-The reference export uses CairoSVG 2.8.2 and Cairo 1.18.4. These settings reproduce
-the retained PNG byte for byte; the export command supplies the background
-without adding one to the vector drawing.
+The reference export uses CairoSVG 2.8.2 and Cairo 1.18.4. These settings reproduce the retained PNG byte for byte; the export command supplies the background without adding one to the vector drawing.
 
-Source dimensions, crop metadata and pixel encoding follow the
-[artwork storage and placement rules](architecture.md#weather-icons).
-[The build guide](build.md#regenerate-artwork-optional) documents
-the generator command.
+Source dimensions, crop metadata and pixel encoding follow the [artwork storage and placement rules](architecture.md#weather-icons). [The build guide](build.md#regenerate-artwork-optional) documents the generator command.
