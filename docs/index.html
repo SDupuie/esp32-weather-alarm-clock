@@ -145,11 +145,12 @@
           some cables that come with chargers are power-only and won't work here.)</li>
         <li>Click the button below, and pick your board from the list your browser shows (it may show up as
           "USB JTAG/serial debug unit" or similar).</li>
-        <li>Click <strong>Install</strong>. It'll take a couple of minutes, erase the device, and reboot it
-          automatically — don't unplug the board or close this tab while it's working.</li>
-        <li>When it says <strong>"Installation complete,"</strong> you're done. There's a "Next" button, but you
-          don't need it — that leads to an optional device log/console view, not another setup step. Just move on
-          to Step 2 below.</li>
+        <li>Choose <strong>Install</strong>. Leave <strong>Erase device</strong> unchecked to keep your saved
+          Wi-Fi, weather API key and other settings. Check it only if you want to erase all saved data.</li>
+        <li>Continue and confirm installation. It writes the firmware and Sound Machine recordings, then
+          restarts the board. Don't unplug it or close this tab while installation is running.</li>
+        <li>When installation finishes, close the installer and check the display. If you kept your settings,
+          the clock should return with those settings. Otherwise, complete setup below.</li>
       </ol>
       <p>
         <esp-web-install-button manifest="firmware/manifest.json"></esp-web-install-button>
@@ -170,14 +171,14 @@
     <div class="card">
       <h2>Step 2: Finish setup on the device itself</h2>
       <p>
-        Once flashing finishes, the round display will boot up on its own and walk you through the rest right on
-        the screen:
+        If you kept your settings, check that the clock returns normally. For a first installation or after
+        erasing saved data, finish setup on the touchscreen:
       </p>
       <ul>
         <li>Connecting to your WiFi network (it'll show you a list of nearby networks to pick from, with an
           on-screen keyboard for the password)</li>
-        <li>Setting your location, so it knows what weather to show</li>
-        <li>Naming the room it's in and choosing a few display preferences</li>
+        <li>Setting your weather location and provider, including an API key if your provider needs one</li>
+        <li>Optionally naming the room and choosing display preferences in Settings</li>
       </ul>
       <p>You don't need this computer for that part — it's all done by touching the display.</p>
     </div>
@@ -194,8 +195,8 @@
         <li><strong>Install button greyed out or missing?</strong> Double check you're using Chrome, Edge, or
           Firefox — not Safari.</li>
         <li><strong>Still no luck?</strong> You can build and flash from source using the manual
-          <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/targets/esp32-p4/README.md#build-without-a-board">build</a>
-          and <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/targets/esp32-p4/README.md#flash-with-a-board">flash</a>
+          <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/docs/build.md#build-without-a-board">build</a>
+          and <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/docs/build.md#flash-with-a-board">flash</a>
           commands in the ESP32-P4 target instructions.
           For help, open an issue on the
           <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/issues">project's GitHub page</a>.</li>
@@ -204,8 +205,8 @@
 
     <p class="footer-note">
       Prefer building from source? See the manual
-      <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/targets/esp32-p4/README.md#build-without-a-board">build</a>
-      and <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/targets/esp32-p4/README.md#flash-with-a-board">flash</a>
+      <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/docs/build.md#build-without-a-board">build</a>
+      and <a href="https://github.com/SDupuie/esp32-weather-alarm-clock/blob/main/docs/build.md#flash-with-a-board">flash</a>
       commands.
     </p>
   </main>

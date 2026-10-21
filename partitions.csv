@@ -1,0 +1,7 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# The factory partition holds the application and compiled artwork. SPIFFS
+# holds the nine prepared Sound Machine recordings, separate from settings.
+nvs,      data, nvs,     ,        0x6000,
+phy_init, data, phy,     ,        0x1000,
+factory,  app,  factory, ,        20M,
+storage,  data, spiffs,  ,        11M,

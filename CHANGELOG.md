@@ -1,11 +1,13 @@
 # Changelog
 
-## Application changes from Round Weather Display
+## Application changes from [Round Weather Display](https://github.com/Canterrain/round-weather-display) by Josh Hendrickson
 
 - Added an audible alarm with one-time and weekday repeats, sound previews,
-  gradual ringing volume, Snooze, Slide to Dismiss and restart recovery.
+  gradual ringing volume, Snooze, Slide to Dismiss and restart recovery,
+  with optimized sound generation for preview and ringing.
 - Added Sound Machine with nine looping recordings, three generated noises,
-  independent volume and sleep timers.
+  independent volume and sleep timers. Improved playback buffering across
+  recording repeats.
 - Added optional DS3231 backup time and locally calculated Sunset to Sunrise
   Night Shift, with separate Day/Night brightness and remembered appearance.
 - Added Visual Crossing alongside Open-Meteo, expanded weather-picture mappings,
@@ -19,13 +21,9 @@
   keyboard inputs, live Display Save and an immediate Alarm On/Off switch.
 - Simplified application ownership and removed superseded screen experiments
   and routine clock-footer messages. Retired the unused Conditions screen and
-  its dedicated artwork, mockup and calculations. Improved audio buffering, memory placement,
-  weather scheduling and drawing work while preserving approved behavior.
+  its dedicated artwork, mockup and calculations.
+- Improved memory placement, weather scheduling and drawing efficiency while
+  preserving approved appearance and behavior.
 
-See the [user guide](README.md) for current features and source credits. The
-[work record](docs/work.md) owns implementation details, test evidence and
-remaining work; this summary does not establish hardware verification.
-
-## Inherited change note
-
-Fix: prevent weekly Sunday freeze by adding request timeouts and serving last-known-good weather data.
+See the [user guide](README.md) for current features and source credits. Product
+behavior is defined in [the architecture](docs/architecture.md).

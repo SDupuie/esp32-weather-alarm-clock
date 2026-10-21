@@ -14,6 +14,8 @@ build/
 
 # OS / editor
 .DS_Store
+/.clangd
+/.vscode/
 
 # Local backups
 *.bak
@@ -21,23 +23,26 @@ build/
 # ESP-IDF generated files
 .esp-idf/
 # ESP-IDF build directories, including local variants
-targets/esp32-p4/build*/
-targets/esp32-p4/managed_components/
-targets/esp32-p4/sdkconfig
-targets/esp32-p4/sdkconfig.old
-targets/esp32-p4/sdkconfig.*.generated
+/build*/
+/managed_components/
+/sdkconfig
+/sdkconfig.old
+/sdkconfig.*.generated
 
 # Device backups (NVS/flash dumps) -- can contain live WiFi credentials and
 # other device config, never appropriate to commit.
-targets/esp32-p4/backups/
+/backups/
 
 # Debug/diagnostic serial captures from development sessions -- useful
 # locally, not meant to accumulate forever in permanent repo history. Key
-# findings from these remain in local .reviews/ reports.
-targets/esp32-p4/benchmark-logs/
-targets/esp32-p4/runtime-logs/
+# findings from these remain in local reviews/ reports.
+/benchmark-logs/
+/runtime-logs/
 
-# Python bytecode cache (any location, not just targets/esp32-p4/tools/)
+# Local review evidence; retention and cleanup rules are in AGENTS.md.
+/reviews/
+
+# Python bytecode cache
 __pycache__/
 *.pyc
 

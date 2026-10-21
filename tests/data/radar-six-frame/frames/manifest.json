@@ -1,0 +1,205 @@
+{
+  "kind": "six real consecutive ten-minute frames; all tiles512/smoothing1/snow0, no synthetic weather",
+  "metadata_generated": 1792416325,
+  "retrieved_utc": "2026-10-19T13:30:54.450021+00:00",
+  "coverage_miles": 75,
+  "output": [
+    800,
+    800
+  ],
+  "zoom": 7,
+  "tile_size": 512,
+  "smooth": 1,
+  "snow": 0,
+  "location": {
+    "latitude": 28.067133260121505,
+    "longitude": -81.5625,
+    "label": "Florida two-tile precipitation test, RAM-only; not saved location"
+  },
+  "native_geometry": {
+    "left": 8904.076750593094,
+    "top": 13664.576750593094,
+    "step": 0.13980812351726488,
+    "first_x": 34,
+    "last_x": 35,
+    "first_y": 53,
+    "last_y": 53
+  },
+  "frames": [
+    {
+      "index": 0,
+      "time": 1792413000,
+      "path": "/v2/radar/1e895a749d2d",
+      "utc": "2026-10-19T12:30:00+00:00",
+      "local": "2026-10-19T07:30:00-05:00",
+      "tiles": [
+        {
+          "tile_x": 34,
+          "tile_y": 53,
+          "file": "frames/frame-0-1792413000-z7-34-53-512-smooth.png",
+          "bytes": 4763,
+          "sha256": "d65e73b4060636398648ec6fd292b3dea0bbe8bd6d25442ad37a7f61852668c6",
+          "visible_source_pixels": 3236,
+          "url": "https://tilecache.rainviewer.com/v2/radar/1e895a749d2d/512/7/34/53/2/1_0.png"
+        },
+        {
+          "tile_x": 35,
+          "tile_y": 53,
+          "file": "frames/frame-0-1792413000-z7-35-53-512-smooth.png",
+          "bytes": 51615,
+          "sha256": "0ef1c3af0c5a358da711e2a71ec25a6106d7daaa317a57ebb47d740deae95e40",
+          "visible_source_pixels": 52353,
+          "url": "https://tilecache.rainviewer.com/v2/radar/1e895a749d2d/512/7/35/53/2/1_0.png"
+        }
+      ],
+      "compressed_bytes": 56378
+    },
+    {
+      "index": 1,
+      "time": 1792413600,
+      "path": "/v2/radar/5eb52622b9c9",
+      "utc": "2026-10-19T12:40:00+00:00",
+      "local": "2026-10-19T07:40:00-05:00",
+      "tiles": [
+        {
+          "tile_x": 34,
+          "tile_y": 53,
+          "file": "frames/frame-1-1792413600-z7-34-53-512-smooth.png",
+          "bytes": 5165,
+          "sha256": "ef76f006a42804a9c451af8171cb477da63010e9925478061a03b64f496c50cc",
+          "visible_source_pixels": 2929,
+          "url": "https://tilecache.rainviewer.com/v2/radar/5eb52622b9c9/512/7/34/53/2/1_0.png"
+        },
+        {
+          "tile_x": 35,
+          "tile_y": 53,
+          "file": "frames/frame-1-1792413600-z7-35-53-512-smooth.png",
+          "bytes": 49779,
+          "sha256": "2252480995da99b44208e681cc39536b30d02700ab07cd90958c6b09a59137f5",
+          "visible_source_pixels": 48211,
+          "url": "https://tilecache.rainviewer.com/v2/radar/5eb52622b9c9/512/7/35/53/2/1_0.png"
+        }
+      ],
+      "compressed_bytes": 54944
+    },
+    {
+      "index": 2,
+      "time": 1792414200,
+      "path": "/v2/radar/5d003acf8e75",
+      "utc": "2026-10-19T12:50:00+00:00",
+      "local": "2026-10-19T07:50:00-05:00",
+      "tiles": [
+        {
+          "tile_x": 34,
+          "tile_y": 53,
+          "file": "frames/frame-2-1792414200-z7-34-53-512-smooth.png",
+          "bytes": 5298,
+          "sha256": "db5b2f601a2f260474a5130631419f562705181e1d2718252b81f03b75b9268d",
+          "visible_source_pixels": 2830,
+          "url": "https://tilecache.rainviewer.com/v2/radar/5d003acf8e75/512/7/34/53/2/1_0.png"
+        },
+        {
+          "tile_x": 35,
+          "tile_y": 53,
+          "file": "frames/frame-2-1792414200-z7-35-53-512-smooth.png",
+          "bytes": 49049,
+          "sha256": "10bbdf2e91bc22d8dedbad620d8a86178874f71b6427c2bb3d3998c724dc622b",
+          "visible_source_pixels": 47716,
+          "url": "https://tilecache.rainviewer.com/v2/radar/5d003acf8e75/512/7/35/53/2/1_0.png"
+        }
+      ],
+      "compressed_bytes": 54347
+    },
+    {
+      "index": 3,
+      "time": 1792414800,
+      "path": "/v2/radar/ab1870a64ca5",
+      "utc": "2026-10-19T13:00:00+00:00",
+      "local": "2026-10-19T08:00:00-05:00",
+      "tiles": [
+        {
+          "tile_x": 34,
+          "tile_y": 53,
+          "file": "frames/frame-3-1792414800-z7-34-53-512-smooth.png",
+          "bytes": 5851,
+          "sha256": "736fed8f252fa1fd6170601841ee427093b3fe5a77cc0b4e3252b7fed1f289de",
+          "visible_source_pixels": 3483,
+          "url": "https://tilecache.rainviewer.com/v2/radar/ab1870a64ca5/512/7/34/53/2/1_0.png"
+        },
+        {
+          "tile_x": 35,
+          "tile_y": 53,
+          "file": "frames/frame-3-1792414800-z7-35-53-512-smooth.png",
+          "bytes": 50020,
+          "sha256": "4d1a7776c4456076003f738251e273295bda95bef573ca647ac5d31874c9483e",
+          "visible_source_pixels": 48686,
+          "url": "https://tilecache.rainviewer.com/v2/radar/ab1870a64ca5/512/7/35/53/2/1_0.png"
+        }
+      ],
+      "compressed_bytes": 55871
+    },
+    {
+      "index": 4,
+      "time": 1792415400,
+      "path": "/v2/radar/5082f727ed0f",
+      "utc": "2026-10-19T13:10:00+00:00",
+      "local": "2026-10-19T08:10:00-05:00",
+      "tiles": [
+        {
+          "tile_x": 34,
+          "tile_y": 53,
+          "file": "frames/frame-4-1792415400-z7-34-53-512-smooth.png",
+          "bytes": 5141,
+          "sha256": "71d9c48df704b95b2fd421639323dafc982bbfbdd1c215b7739e991850fba9a9",
+          "visible_source_pixels": 2854,
+          "url": "https://tilecache.rainviewer.com/v2/radar/5082f727ed0f/512/7/34/53/2/1_0.png"
+        },
+        {
+          "tile_x": 35,
+          "tile_y": 53,
+          "file": "frames/frame-4-1792415400-z7-35-53-512-smooth.png",
+          "bytes": 48774,
+          "sha256": "797351f6cec4856cf9995fab44133cf951c3176165778165d40f415f901600c0",
+          "visible_source_pixels": 47729,
+          "url": "https://tilecache.rainviewer.com/v2/radar/5082f727ed0f/512/7/35/53/2/1_0.png"
+        }
+      ],
+      "compressed_bytes": 53915
+    },
+    {
+      "index": 5,
+      "time": 1792416000,
+      "path": "/v2/radar/463ffb0c2053",
+      "utc": "2026-10-19T13:20:00+00:00",
+      "local": "2026-10-19T08:20:00-05:00",
+      "tiles": [
+        {
+          "tile_x": 34,
+          "tile_y": 53,
+          "file": "frames/frame-5-1792416000-z7-34-53-512-smooth.png",
+          "bytes": 4454,
+          "sha256": "7cda30e9d1ec2ee9fb36109b8e5196acfbbafdae6cd8f8d6831c3c48fa6d72e7",
+          "visible_source_pixels": 2351,
+          "url": "https://tilecache.rainviewer.com/v2/radar/463ffb0c2053/512/7/34/53/2/1_0.png"
+        },
+        {
+          "tile_x": 35,
+          "tile_y": 53,
+          "file": "frames/frame-5-1792416000-z7-35-53-512-smooth.png",
+          "bytes": 47028,
+          "sha256": "32de3c650060bfb65da2b0af45085c5d3a6ea5f7905e98c483f463e151074fd6",
+          "visible_source_pixels": 45112,
+          "url": "https://tilecache.rainviewer.com/v2/radar/463ffb0c2053/512/7/35/53/2/1_0.png"
+        }
+      ],
+      "compressed_bytes": 51482
+    }
+  ],
+  "total_compressed_bytes": 326937,
+  "frame_span_seconds": 3000,
+  "measurement_limits": [
+    "Six ten-minute samples span50 minutes between first and last timestamps, representing six frames from the most recent hour available at acquisition.",
+    "Actual provider tiles and source changes; not synthetic motion.",
+    "This fixture changes only the radar test area, not saved weather coordinates."
+  ]
+}

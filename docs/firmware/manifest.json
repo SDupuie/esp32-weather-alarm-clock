@@ -1,7 +1,7 @@
 {
   "name": "ESP32 Weather Alarm Clock",
   "version": "1.2.0",
-  "new_install_prompt_erase": false,
+  "new_install_prompt_erase": true,
   "new_install_improv_wait_time": 0,
   "builds": [
     {

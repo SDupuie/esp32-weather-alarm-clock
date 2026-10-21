@@ -1,6 +1,6 @@
 # Project instructions
 
-Build the ESP32-P4 weather alarm clock for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C from the original ESP-IDF application. Only ESP32-P4 is supported; maintaining Raspberry Pi or other firmware implementations is out of scope.
+Develop the ESP-IDF weather alarm clock application for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C. Only ESP32-P4 is supported; maintaining Raspberry Pi or other firmware implementations is out of scope.
 
 There is no backward-compatibility requirement with other firmware or its settings. Do not add migration, compatibility adapters, or alternate UI build modes for it.
 
@@ -14,33 +14,39 @@ Use existing ESP-IDF, LVGL, and board facilities. Reuse and change existing appl
 
 Use plain language. Report only credible, consequential audit findings.
 
-Test affected behavior and compile firmware after source changes; distinguish these checks from hardware verification. A board is available; completed checks, accepted verification limits and remaining work are recorded in [docs/work.md](docs/work.md). Do not push, merge, or flash without authorization.
-
 ## Document authority
 
 - [AGENTS.md](AGENTS.md): agent workflow and this authority map.
 - [docs/architecture.md](docs/architecture.md): approved behavior, defaults, accepted tradeoffs, service rules, implementation ownership and source structure; links to the approved visual reference.
-- [docs/weather.md](docs/weather.md): approved and proposed provider-to-condition/icon mappings, artwork previews, source limitations, selection recommendations and current firmware mapping; linked from the architecture. Recorded proposals, approved behavior changes and completed firmware implementation are distinct states.
-- [docs/work.md](docs/work.md): current development tasks, completed slices and the next slice; does not define product or architecture requirements.
+- [docs/alarm-design.html](docs/alarm-design.html): approved device and House Messages appearance and controls, subject to the exceptions identified in the architecture. Preview samples do not define product defaults.
+- [docs/weather.md](docs/weather.md): detailed provider-to-condition/icon mappings, artwork previews, selection rules, source limitations and current firmware mapping; linked from the architecture.
 - [README.md](README.md): user-facing project overview, features, hardware, setup, user guide and source credits; links to detailed development instructions.
-- [targets/esp32-p4/README.md](targets/esp32-p4/README.md): ESP32-P4 environment preparation, build and flash commands.
-- [targets/esp32-p4/tests/README.md](targets/esp32-p4/tests/README.md): runnable test instructions and verification limits.
+- [docs/build.md](docs/build.md): ESP32-P4 environment preparation, build and flash commands.
+- [tests/README.md](tests/README.md): runnable test instructions and verification limits.
 
-Keep product and architecture requirements in [docs/architecture.md](docs/architecture.md), with detailed weather mappings owned by its linked [docs/weather.md](docs/weather.md). Link to these owners rather than restating their requirements in other documents. A proposed or unresolved item does not become approved merely by being recorded there.
+Link to each subject's owner rather than duplicating detailed requirements. The README explains how to use the implemented features; it is not a separate specification. Distinguish proposals, approved behavior and completed implementation. Recording an unresolved choice does not approve it.
 
 ## Current checkout and retained material
 
 Work in this project folder on `main`. Integrate useful upstream changes deliberately into this application; do not automatically update or replace the whole project from upstream. Setup scripts must not update the checkout automatically. Preserve unrelated work.
 
-Read the current work list in [docs/work.md](docs/work.md#current-work) when resuming work. It distinguishes completed work, approved unfinished work, deferred tests and unapproved proposals; dated historical entries do not reopen checks subsequently closed. Follow the architecture's startup and inherited-screen cleanup scope, carrying approved remaining work through bounded, tested slices rather than deferring it to an unspecified future sprint. File moves or lower line counts alone do not establish completion.
+Carry authorized work through bounded, tested changes. File moves or lower line counts alone do not establish completion. Do not reopen closed checks merely to expand coverage.
 
-Update completed and remaining items in docs/work.md before ending a development slice or a review that changes the work list. Keep README.md user-facing: features, hardware, setup, usage and source credits belong there. Record development status, completed work, test and flash evidence, and pending work in docs/work.md; link to that record from the READMEs rather than duplicating it. Documentation updates must preserve the distinction between software checks, debugger observations, physical board checks and accepted verification limits.
+Update the documents that own affected subjects before completing a change. Keep README.md user-facing; do not put development status, work lists or test reports there.
+
+Test affected behavior and compile firmware after source changes. A board is available; do not commit, push, merge, or flash without the user's authorization. Keep completed-work, test and flash evidence with its qualifications in local reports under `reviews/`, which is visible and excluded from Git. Reports are evidence rather than requirements. Keep test-method limits in the test instructions. Distinguish software checks, debugger observations, physical board checks and accepted verification limits; general test caveats are not unfinished work.
+
+Keep reports only while they support uncommitted changes awaiting review or commit, an unresolved finding or ongoing test, or a specific current verification need. State the retention reason and the event that permits deletion in each retained report or data folder's README.
+
+Reusable test inputs and expected results belong at approved `tests/data/` paths and are versioned with their tests. Do not keep maintained test dependencies in `reviews/`.
+
+- At task completion, remove disposable captures, scratch files and superseded reports. Keep raw logs and output images only while they support retained evidence or an ongoing investigation.
+- After an authorized commit, remove completed reports supporting that committed work unless a stated retention reason remains. Do not commit merely to trigger cleanup.
+- Remove empty review folders. Preserve unrelated files and ongoing test evidence. Perform this cleanup as part of normal task and commit completion; `.gitignore` does not clean files up.
 
 Remove superseded plans, obsolete implementations, unused experiments and backup copies when they no longer serve a current purpose within the work being performed. Do not create backup or archive copies of material being retired. Retain material only for an identified current application, development, verification or evaluation need.
 
-Any existing `archive/` directory is excluded from ordinary development searches and implementation audits, including commands that otherwise include ignored files. It may be inspected to assess its current purpose and recommend cleanup, but is not an implementation authority. Nothing current may link to or depend on its contents. Do not restore archived material without explicit user direction. Its existence does not require continued retention or new archival copies.
-
-Current local review reports are allowed as evidence, not requirements. A separate original-firmware evaluation checkout has no automatic retention requirement and is not an implementation authority; retain it only while it has an identified current evaluation purpose.
+Exclude retired or archived material from ordinary development searches and implementation audits. Inspect it only to assess its purpose or when directed by the user; do not use it as an implementation authority, link current material to it, depend on it or restore it without explicit user direction. Evaluation material has no automatic retention requirement.
 
 ## File creation and permission
 
@@ -50,7 +56,7 @@ Source code includes firmware, headers, application UI, build logic, development
 
 Before creating or renaming a source-code file to a path outside that list, obtain the user's permission for its exact path and purpose. Explain why an existing approved file is insufficient. Approval of a feature does not automatically approve additional source files. Update the approved tree only after permission is received.
 
-Supporting documents, review reports, logs, screenshots, exported results and disposable test data may be created as needed for authorized work without separate path approval. Reuse existing documents where they own the subject, keep review artifacts local under `.reviews/`, and keep disposable files in the operating system's temporary directory. Supporting files must not become an alternate location for application or tooling source code.
+Supporting documents, review reports, logs, screenshots, exported results and disposable test data may be created as needed for authorized work without separate path approval. Reuse existing documents where they own the subject, keep review artifacts local under `reviews/`, and keep disposable files in the operating system's temporary directory. Supporting files must not become an alternate location for application or tooling source code.
 
 Authorized builds and tests may create ordinary tool-generated outputs, managed dependencies and disposable test directories. This allowance does not approve generated source files added to the maintained application at unlisted paths. Clean up task-owned disposable outputs when finished.
 
