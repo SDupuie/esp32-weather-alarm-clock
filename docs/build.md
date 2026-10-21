@@ -212,7 +212,7 @@ scripts/build-release.sh
 
 This builds through the normal build helper and copies four firmware images into `docs/firmware/`: bootloader, partition table, application and `storage.bin` with the nine Sound Machine recordings. The installer manifest includes all four at the current partition offsets. It does not publish the website or flash a board.
 
-For a versioned release, update the version in `docs/firmware/manifest.json` manually. The helper does not choose or change it.
+Before preparing a versioned release, set `PROJECT_VER` in the root `CMakeLists.txt` and `version` in `docs/firmware/manifest.json` to the same release number, then run the helper. `PROJECT_VER` identifies the compiled firmware; the manifest version is shown by Chrome's installer. The helper does not choose or change either version.
 
 ## Regenerate artwork (optional)
 

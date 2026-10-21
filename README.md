@@ -367,6 +367,10 @@ Original project © 2025 Josh Hendrickson, as recorded in the [license](license)
 
 Interface icons are adapted from [Lucide 1.17.0](https://github.com/lucide-icons/lucide/tree/1.17.0), including its Feather-derived designs. Their ISC and MIT copyright and permission notices are included in the [license file](license).
 
+### Fonts
+
+The touchscreen uses Montserrat, including glyphs converted for LVGL. Montserrat's copyright and SIL Open Font License 1.1 notice are included in the [license file](license).
+
 ### Weather, location and map sources
 
 - **Weather data provided by [Open-Meteo](https://open-meteo.com/)** — the default forecast and current-weather source. API data is provided under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); access to its free service follows the [Open-Meteo terms](https://open-meteo.com/en/terms).
@@ -381,3 +385,5 @@ The clock converts provider units, selects representative forecast pictures and 
 ### Sound sources
 
 Sound Machine recordings and the White, Pink and Brown Noise calculations were adapted from [soundmachine.app](https://soundmachine.app/). The clock's recordings have prepared loop crossfades and playback gain adjustments; generated noises use the source equations with the clock's output gain.
+
+The recordings were sourced through [Moodist](https://github.com/remvze/moodist), whose maintainer identifies its recording sources as [CC0 Freesound recordings](https://github.com/remvze/moodist/issues/33#issuecomment-2082429291) and recordings under the [Pixabay Content License](https://pixabay.com/service/terms/). These recordings retain their source licenses.

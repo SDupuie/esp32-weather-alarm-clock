@@ -5,13 +5,14 @@ set -euo pipefail
 # Activate ESP-IDF first, as documented in docs/build.md.
 # Builds the ESP32-P4 firmware and copies the release artifacts into docs/,
 # which GitHub Pages serves as the browser-flashing page
-# (https://<org>.github.io/round-weather-display/). Run this after any
+# (https://sdupuie.github.io/esp32-weather-alarm-clock/). Run this after any
 # firmware change you want end users to be able to install via that page --
 # it is NOT run automatically, so the hosted page only ever has whatever was
 # last copied here.
 #
-# For a versioned release, update docs/firmware/manifest.json yourself.
-# This script does not choose a version or publish the installation page.
+# Before a versioned build, align PROJECT_VER in CMakeLists.txt with the
+# version in docs/firmware/manifest.json. This script does not choose a
+# version or publish the installation page.
 # -----------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,5 +30,5 @@ cp "$PROJECT_DIR/build/storage.bin" "$DOCS_FIRMWARE_DIR/storage.bin"
 
 echo ""
 echo "Copied release artifacts to $DOCS_FIRMWARE_DIR"
-echo "For a versioned release, update $DOCS_FIRMWARE_DIR/manifest.json."
+echo "Check that the installer manifest and compiled firmware versions match."
 echo "The installation page has not been published."
