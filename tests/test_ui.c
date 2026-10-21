@@ -1198,6 +1198,11 @@ static void test_wifi_scan_states_and_retained_drafts(void)
 {
   for (unsigned night = 0; night < 2; ++night) {
     fresh_editor();
+    device_config_t baseline = current(), saved = baseline;
+    strcpy(saved.wifi_ssid, "Home network");
+    strcpy(saved.wifi_password, "saved-network-password");
+    assert(device_config_save_device(&baseline, &saved) == ESP_OK);
+    wac_ui_settings_close(); open_editor(); fake_nvs_clear_activity();
     wac_settings_apply_night(night);
     click("Device Setup");
     click("Messaging");
@@ -1236,6 +1241,16 @@ static void test_wifi_scan_states_and_retained_drafts(void)
     assert(task_count == 0);
     wifi_phase("Couldn’t Scan for Networks", "Refresh the scan or enter\na network manually.", false, night);
     tap(menu_button("Manual Network", NULL));
+    assert(!lv_textarea_get_text(menu_field("Network Name"))[0]);
+    assert(!lv_textarea_get_text(menu_field("Password"))[0]);
+    assert(!strcmp(current().wifi_ssid, "Home network"));
+    assert(!strcmp(current().wifi_password, "saved-network-password"));
+    field(0, "Manual draft");
+    field(1, "retained-password");
+    click("Back");
+    tap(menu_button("Manual Network", NULL));
+    assert(!lv_textarea_get_text(menu_field("Network Name"))[0]);
+    assert(!lv_textarea_get_text(menu_field("Password"))[0]);
     field(0, "Manual draft");
     field(1, "retained-password");
     click("Back");
@@ -1245,6 +1260,8 @@ static void test_wifi_scan_states_and_retained_drafts(void)
     assert(menu_button("Wi-Fi", "Manual draft · Not Connected"));
     assert(fake_nvs_calls(FAKE_SET) == 0);
     click("Cancel");
+    assert(!strcmp(current().wifi_ssid, "Home network"));
+    assert(!strcmp(current().wifi_password, "saved-network-password"));
   }
   wac_settings_apply_night(false);
 
@@ -1806,22 +1823,31 @@ static void test_weather_provider_drafts_and_save_guard(bool night)
     menu_button_style(menu_button("Open-Meteo", NULL), true, night);
     menu_button_style(menu_button("Visual Crossing", NULL), false, night);
     click("Visual Crossing");
+    unsigned index = 0;
+    lv_obj_t *keyboard = find_type(lv_screen_active(), &lv_keyboard_class, &index);
+    lv_obj_t *key = menu_field("API Key");
+    assert(keyboard && menu_visible(keyboard) && lv_keyboard_get_textarea(keyboard) == key);
+    assert(task_count == 0 && weather_validation_count == 0 && fake_nvs_calls(FAKE_SET) == 0);
+    menu_field_geometry("API Key", 212, night);
+    keyboard_key(keyboard, LV_SYMBOL_CLOSE, false);
     menu_button_style(menu_button("Open-Meteo", NULL), false, night);
     menu_button_style(menu_button("Visual Crossing", NULL), true, night);
     menu_field_geometry("API Key", 428, night);
     click("Done");
     assert(view == WAC_SETTINGS_PROVIDER && task_count == 0 && weather_validation_count == 0);
-    lv_obj_t *key = menu_field("API Key");
+    key = menu_field("API Key");
     assert(lv_textarea_get_password_mode(key));
     lv_textarea_set_text(key, "test-secret"); lv_obj_send_event(key, LV_EVENT_VALUE_CHANGED, NULL);
-    unsigned index = 0;
-    lv_obj_t *keyboard = find_type(lv_screen_active(), &lv_keyboard_class, &index);
+    index = 0;
+    keyboard = find_type(lv_screen_active(), &lv_keyboard_class, &index);
     keyboard_key(keyboard, LV_SYMBOL_OK, false);
     assert(menu_label(lv_screen_active(), "Entered (not saved)"));
     assert(!menu_label(lv_screen_active(), "test-secret"));
     click("Open-Meteo"); click("Visual Crossing");
     key = menu_field("API Key");
     assert(!strcmp(lv_textarea_get_text(key), "test-secret"));
+    index = 0; keyboard = find_type(lv_screen_active(), &lv_keyboard_class, &index);
+    assert(keyboard && !menu_visible(keyboard));
     tap(lv_obj_get_parent(key)); tap(menu_button("Clear", NULL));
     assert(!lv_textarea_get_text(key)[0] && !current().weather_api_key[0]);
     lv_textarea_set_text(key, "test-secret-cancel"); lv_obj_send_event(key, LV_EVENT_VALUE_CHANGED, NULL);
@@ -1831,7 +1857,7 @@ static void test_weather_provider_drafts_and_save_guard(bool night)
     assert(view == WAC_SETTINGS_WEATHER && menu_button("Provider", "Open-Meteo"));
     click("Provider"); click("Visual Crossing");
     assert(!lv_textarea_get_text(menu_field("API Key"))[0]);
-    click("Cancel");
+    header_back();
     if (cancel) click("Cancel"); else header_back();
     assert(view == WAC_SETTINGS_DEVICE_SETUP && menu_button("Messaging", "Pending device room"));
   }
@@ -2346,7 +2372,11 @@ static void test_text_fields_and_typing_layout(void)
       wac_settings_apply_night(night);
       if (cases[i].view == WAC_SETTINGS_WEATHER || cases[i].view == WAC_SETTINGS_PROVIDER) {
         click("Device Setup"); click("Weather");
-        if (cases[i].view == WAC_SETTINGS_PROVIDER) { click("Provider"); click("Visual Crossing"); }
+        if (cases[i].view == WAC_SETTINGS_PROVIDER) {
+          click("Provider"); click("Visual Crossing");
+          lv_obj_t *keyboard = find_type(lv_screen_active(), &lv_keyboard_class, &(unsigned){0});
+          keyboard_key(keyboard, LV_SYMBOL_CLOSE, false);
+        }
       }
       else {
         click("Device Setup");
@@ -7944,8 +7974,8 @@ static void test_alarm_preempts_pending_settings(lv_indev_t *pointer)
   assert(fake_nvs_calls(FAKE_SET) == 0);
   wac_ui_settings_close();
 
-  /* Explicit Alarm Save may finish while ringing covers its editor. The
-   * existing save still applies, and its completion keeps the editor hidden. */
+  /* Save and Snooze may finish in the same heartbeat. Save closes its hidden
+   * clock-entry editor without canceling the Snooze completion's navigation. */
   alarm_fixture(&config, &runtime);
   assert(device_config_set_alarm_enabled(true) == ESP_OK);
   fake_nvs_clear_activity();
@@ -7961,6 +7991,10 @@ static void test_alarm_preempts_pending_settings(lv_indev_t *pointer)
   assert(pending_settings_task && fake_nvs_calls(FAKE_SET) == 0);
   runtime.alarm.phase = WAC_ALARM_RINGING;
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  pointer_tap(pointer, visible_button("SNOOZE"));
+  assert(submitted_alarm_action == APP_ALARM_SNOOZE);
+  runtime.alarm.phase = WAC_ALARM_SNOOZED;
+  runtime.alarm.snooze_deadline = runtime.clock.utc_now + 600;
   run = pending_settings_task;
   argument = pending_settings_argument;
   pending_settings_task = NULL;
@@ -7971,13 +8005,10 @@ static void test_alarm_preempts_pending_settings(lv_indev_t *pointer)
   assert(applied.alarm_sound == DEVICE_CONFIG_ALARM_RISING_TONES && applied.alarm_enabled);
   assert(fake_nvs_calls(FAKE_SET) > 0);
   assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
-  assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
   assert(!find_visible_label(lv_screen_active(), "Settings"));
-  alarm_dismiss(pointer);
-  runtime.alarm.phase = WAC_ALARM_IDLE;
-  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-  complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
+  app_ui_complete_alarm_action(APP_ALARM_SNOOZE, &submitted_alarm_occurrence, ESP_OK);
+  assert(find_visible_label(lv_screen_active(), "SNOOZED"));
   swipe(pointer, 600, 300, 600, 500);
   assert(find_visible_label(lv_screen_active(), "Settings"));
   wac_ui_settings_close();
@@ -8401,6 +8432,20 @@ static void test_alarm_clock_shortcut(lv_indev_t *pointer)
       device_config_t config; app_runtime_state_t runtime;
       alarm_fixture(&config, &runtime);
       strcpy(config.default_clock_face, analog ? "analog" : "digital");
+      /* Save completion reads the actual applied settings, including the
+       * first-use exit guard and the selected clock face. */
+      device_config_t baseline;
+      assert(device_config_copy(&baseline) == ESP_OK);
+      strcpy(config.location, "Cincinnati, Ohio, US");
+      strcpy(config.latitude, "39.1031"); strcpy(config.longitude, "-84.5120");
+      strcpy(config.timezone, "America/New_York");
+      strcpy(config.wifi_ssid, "Saved network");
+      assert(device_config_save_weather(&baseline, &config) == ESP_OK);
+      assert(device_config_save_device(&baseline, &config) == ESP_OK);
+      assert(device_config_save_display(&baseline, &config) == ESP_OK);
+      assert(device_config_save_alarm(&baseline, &config) == ESP_OK);
+      assert(device_config_copy(&config) == ESP_OK);
+      fake_nvs_clear_activity();
       runtime.night_active = night;
       assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
 
@@ -8457,6 +8502,52 @@ static void test_alarm_clock_shortcut(lv_indev_t *pointer)
       assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
       assert(find_visible_label(lv_screen_active(), "Waiting for time sync"));
       assert(fake_nvs_calls(FAKE_SET) == 0);
+
+      runtime.clock.usable = true;
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      pointer_tap(pointer, visible_button("Tomorrow · 7:06 AM"));
+      click("Repeat"); click("Every Day"); click("Done");
+      fake_nvs_fail(FAKE_COMMIT, 1);
+      allow_settings_task = true; click("Save");
+      complete_settings_save(&config, &runtime);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_ALARM);
+      assert(find_visible_label(lv_screen_active(), "Every Day"));
+      assert(config.alarm_repeat_days == 0x3e);
+
+      /* A successful retry applies the edit and returns to the same face. */
+      fake_nvs_clear_activity();
+      allow_settings_task = true; click("Save");
+      complete_settings_save(&config, &runtime);
+      assert(config.alarm_repeat_days == 0x7f);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+      assert(visible(find_image_source(lv_screen_active(), &analog_hour_hand)) == (bool)analog);
+      assert(find_visible_label(lv_screen_active(), "Fri, Oct 9"));
+
+      swipe(pointer, 600, 300, 600, 500);
+      click("Alarm Settings"); click("Repeat"); click("Weekdays"); click("Done");
+      allow_settings_task = true; click("Save");
+      complete_settings_save(&config, &runtime);
+      assert(config.alarm_repeat_days == 0x3e);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
+      click("Back to Clock");
+
+      /* A newer screen must retain navigation when the old Save finishes. */
+      pointer_tap(pointer, visible_button("Tomorrow · 7:06 AM"));
+      allow_settings_task = true; click("Save");
+      runtime.alarm.phase = WAC_ALARM_RINGING;
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      alarm_dismiss(pointer);
+      runtime.alarm.phase = WAC_ALARM_IDLE;
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
+      pointer_tap(pointer, find_image_source(lv_screen_active(), &wac_icon_volume_off_40));
+      assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE);
+      complete_settings_save(&config, &runtime);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE);
+      pointer_tap(pointer, menu_back(lv_screen_active()));
+      click("Cancel");
+      assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+      assert(settings_restart_count == 0);
     }
   }
 }

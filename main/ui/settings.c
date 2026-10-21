@@ -1838,6 +1838,8 @@ static void action_event(lv_event_t *event)
   }
   if (action == ACTION_SCAN) { scan_networks(); return; }
   if (action == ACTION_MANUAL) {
+    s_settings.draft.wifi_ssid[0] = '\0';
+    s_settings.draft.wifi_password[0] = '\0';
     s_settings.network_note = "Enter the network name and password.";
     navigate(WAC_SETTINGS_CREDENTIALS); return;
   }
@@ -1903,6 +1905,8 @@ static void action_event(lv_event_t *event)
   else if (action >= ACTION_SNOOZE_BASE && action < ACTION_SNOOZE_BASE + 3) s_settings.draft.alarm_snooze_minutes = 5 * (action - ACTION_SNOOZE_BASE + 1);
   else if (action >= ACTION_MODE_BASE && action < ACTION_MODE_BASE + 4) draft->night_shift_mode = action - ACTION_MODE_BASE;
   wac_settings_render(wac_ui_settings_view());
+  if (action == ACTION_PROVIDER_CROSSING && !has_text(draft->weather_api_key))
+    typing_layout(s_settings.fields[FIELD_API_KEY].input);
 }
 
 void wac_settings_poll(void)
@@ -1967,8 +1971,12 @@ void wac_settings_poll(void)
       if (save.error == ESP_OK) {
         if (save.kind == SAVE_ALARM || save.kind == SAVE_DISPLAY) {
           s_settings.baseline = s_settings.draft = s_settings.applied;
-          navigate(WAC_SETTINGS_ENTRY);
-          show_notice(save.kind == SAVE_DISPLAY ? "Display settings saved." : "Alarm settings saved.");
+          if (save.kind == SAVE_ALARM && s_settings.alarm_return_to_clock) {
+            wac_ui_settings_close();
+          } else {
+            navigate(WAC_SETTINGS_ENTRY);
+            show_notice(save.kind == SAVE_DISPLAY ? "Display settings saved." : "Alarm settings saved.");
+          }
         } else {
           /* On/Off is already applied. Cancel and a later full Save must keep
            * it while the other alarm edits remain in this editor's draft. */

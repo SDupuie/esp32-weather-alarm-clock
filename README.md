@@ -168,7 +168,7 @@ To build the firmware yourself, follow the [step-by-step source-build guide](doc
 
 ### Finish setup on the touchscreen
 
-1. Open **Wi-Fi** under Device Setup, select your network and enter its password. Tap **Save & Restart**. Use **Manual Network** if needed.
+1. Open **Wi-Fi** under Device Setup, select your network and enter its password. Tap **Save & Restart**. Use **Manual Network** if needed; it opens empty name and password boxes each time. Your saved connection stays unchanged until you save.
 2. Open **Device Setup → Weather → Weather Location**, enter your location, such as `Cincinnati,OH,US` or `Paris,FR`, and tap **Save**. A successful lookup and save restarts the clock; errors retain the editor.
 3. Allow time for network synchronization and the first weather update.
 4. Open **Settings → Display Settings** to change the clock face, time format or brightness, then tap **Save** to apply without restarting. Other device preferences are under **Device Setup**; nested **Done** keeps your edits until **Save & Restart** applies them.
@@ -223,7 +223,7 @@ Select a row to read its affected area, issue/end times, description and protect
 
 Open **Settings → Alarm Settings** or tap the alarm notice on the clock. Choose the time, repeat days, sound, volume and snooze duration. Use **Done** to return from a nested editor, then **Save** on Alarm to apply those edits without restarting. **Preview Sound** plays the selected unsaved sound at the unsaved volume for about five seconds. **Stop Preview**, leaving the sound picker or a ringing alarm stops it.
 
-Alarm's header **Back** and **Cancel** discard unsaved edits and return to the screen where you opened Alarm: the clock shortcut or Settings. A successful Alarm Save returns to Settings. The immediate On/Off switch is separate from these unsaved edits; see [Saving and canceling](#saving-and-canceling).
+Alarm's header **Back** and **Cancel** discard unsaved edits and return to the screen where you opened Alarm: the clock shortcut or Settings. A successful **Save** applies the edits and returns to that same screen. The immediate On/Off switch is separate from these unsaved edits; see [Saving and canceling](#saving-and-canceling).
 
 For a one-time alarm, choose **Repeat → None**, set the time and Save. If Alarm is Off, reopen Alarm and turn it On after saving those choices. It rings at the next occurrence of that time, today or tomorrow. Snooze works normally; Dismiss turns the alarm Off. Turn it On again to reuse the time for another one-time alarm. Restart recovery keeps the original scheduled date.
 
@@ -328,7 +328,7 @@ Alarm Time and Fixed Schedule minute arrows move in five-minute steps and change
 
 ### Saving and canceling
 
-**Done** in a nested settings editor normally keeps your edits pending in its parent; it does not save them. Use the parent Save action below. Back from Provider or an alert-sound selection page discards that child's changes; use Done to retain them. Sound Machine is the immediate-control exception.
+**Done** in a nested settings editor normally keeps your edits pending in its parent; it does not save them. Use the parent Save action below. Back from Provider or an alert-sound selection page discards that child's changes; use Done to retain them. While typing, the keyboard's Done or Close keeps your text and closes the keyboard. The header Back arrow follows the page's normal Back behavior. Sound Machine is the immediate-control exception.
 
 | Controls | How changes are applied |
 | --- | --- |
@@ -343,7 +343,7 @@ A failed save leaves the editor available for correction or retry and does not r
 
 ### Weather provider and API key
 
-Open **Device Setup → Weather → Provider** and choose **Open-Meteo** (no key required) or **Visual Crossing** (your API key required). API Key is inside the Visual Crossing Provider editor, rather than a separate Weather row.
+Open **Device Setup → Weather → Provider** and choose **Open-Meteo** (no key required) or **Visual Crossing** (your API key required). Selecting Visual Crossing opens key entry automatically if no key is present. To replace an existing key, tap **API Key** in that editor.
 
 Visual Crossing's API key stays masked. **Configured** means a key is saved; **Entered (not saved)** means you changed it in the editor. Save checks a newly selected Visual Crossing provider or changed key before applying it. If the check fails, the editor stays open for retry without restarting. Choosing Open-Meteo keeps the saved key for later reuse. To remove it, open API Key while Visual Crossing is selected, tap **Clear**, close the keyboard, choose Open-Meteo and Save. Cancel discards unsaved key changes.
 

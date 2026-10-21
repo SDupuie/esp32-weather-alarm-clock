@@ -15,7 +15,7 @@ The application provides weather, location selection, Wi-Fi, House Messages and 
   - [Sound Machine controls](#sound-machine-controls)
   - [Sound Machine playback](#sound-machine-playback)
   - [UI and visual reference](#ui-and-visual-reference)
-    - [Clock display](#clock-display)
+  - [Clock display](#clock-display)
   - [Night Shift](#night-shift)
   - [Time and RTC](#time-and-rtc)
   - [Weather](#weather)
@@ -42,6 +42,8 @@ Cancel discards unsaved edits. Nested Done returns to the parent draft without s
 
 Alarm Save applies without restart. The On/Off switch in Alarm Settings applies and saves immediately, writing only the enabled value. The Alarm Settings switch does not apply pending time, repeat, sound, volume or snooze edits; those still require Save. A successful switch change remains applied after Cancel or Back, while those other edits are discarded. Failed switch saves retain the applied On/Off state and pending edits for retry. One-time alarm completion below also saves Off through the settings owner. Device Setup and Wi-Fi share pending edits for Save & Restart. Weather retains its independent save and restart, including location, coordinates, timezone, units and the alert sound settings. Its Back and Cancel return to Device Setup without discarding pending device edits. A Weather Save must not apply those unsubmitted device edits.
 
+Choosing Manual Network starts empty network-name and password fields in the existing Device draft each time. It leaves other Device edits, saved credentials and the current connection unchanged. Ordinary Back from Network Details retains the pending credentials; selecting the same scanned network also retains its pending password. Device Setup Cancel or Back discards all pending Device/Wi-Fi edits. Only Save & Restart applies the credential changes.
+
 Apply only changes made in that editor, preserving unrelated applied choices. Display saves cover only its five existing fields; Device saves cover the remaining Device Setup choices. Keep the existing settings owner, stored keys and ordinary save facilities. Validation errors remain in the editor; save failure retains the draft and does not automatically restart.
 
 A submitted Save continues if its editor is hidden, closed or replaced. A successful Device or Weather Save still completes its required restart. Results specific to the old editor must not reopen it or change a newer editor; the general saved/restarting notice may appear on the current screen. Preserve the existing restart delay, including when ringing hides the editor. Failed saves never trigger that restart.
@@ -66,7 +68,7 @@ Defaults: alarm Off, 07:00 Monday–Friday, Classic Beep at 50% volume and ten-m
 
 The Alarm editor previews its draft's next scheduled time through the existing pure `alarm_schedule` calculation using supplied usable clock time. For an unchanged saved one-time schedule, display the alarm owner's copied dated target or captured ringing/snoozed occurrence instead of calculating a new day. With usable time but no upcoming/captured occurrence, show **No upcoming alarm**; do not invent tomorrow's alarm or claim synchronization is pending. This is display-only: the editor does not handle, arm or save an occurrence. Live recovery, handled occurrences and snooze remain with `alarm`; the editor retains its existing alarm-time formatter and caption layout. Automatic Off refreshes only the immediate enabled control/baseline, preserving other draft edits.
 
-Ringing hides the existing Settings root without closing it; the draft, active input and keyboard retain their single owner. A later Settings swipe resumes that editor. The explicit Alarm Settings shortcut resumes a held Alarm editor; otherwise it closes any unrelated held editor without saving and starts the Alarm editor. When opened or resumed through the clock's Alarm shortcut, Alarm's header Back and Cancel discard unsaved alarm edits and return to that clock, matching the Sound Machine shortcut. Alarm opened through Settings returns to Settings. Nested editors retain their existing parent navigation, and successful Alarm Save retains its existing Settings destination. The immediate On/Off setting remains applied after Back or Cancel. Keep this entry distinction in the existing settings owner; no second draft or saved return route is created.
+Ringing hides the existing Settings root without closing it; the draft, active input and keyboard retain their single owner. A later Settings swipe resumes that editor. The explicit Alarm Settings shortcut resumes a held Alarm editor; otherwise it closes any unrelated held editor without saving and starts the Alarm editor. When opened or resumed through the clock's Alarm shortcut, Alarm's header Back and Cancel discard unsaved alarm edits and return to that clock, matching the Sound Machine shortcut. A successful Alarm Save also returns to that clock. Alarm opened through Settings returns to Settings after Back, Cancel or a successful Save. Nested editors retain their existing parent navigation. The immediate On/Off setting remains applied after Back or Cancel. Keep this entry distinction in the existing settings owner; no second draft or saved return route is created.
 
 **One-time operation:** Repeat **None** means no weekdays are selected. The Alarm Settings Repeat row shows **None**. The Repeat editor presents **None**, **Every Day**, **Weekdays** and **Custom Days**, in that order. Derive its selected row from the existing weekday mask; no separate preset is stored. Custom Days opens the preserved draft selection, with Monday–Friday on the first centered row and Saturday/Sunday below. Both Repeat editors show **Rings once** for an empty selection. Clearing all weekdays selects None; selecting any weekday returns to recurring operation. Custom Days Back/Done returns to Repeat; Repeat Back/Done returns to Alarm, retaining the draft. Alarm Save applies it and Alarm Cancel/Back discards it, preserving the independent On/Off switch. The Alarm Repeat row summarizes actual selected days using the existing compact names/day-count rules rather than saying Custom. The visual reference owns geometry and styles; LVGL rounds its half-pixel Custom Days row positions consistently to whole pixels, retaining the gap and a half-pixel center offset.
 
@@ -186,6 +188,8 @@ Messaging's distinct Device ID guidance is vertically centered in the fourth-row
 
 Use LVGL for the keyboard, matching the mockup’s lowercase, uppercase, numbers and symbols arrangements, size and position. The temporary typing layout hides inactive controls and shows the active input above the keyboard. Show the enlarged character while a key is pressed. Caret and colon are available on the illustrated symbol layouts.
 
+Keyboard Done and Close hide the keyboard and retain the typed field in its draft. Header Back keeps the enclosing editor's normal navigation and discard rules while typing. Input limits match the existing native fields: Room Name, Device ID and Weather Location allow 63 characters; Network Name allows 32, Password 64 and API Key 128. These input limits do not expand the underlying byte buffers or change storage validation.
+
 Use the same raised active label/input placement for location, API key, room name, device ID, network name and password. While editing location, keep the exact muted note “Time zone is set automatically from this location.” between the input and keyboard. Keep real field errors above the active label, using the reference's single-line band; normal lookup notices use “Location not found.” and “Lookup unavailable.” without changing lookup or retry behavior.
 
 Alarm Time and Fixed Schedule start/end use the same time control. Each minute-arrow press adds or subtracts five minutes, advancing or reducing the hour when minutes cross an hour boundary. This also changes AM/PM across noon or midnight and wraps between 23:55 and 00:00. Opening or leaving a time editor does not round an existing saved minute value. Hour and AM/PM have separate buttons.
@@ -202,7 +206,7 @@ The normal analog clock's next-alarm caption shows its complete text on one line
 
 After Save & Restart, retain normal startup navigation to the clock or required unfinished setup. Wi-Fi connection status belongs in Device Setup; the mockup's connection previews do not require a separate startup screen or a saved return-route flag.
 
-#### Clock display
+### Clock display
 
 Analog and Digital share the following clock presentation in Day and Night where applicable. The official visual reference owns the exact geometry; native pixel sizes below define shared layout requirements.
 
@@ -517,6 +521,8 @@ The [public API](https://www.rainviewer.com/api.html) needs no key, permits cust
 The [USGS map services](https://www.usgs.gov/faqs/what-are-terms-uselicensing-map-services-and-data-national-map) are public-domain sources. Requested acknowledgment: “Map services and data available from U.S. Geological Survey, National Geospatial Program.” The screen credit is `RainViewer · USGS` on one line. Keep the current location's background and names in RAM; no persistent map store is introduced.
 
 ### House Messages
+
+Long or multiline messages can extend below the clock's fixed message area, which has no text scrolling. The complete text remains available in the browser. This display limitation is accepted.
 
 #### Message Contract
 
@@ -838,7 +844,7 @@ tests/
       expected-frame-5.png              Newest composed reference image
       frames/
         manifest.json                   Capture geometry, relative tile paths and checksums
-        usgs-background-800.png          Captured USGS map background
+        usgs-background-800.png         Captured USGS map background
         frame-0-1792413000-z7-34-53-512-smooth.png  First frame, western tile
         frame-0-1792413000-z7-35-53-512-smooth.png  First frame, eastern tile
         frame-1-1792413600-z7-34-53-512-smooth.png  Second frame, western tile

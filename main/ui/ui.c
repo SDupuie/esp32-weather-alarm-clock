@@ -386,8 +386,10 @@ void wac_ui_settings_close(void)
     return;
   }
   s_ui.settings_view = WAC_SETTINGS_NONE;
+  /* A background Save may close an alarm-hidden editor before a pending
+   * Snooze/Dismiss result arrives. Keep that action's return destination. */
+  if (!s_ui.settings_suspended) s_ui.alarm_action_return_allowed = false;
   s_ui.settings_suspended = false;
-  s_ui.alarm_action_return_allowed = false;
   wac_settings_close();
   update_backup_notice();
   update_alarm_surface();
