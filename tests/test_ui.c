@@ -4755,9 +4755,10 @@ static void test_sound_machine_controls(void)
     fake_nvs_clear_activity(); click("Retry Save"); run_task();
     assert(current().sound_machine_sound == DEVICE_CONFIG_SOUND_MACHINE_OCEAN);
     click("Done"); header_back();
-    /* A pending alarm draft can coexist with immediately saved machine choices. */
+    /* A submitted immediate choice finishes while a later Alarm draft is open. */
+    click("Sound Machine"); click("Sleep Timer"); click("15 Minutes"); click("Done"); header_back();
     click("Alarm Settings"); click("Alarm Time"); picker_set(8, 25, true); click("Done");
-    wac_settings_start_machine(false); click("Sleep Timer"); click("15 Minutes"); run_task(); click("Done"); header_back();
+    run_task();
     assert(view == WAC_SETTINGS_ALARM && menu_button("Alarm Time", "8:25 AM"));
     click("Cancel"); assert(current().alarm_hour == 7 && current().sound_machine_timer_minutes == 15);
     click("Sound Machine");
@@ -6356,9 +6357,8 @@ static void test_waiting_sync_transitions(lv_indev_t *pointer)
     assert(!find_visible_label(lv_screen_active(), "Waiting for sync"));
     lv_tick_inc(136000);
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    swipe(pointer, 300, 350, 600, 350);
-    assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-    assert_waiting_sync(analog, false); /* Away from home resets paused-minute health. */
+    /* Forecast inactivity now returns home itself, resetting minute health. */
+    assert_waiting_sync(analog, false);
     swipe(pointer, 600, 300, 600, 500);
     assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
     assert(!find_visible_label(lv_screen_active(), "Waiting for sync"));
@@ -7112,6 +7112,165 @@ static lv_obj_t *alarm_label_box(const char *text, int x, int y, int width,
   assert(lv_obj_get_style_text_font(obj, 0) == font);
   menu_color(obj, color, false);
   return obj;
+}
+
+/* Inspect the real font's ASCII glyph boxes, including kerning and bearings.
+ * This checks that the digits/period fit their drawing areas and round panel;
+ * software geometry does not establish physical clipping or readability. */
+static lv_area_t assert_clock_glyph_fit(lv_obj_t *object)
+{
+  const lv_font_t *font = lv_obj_get_style_text_font(object, 0);
+  const char *text = lv_label_get_text(object);
+  lv_area_t content;
+  lv_obj_get_content_coords(object, &content);
+  int margin = 0;
+  lv_obj_send_event(object, LV_EVENT_REFR_EXT_DRAW_SIZE, &margin);
+  lv_area_t drawn = content, all_ink = {0};
+  lv_area_increase(&drawn, margin, margin);
+  assert(lv_obj_get_style_transform_scale_x_safe(object, 0) == 256);
+  assert(lv_obj_get_style_transform_scale_y_safe(object, 0) == 256);
+  for (unsigned i = 0; text[i]; ++i) {
+    lv_point_t position;
+    lv_label_get_letter_pos(object, i, &position);
+    lv_font_glyph_dsc_t glyph;
+    assert(lv_font_get_glyph_dsc(font, &glyph, (unsigned char)text[i], (unsigned char)text[i + 1]));
+    assert(!glyph.is_placeholder && glyph.box_w && glyph.box_h);
+    lv_area_t ink = {
+      .x1 = content.x1 + position.x + glyph.ofs_x,
+      .y1 = content.y1 + position.y + font->line_height - font->base_line - glyph.ofs_y - glyph.box_h,
+    };
+    ink.x2 = ink.x1 + glyph.box_w - 1;
+    ink.y2 = ink.y1 + glyph.box_h - 1;
+    /* Montserrat's A has a -1px left bearing; LVGL expressly reserves extra
+     * label draw space for bearings outside the content rectangle. */
+    assert(ink.x1 >= drawn.x1 && ink.x2 <= drawn.x2);
+    assert(ink.y1 >= drawn.y1 && ink.y2 <= drawn.y2);
+    for (lv_obj_t *parent = lv_obj_get_parent(object); parent; parent = lv_obj_get_parent(parent)) {
+      lv_area_t parent_box;
+      lv_obj_get_content_coords(parent, &parent_box);
+      assert(ink.x1 >= parent_box.x1 && ink.x2 <= parent_box.x2);
+      assert(ink.y1 >= parent_box.y1 && ink.y2 <= parent_box.y2);
+    }
+    if (i == 0) all_ink = ink;
+    else {
+      all_ink.x1 = LV_MIN(all_ink.x1, ink.x1); all_ink.x2 = LV_MAX(all_ink.x2, ink.x2);
+      all_ink.y1 = LV_MIN(all_ink.y1, ink.y1); all_ink.y2 = LV_MAX(all_ink.y2, ink.y2);
+    }
+    const int xs[] = {ink.x1, ink.x2}, ys[] = {ink.y1, ink.y2};
+    for (unsigned x = 0; x < 2; ++x) {
+      for (unsigned y = 0; y < 2; ++y) {
+        int dx = xs[x] - 400, dy = ys[y] - 400;
+        assert(dx * dx + dy * dy <= 390 * 390);
+      }
+    }
+  }
+  return all_ink;
+}
+
+static void assert_centered_clock_time(const char *text, const char *period_text, bool night,
+  const lv_area_t *expected_time, const lv_area_t *expected_period)
+{
+  lv_obj_update_layout(lv_screen_active());
+  lv_obj_t *time = find_visible_label(lv_screen_active(), text);
+  assert(time && lv_obj_get_style_text_font(time, 0) == &lv_font_clock_time_144);
+  assert(lv_obj_get_style_text_letter_space(time, 0) == -2);
+  menu_color(time, night ? 0xecc0c0 : 0xf5f8ff, false);
+  lv_area_t time_box;
+  lv_obj_get_coords(time, &time_box);
+  assert(abs(time_box.x1 + time_box.x2 - 799) <= 1);
+  assert(time_box.y1 == 192);
+  if (expected_time) assert(!memcmp(&time_box, expected_time, sizeof(time_box)));
+  lv_area_t time_ink = assert_clock_glyph_fit(time);
+  lv_obj_t *period = period_text ? find_visible_label(lv_screen_active(), period_text) : NULL;
+  if (period_text) {
+    assert(period && lv_obj_get_style_text_font(period, 0) == &lv_font_montserrat_24);
+    assert(lv_obj_get_style_text_letter_space(period, 0) == 2);
+    menu_color(period, night ? 0xc17a7a : 0x78b8ff, false);
+    lv_area_t period_box;
+    lv_obj_get_coords(period, &period_box);
+    assert(period_box.x1 - time_box.x2 - 1 == 14 && period_box.y1 == 272);
+    if (expected_period) assert(!memcmp(&period_box, expected_period, sizeof(period_box)));
+    lv_area_t period_ink = assert_clock_glyph_fit(period);
+    assert(time_ink.x2 < period_ink.x1);
+    assert(!find_visible_label(lv_screen_active(), !strcmp(period_text, "AM") ? "PM" : "AM"));
+  } else {
+    assert(!find_visible_label(lv_screen_active(), "AM"));
+    assert(!find_visible_label(lv_screen_active(), "PM"));
+  }
+}
+
+static void test_centered_day_and_alarm_times(lv_indev_t *pointer)
+{
+  /* Supplied times include midnight/noon, narrow digits and each format's
+   * actual-font widest AM/PM time. The alarm snapshots are test examples. */
+  for (unsigned format = 0; format < 3; ++format) {
+    device_config_t config;
+    app_runtime_state_t runtime;
+    alarm_fixture(&config, &runtime);
+    bool twelve = format != 2;
+    config.leading_zero_12h = format == 1;
+    strcpy(config.time_format, twelve ? "12" : "24");
+    unsigned cases[] = {0, 71, 426, 720, 791, 1439, 0, 720};
+    int widest[2] = {-1, -1};
+    for (unsigned minute = 0; minute < 1440; ++minute) {
+      unsigned hour = minute / 60;
+      unsigned display_hour = twelve ? (hour % 12 ? hour % 12 : 12) : hour;
+      char text[6];
+      snprintf(text, sizeof(text), format ? "%02u:%02u" : "%u:%02u", display_hour, minute % 60);
+      lv_point_t size;
+      lv_text_get_size(&size, text, &lv_font_clock_time_144, -2, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+      unsigned half = hour >= 12;
+      if (size.x > widest[half]) {
+        widest[half] = size.x;
+        cases[6 + half] = minute;
+      }
+    }
+    for (unsigned i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+      unsigned minute = cases[i], hour = minute / 60;
+      unsigned display_hour = twelve ? (hour % 12 ? hour % 12 : 12) : hour;
+      char text[6];
+      snprintf(text, sizeof(text), format ? "%02u:%02u" : "%u:%02u", display_hour, minute % 60);
+      const char *period_text = twelve ? (hour >= 12 ? "PM" : "AM") : NULL;
+      strcpy(config.default_clock_face, "digital");
+      runtime.night_active = false;
+      runtime.alarm.phase = WAC_ALARM_IDLE;
+      runtime.clock.utc_now = local_epoch(2026, 10, 9, hour, minute % 60);
+      assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+      assert_centered_clock_time(text, period_text, false, NULL, NULL);
+      lv_area_t day_time, day_period;
+      lv_obj_get_coords(find_visible_label(lv_screen_active(), text), &day_time);
+      if (period_text) lv_obj_get_coords(find_visible_label(lv_screen_active(), period_text), &day_period);
+      for (unsigned analog = 0; analog < 2; ++analog) {
+        strcpy(config.default_clock_face, analog ? "analog" : "digital");
+        for (unsigned night = 0; night < 2; ++night) {
+          runtime.night_active = night;
+          runtime.alarm.phase = WAC_ALARM_RINGING;
+          runtime.alarm.current = alarm_occurrence(20261009, minute);
+          assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+          assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
+          assert_centered_clock_time(text, period_text, night, &day_time, period_text ? &day_period : NULL);
+          pointer_tap(pointer, visible_button("SNOOZE"));
+          runtime.alarm.phase = WAC_ALARM_SNOOZED;
+          runtime.alarm.snooze_deadline = runtime.clock.utc_now + 600;
+          assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+          app_ui_complete_alarm_action(APP_ALARM_SNOOZE, &submitted_alarm_occurrence, ESP_OK);
+          assert(find_visible_label(lv_screen_active(), "SNOOZED"));
+          assert_centered_clock_time(text, period_text, night, &day_time, period_text ? &day_period : NULL);
+          /* Dismissed confirmation follows a completed ringing slide. */
+          runtime.alarm.phase = WAC_ALARM_RINGING;
+          assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+          alarm_dismiss(pointer);
+          runtime.alarm.phase = WAC_ALARM_IDLE;
+          runtime.alarm.current.valid = false;
+          assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+          app_ui_complete_alarm_action(APP_ALARM_DISMISS, &submitted_alarm_occurrence, ESP_OK);
+          assert(find_visible_label(lv_screen_active(), "DISMISSED"));
+          assert_centered_clock_time(text, period_text, night, &day_time, period_text ? &day_period : NULL);
+        }
+      }
+    }
+    assert(fake_nvs_calls(FAKE_SET) == 0);
+  }
 }
 
 static void test_alarm_ringing_snoozed_surfaces(lv_indev_t *pointer)
@@ -8540,12 +8699,18 @@ static void test_alarm_clock_shortcut(lv_indev_t *pointer)
       runtime.alarm.phase = WAC_ALARM_IDLE;
       assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
       complete_alarm_dismiss(&submitted_alarm_occurrence, ESP_OK);
-      pointer_tap(pointer, find_image_source(lv_screen_active(), &wac_icon_volume_off_40));
-      assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE);
+      swipe(pointer, 600, 300, 600, 500); /* Resume the submitted Alarm editor. */
+      lv_tick_inc(15000);
+      assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+      swipe(pointer, 600, 300, 600, 500);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
       complete_settings_save(&config, &runtime);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
+      click("Sound Machine");
       assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE);
       pointer_tap(pointer, menu_back(lv_screen_active()));
-      click("Cancel");
+      click("Back to Clock");
       assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
       assert(settings_restart_count == 0);
     }
@@ -8606,37 +8771,43 @@ static void test_machine_clock_shortcut(lv_indev_t *pointer)
       assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
       speaker = find_image_source(lv_screen_active(), &wac_icon_volume_off_40);
       pointer_tap(pointer, speaker);
-      assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE && find_visible_label(lv_screen_active(), "Stopped"));
-      pointer_tap(pointer, visible_button("Play"));
-      assert(audio_snapshot.machine_pending && machine_plays == 1);
-      runtime.audio = audio_snapshot;
+      assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+      assert(audio_snapshot.machine_pending && machine_plays == 1 && machine_stops == 0);
+      /* Start can still be pending when another tap arrives. A stale copied
+       * runtime must not turn the second tap into another Play request. */
+      runtime.audio = (wac_audio_snapshot_t){.ready = true};
       assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
-      assert(find_visible_label(lv_screen_active(), "Starting…"));
-      pointer_tap(pointer, menu_back(lv_screen_active()));
-      assert(wac_ui_settings_view() == WAC_SETTINGS_NONE && machine_stops == 0 && audio_snapshot.machine_pending);
-      assert(visible(find_image_source(lv_screen_active(), &wac_icon_volume_off_40)));
-      runtime.audio = audio_snapshot = (wac_audio_snapshot_t){.ready = true, .machine_active = true, .machine_remaining_seconds = 123};
+      pointer_tap(pointer, speaker);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+      assert(!audio_snapshot.machine_pending && machine_plays == 1 && machine_stops == 1);
+      runtime.audio = audio_snapshot = (wac_audio_snapshot_t){.ready = true, .machine_active = true,
+        .machine_remaining_seconds = 123};
       assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
       speaker = find_image_source(lv_screen_active(), &wac_icon_volume_2_40);
       assert(speaker && visible(speaker));
       pointer_tap(pointer, speaker);
-      assert(find_visible_label(lv_screen_active(), "Playing · 3 min left"));
-      pointer_tap(pointer, visible_button("Sleep Timer"));
-      /* Constructed alarm-owner snapshots establish UI priority and retained
-       * selection, while actual audio interruption is checked in test_audio. */
+      assert(wac_ui_settings_view() == WAC_SETTINGS_NONE && machine_stops == 2);
+      assert(!audio_snapshot.machine_active && !audio_snapshot.machine_pending);
+      /* The settings icon and down swipe retain the ordinary Settings root,
+       * where Sound Machine still opens its controls. */
+      lv_obj_t *settings_icon = find_image_source(lv_screen_active(), &wac_icon_settings_2_40);
+      assert(settings_icon); pointer_tap(pointer, settings_icon);
+      assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
+      click("Sound Machine");
+      assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE);
+      click("Sleep Timer");
       runtime.alarm.phase = WAC_ALARM_RINGING;
       runtime.audio = audio_snapshot = (wac_audio_snapshot_t){.ready = true};
       assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
       assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE_TIMER);
       assert(find_visible_label(lv_screen_active(), "Alarm ringing") && !find_visible_label(lv_screen_active(), "Continuous"));
-      assert(machine_stops == 0 && fake_nvs_calls(FAKE_SET) == 0);
       runtime.alarm.phase = WAC_ALARM_IDLE;
       assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
       swipe(pointer, 600, 350, 600, 500);
       assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE_TIMER && find_visible_label(lv_screen_active(), "30 Minutes"));
-      pointer_tap(pointer, visible_button("Done"));
-      assert(find_visible_label(lv_screen_active(), "Stopped"));
-      pointer_tap(pointer, menu_back(lv_screen_active()));
+      click("Done"); pointer_tap(pointer, menu_back(lv_screen_active()));
+      assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
+      click("Back to Clock");
       assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
       runtime.clock.usable = false;
       assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
@@ -9121,6 +9292,193 @@ static void test_radar_playback(lv_indev_t *pointer)
   free(pixels[0]); free(pixels[1]);
 }
 
+/* Controlled LVGL time and owner publications test inactivity policy. No
+ * wall-clock sleep or hardware touch/heartbeat scheduling is involved. */
+static void idle_heartbeat(device_config_t *config, app_runtime_state_t *runtime, uint32_t elapsed)
+{
+  lv_tick_inc(elapsed);
+  assert(app_ui_update_runtime(config, runtime) == ESP_OK);
+}
+
+static void test_inactivity_returns(lv_indev_t *pointer)
+{
+  static const wac_settings_view_t timed[] = {
+    WAC_SETTINGS_ENTRY, WAC_SETTINGS_DISPLAY, WAC_SETTINGS_BRIGHTNESS,
+    WAC_SETTINGS_ALARM, WAC_SETTINGS_ALARM_TIME, WAC_SETTINGS_REPEAT,
+    WAC_SETTINGS_REPEAT_CUSTOM, WAC_SETTINGS_SOUND, WAC_SETTINGS_SOUND_PICKER,
+    WAC_SETTINGS_SNOOZE, WAC_SETTINGS_MACHINE, WAC_SETTINGS_MACHINE_SOUND,
+    WAC_SETTINGS_MACHINE_TIMER
+  };
+  static const wac_settings_view_t setup[] = {
+    WAC_SETTINGS_DEVICE_SETUP, WAC_SETTINGS_DEVICE, WAC_SETTINGS_WEATHER,
+    WAC_SETTINGS_WIFI, WAC_SETTINGS_CREDENTIALS, WAC_SETTINGS_PROVIDER,
+    WAC_SETTINGS_ALERTS, WAC_SETTINGS_WATCH_SOUNDS, WAC_SETTINGS_WARNING_SOUNDS,
+    WAC_SETTINGS_UPDATE_SOUNDS, WAC_SETTINGS_NIGHT, WAC_SETTINGS_NIGHT_MODE,
+    WAC_SETTINGS_NIGHT_FIXED, WAC_SETTINGS_NIGHT_START, WAC_SETTINGS_NIGHT_END,
+    WAC_SETTINGS_NIGHT_SOLAR, WAC_SETTINGS_SUNSET_OFFSET, WAC_SETTINGS_SUNRISE_OFFSET
+  };
+  device_config_t config;
+  app_runtime_state_t runtime;
+  alarm_fixture(&config, &runtime);
+  assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+  for (unsigned i = 0; i < sizeof(timed) / sizeof(*timed); ++i) {
+    swipe(pointer, 600, 300, 600, 500);
+    wac_ui_settings_navigate(timed[i]);
+    idle_heartbeat(&config, &runtime, 14999);
+    assert(wac_ui_settings_view() == timed[i]);
+    idle_heartbeat(&config, &runtime, 1);
+    assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+    assert(visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
+  }
+  /* Opening a child starts its interval even when no touch preceded the
+   * programmatic transition. Owner updates alone do not extend that interval. */
+  swipe(pointer, 600, 300, 600, 500);
+  idle_heartbeat(&config, &runtime, 14000);
+  click("Display Settings");
+  idle_heartbeat(&config, &runtime, 14000);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_DISPLAY);
+  idle_heartbeat(&config, &runtime, 1000);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+
+  /* Pointer input elsewhere on the panel counts, including a held contact
+   * and a drag; an owner heartbeat with no contact does not count. */
+  swipe(pointer, 600, 300, 600, 500);
+  idle_heartbeat(&config, &runtime, 14000);
+  pointer_press(pointer, 100, 400);
+  idle_heartbeat(&config, &runtime, 14000);
+  lv_indev_read(pointer); /* Still held. */
+  idle_heartbeat(&config, &runtime, 14000);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
+  pointer_move(pointer, 120, 410);
+  pointer_release(pointer);
+  /* LVGL records the last pressed sample; release follows it by 30ms. */
+  uint32_t released_idle = lv_display_get_inactive_time(lv_display_get_default());
+  assert(released_idle < 14999);
+  idle_heartbeat(&config, &runtime, 14999 - released_idle);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
+  idle_heartbeat(&config, &runtime, 1);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+
+  swipe(pointer, 600, 300, 600, 500);
+  click("Display Settings"); click("Time Format");
+  idle_heartbeat(&config, &runtime, 15000);
+  swipe(pointer, 600, 300, 600, 500); click("Display Settings");
+  assert(menu_button("Time Format", "12-Hour")); /* Unsaved choice discarded. */
+  wac_ui_settings_close();
+  assert(fake_nvs_calls(FAKE_SET) == 0);
+
+  /* Expiry closes controls without undoing an explicit playback request. */
+  swipe(pointer, 600, 300, 600, 500); click("Sound Machine");
+  unsigned stops = machine_stops;
+  click("Play"); runtime.audio = audio_snapshot;
+  idle_heartbeat(&config, &runtime, 15000);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+  assert(audio_snapshot.machine_pending && machine_stops == stops);
+  runtime.audio = audio_snapshot = (wac_audio_snapshot_t){.ready = true};
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+
+  /* Setup descendants, including their actual keyboard, remain available. */
+  swipe(pointer, 600, 300, 600, 500);
+  for (unsigned i = 0; i < sizeof(setup) / sizeof(*setup); ++i) {
+    wac_ui_settings_navigate(setup[i]);
+    idle_heartbeat(&config, &runtime, 65000);
+    assert(wac_ui_settings_view() == setup[i]);
+  }
+  wac_ui_settings_navigate(WAC_SETTINGS_DEVICE);
+  lv_obj_t *room = find_widget(lv_screen_active(), &lv_textarea_class);
+  lv_obj_t *keyboard = find_widget(lv_screen_active(), &lv_keyboard_class);
+  lv_textarea_set_text(room, "Retained setup draft");
+  lv_obj_send_event(room, LV_EVENT_VALUE_CHANGED, NULL);
+  pointer_tap(pointer, lv_obj_get_parent(room));
+  assert(visible(keyboard));
+  idle_heartbeat(&config, &runtime, 65000);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_DEVICE && visible(keyboard));
+  assert(!strcmp(lv_textarea_get_text(room), "Retained setup draft"));
+  wac_ui_settings_close();
+
+  /* First-use setup is exempt, and its existing explicit exit guard remains. */
+  config.location_ready = config.wifi_ready = false;
+  assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+  idle_heartbeat(&config, &runtime, 65000);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_DEVICE_SETUP);
+  click("Cancel"); click("Back to Clock");
+  assert(wac_ui_settings_view() == WAC_SETTINGS_WEATHER);
+  idle_heartbeat(&config, &runtime, 65000);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_WEATHER);
+
+  /* Ringing hides an Alarm draft for longer than its normal interval. Resume
+   * retains the same child/draft and grants a complete new interval. */
+  config.location_ready = config.wifi_ready = true;
+  assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+  swipe(pointer, 600, 300, 600, 500); click("Alarm Settings");
+  click("Repeat"); click("Every Day");
+  runtime.alarm.phase = WAC_ALARM_RINGING;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  idle_heartbeat(&config, &runtime, 65000);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_REPEAT);
+  assert(find_visible_label(lv_screen_active(), "Alarm ringing"));
+  runtime.alarm.phase = WAC_ALARM_IDLE;
+  assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
+  idle_heartbeat(&config, &runtime, 20000);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_REPEAT);
+  swipe(pointer, 600, 300, 600, 500);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_REPEAT);
+  click("Done"); assert(find_visible_label(lv_screen_active(), "Every Day"));
+  idle_heartbeat(&config, &runtime, 14999);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_ALARM);
+  idle_heartbeat(&config, &runtime, 1);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+
+  /* A submitted Save finishes after expiry, without reopening its old editor. */
+  swipe(pointer, 600, 300, 600, 500); click("Alarm Settings");
+  assert(find_visible_label(lv_screen_active(), "Mon–Fri")); /* Expired draft was discarded. */
+  click("Repeat"); click("Every Day"); click("Done");
+  allow_settings_task = true; click("Save");
+  idle_heartbeat(&config, &runtime, 15000);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_NONE);
+  complete_settings_save(&config, &runtime);
+  assert(wac_ui_settings_view() == WAC_SETTINGS_NONE && config.alarm_repeat_days == 0x7f);
+
+  /* Each content page expires at 60s to the selected home face.
+   * No message acknowledgment is sent; leaving Radar requests Latest. */
+  alarm_fixture(&config, &runtime);
+  runtime.message = (app_message_snapshot_t){.available = true, .id = "idle-message",
+    .text = "Inactivity leaves this unread", .meta = "Test sender"};
+  runtime.unread_message_count = 1;
+  runtime.weather.valid = true;
+  strcpy(runtime.weather.forecast[0].date, "2026-10-10");
+  strcpy(runtime.weather.forecast[0].icon_name, "clear-day");
+  strcpy(config.location, "Cincinnati, Ohio, US");
+  strcpy(config.default_clock_face, "digital");
+  assert(app_ui_show_boot_screen(&config, &runtime, true) == ESP_OK);
+  assert(!visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
+  unsigned acknowledgments = message_submissions;
+  swipe(pointer, 300, 350, 600, 350);
+  idle_heartbeat(&config, &runtime, 59999);
+  assert(find_visible_label(lv_screen_active(), "Inactivity leaves this unread"));
+  idle_heartbeat(&config, &runtime, 1);
+  assert(!find_visible_label(lv_screen_active(), "Inactivity leaves this unread"));
+  assert(message_submissions == acknowledgments);
+  assert(!visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
+  swipe(pointer, 600, 280, 300, 280); /* Forecast. */
+  assert(find_visible_label(lv_screen_active(), "Tomorrow"));
+  idle_heartbeat(&config, &runtime, 59999);
+  assert(find_visible_label(lv_screen_active(), "Tomorrow"));
+  idle_heartbeat(&config, &runtime, 1);
+  assert(!find_visible_label(lv_screen_active(), "Tomorrow"));
+  radar_action_count = 0; radar_action_result = ESP_OK;
+  app_ui_set_radar_action_handler(submit_radar);
+  swipe(pointer, 600, 280, 300, 280); swipe(pointer, 600, 280, 300, 280);
+  assert(visible(radar_view()));
+  unsigned actions = radar_action_count;
+  idle_heartbeat(&config, &runtime, 59999);
+  assert(visible(radar_view()) && radar_action_count == actions);
+  idle_heartbeat(&config, &runtime, 1);
+  assert(!visible(radar_view()) && radar_action_count == actions + 1 && radar_action == APP_RADAR_LATEST);
+  assert(!visible(find_image_source(lv_screen_active(), &analog_hour_hand)));
+  app_ui_set_radar_action_handler(NULL);
+}
+
 static void test_radar_country_eligibility(lv_indev_t *pointer)
 {
   /* Real place labels are supplied as constructed owner input here. No live
@@ -9580,9 +9938,10 @@ static void test_alert_clock_and_navigation(lv_indev_t *pointer)
     pointer_tap(pointer, settings);
     assert(wac_ui_settings_view() == WAC_SETTINGS_ENTRY);
     click("Back to Clock");
+    unsigned plays = machine_plays;
+    audio_snapshot = (wac_audio_snapshot_t){.ready = true};
     pointer_tap(pointer, speaker);
-    assert(wac_ui_settings_view() == WAC_SETTINGS_MACHINE);
-    pointer_tap(pointer, menu_back(lv_screen_active()));
+    assert(wac_ui_settings_view() == WAC_SETTINGS_NONE && machine_plays == plays + 1);
     assert(find_visible_label(lv_screen_active(), "Time unavailable"));
     runtime.clock.usable = true;
     assert(app_ui_update_runtime(&config, &runtime) == ESP_OK);
@@ -10075,6 +10434,7 @@ int main(int argc, char **argv)
     test_settings_runtime_appearance(pointer);
     test_settings_runtime_solar(pointer);
     test_first_use_boot(pointer);
+    test_centered_day_and_alarm_times(pointer);
     test_alarm_ringing_snoozed_surfaces(pointer);
     test_alarm_slide_input_and_lifetime(pointer);
     test_alarm_caption_unavailable_and_formats(pointer);
@@ -10091,6 +10451,7 @@ int main(int argc, char **argv)
     test_radar_page(pointer);
     test_radar_playback(pointer);
     test_radar_country_eligibility(pointer);
+    test_inactivity_returns(pointer);
     test_clock_palette_refresh();
     test_unchanged_render_updates();
     test_alert_clock_and_navigation(pointer);

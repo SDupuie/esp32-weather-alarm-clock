@@ -31,7 +31,6 @@ void wac_settings_update_solar(const solar_times_t *events);
 void wac_settings_update_clock(const wac_time_snapshot_t *clock);
 void wac_settings_update_alarm(const device_config_t *config, const wac_alarm_snapshot_t *alarm);
 void wac_settings_update_audio(const wac_audio_snapshot_t *audio);
-void wac_settings_start_machine(bool return_to_clock);
 void wac_settings_set_alarm_return_to_clock(void);
 void wac_settings_start_weather(const device_config_t *config);
 void wac_settings_render(wac_settings_view_t view);

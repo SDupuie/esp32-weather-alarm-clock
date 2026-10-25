@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## [1.1.0] - 2026-10-25
+
+**Clock controls, screen timers and display refinements**
+
+### Features
+
+- Start or stop Sound Machine directly from either clock face's speaker icon using the saved sound, volume and sleep timer.
+- Return Settings, Display, Alarm and Sound Machine menus to the clock after 15 seconds without touch. Device Setup and its menus stay open. Unsaved edits are discarded; applied choices, playback and submitted saves continue.
+- Return Messages, Forecast and Radar to the clock after 60 seconds without touch, without marking messages read.
+
+### Changed
+
+- Center the time digits independently of AM/PM on Day Digital and Ringing, Snoozed and Dismissed screens.
+- Enlarge the main Forecast heading from 24px to 32px, keeping its weight and horizontal centering.
+
+### Fixed
+
+- Correct AM/PM placement in the official Ringing and Dismissed mockups.
+
+See the [user guide](README.md) for current features and source credits. Product behavior is defined in [the architecture](docs/architecture.md).
+
 ## [1.0.0] - 2026-10-21
 
 **Weather alarm clock for the Waveshare ESP32-P4**

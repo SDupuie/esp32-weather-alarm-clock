@@ -312,7 +312,7 @@ void wac_weather_build_forecast(lv_obj_t *parent)
   lv_obj_align(s_weather.forecast_tomorrow_frame, LV_ALIGN_TOP_MID, 0, FORECAST_TOMORROW_FRAME_TOP);
 
   s_weather.forecast_tomorrow_day_label = wac_ui_create_label(
-    forecast_face, &lv_font_montserrat_24, wac_ui_color_text_primary(), LV_TEXT_ALIGN_CENTER, "--"
+    forecast_face, &lv_font_montserrat_32, wac_ui_color_text_primary(), LV_TEXT_ALIGN_CENTER, "--"
   );
   lv_obj_set_width(s_weather.forecast_tomorrow_day_label, LV_PCT(100));
   lv_obj_align(s_weather.forecast_tomorrow_day_label, LV_ALIGN_TOP_MID, 0, FORECAST_TOMORROW_LABEL_TOP);

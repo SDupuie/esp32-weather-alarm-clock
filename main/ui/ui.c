@@ -21,6 +21,8 @@
 #define SWIPE_THRESHOLD_PX 70
 #define SWIPE_AXIS_RATIO_X10 15
 #define CLOCK_STALE_WARNING_MS (135ULL * 1000ULL)
+#define SETTINGS_IDLE_MS 15000U
+#define CONTENT_IDLE_MS 60000U
 
 typedef enum {
   APP_VIEW_ANALOG = 0,
@@ -40,6 +42,7 @@ typedef struct {
   bool settings_suspended;
   app_view_mode_t current_view;
   app_view_mode_t last_home_view;
+  uint32_t view_entered_tick;
   app_alert_snapshot_t alerts;
   uint64_t alert_detail_id;
   lv_point_t gesture_start;
@@ -265,7 +268,7 @@ static void yield_ui_bootstrap(void)
 
 static void open_settings(void);
 static void update_backup_notice(void);
-static void machine_open_event_cb(lv_event_t *event);
+static void machine_toggle_event_cb(lv_event_t *event);
 static void alerts_open_event_cb(lv_event_t *event);
 static void alert_dismiss_event_cb(lv_event_t *event);
 static void settings_open_event_cb(lv_event_t *event);
@@ -367,6 +370,7 @@ void wac_ui_settings_navigate(wac_settings_view_t view)
   }
   s_ui.backup_notice_open = false;
   s_ui.settings_view = view;
+  s_ui.view_entered_tick = lv_tick_get();
   update_backup_notice();
   wac_settings_render(view);
   wac_settings_set_visible(!s_ui.settings_suspended && !alarm_preempting());
@@ -402,6 +406,7 @@ static void open_settings(void)
   s_ui.snoozed_view = false;
   if (s_ui.settings_suspended && s_ui.settings_view != WAC_SETTINGS_NONE) {
     s_ui.settings_suspended = false;
+    s_ui.view_entered_tick = lv_tick_get();
     s_ui.alarm_action_return_allowed = false;
     wac_settings_set_visible(true);
     update_backup_notice();
@@ -460,6 +465,7 @@ static void set_view_mode(app_view_mode_t next_view)
       s_ui.message_ack_pending ? "Dismissing..." : "Tap to dismiss");
   }
   s_ui.current_view = next_view;
+  s_ui.view_entered_tick = lv_tick_get();
   if (next_view == APP_VIEW_ANALOG || next_view == APP_VIEW_DIGITAL) {
     s_ui.last_home_view = next_view;
   } else {
@@ -477,6 +483,48 @@ static void set_view_mode(app_view_mode_t next_view)
   apply_view_night_state(s_ui.night_overlay_active);
   update_weather_status();
   update_alarm_surface();
+}
+
+static void return_home_if_inactive(void)
+{
+  if (alarm_page()) return;
+  uint32_t timeout = 0;
+  if (settings_visible()) {
+    switch (s_ui.settings_view) {
+      case WAC_SETTINGS_ENTRY:
+      case WAC_SETTINGS_DISPLAY:
+      case WAC_SETTINGS_ALARM:
+      case WAC_SETTINGS_ALARM_TIME:
+      case WAC_SETTINGS_REPEAT:
+      case WAC_SETTINGS_REPEAT_CUSTOM:
+      case WAC_SETTINGS_SOUND:
+      case WAC_SETTINGS_SOUND_PICKER:
+      case WAC_SETTINGS_SNOOZE:
+      case WAC_SETTINGS_BRIGHTNESS:
+      case WAC_SETTINGS_MACHINE:
+      case WAC_SETTINGS_MACHINE_SOUND:
+      case WAC_SETTINGS_MACHINE_TIMER:
+        timeout = SETTINGS_IDLE_MS;
+        break;
+      /* Device Setup and its children include first-use setup and have no
+       * inactivity limit, including while entering network/location text. */
+      default: return;
+    }
+  } else if (s_ui.current_view == APP_VIEW_MESSAGE || s_ui.current_view == APP_VIEW_FORECAST
+      || s_ui.current_view == APP_VIEW_RADAR) {
+    timeout = CONTENT_IDLE_MS;
+  }
+  if (timeout == 0 || lv_tick_elaps(s_ui.view_entered_tick) < timeout
+      || lv_display_get_inactive_time(lv_obj_get_display(s_ui.stage)) < timeout) return;
+
+  /* Close through the draft owner so previews stop and late save results
+   * cannot reopen an expired editor. Submitted saves still finish normally. */
+  if (settings_visible()) {
+    wac_ui_settings_close();
+    if (settings_visible()) return; /* Preserve the first-use location guard. */
+  }
+  s_ui.gesture_tracking = false;
+  set_view_mode(s_ui.last_home_view);
 }
 
 static bool radar_enabled(void)
@@ -661,13 +709,19 @@ void app_ui_set_clock_warning_dismiss_handler(esp_err_t (*handler)(wac_time_warn
   s_clock_warning_dismiss_handler = handler;
 }
 
-static void machine_open_event_cb(lv_event_t *event)
+static void machine_toggle_event_cb(lv_event_t *event)
 {
   (void)event;
-  if (alarm_preempting() || s_ui.backup_notice_open) return;
-  bool returning_to_draft = s_ui.settings_suspended;
-  open_settings();
-  if (settings_visible()) wac_settings_start_machine(!returning_to_draft);
+  if (alarm_preempting() || settings_visible() || s_ui.backup_notice_open) return;
+  /* Read the owner at each tap so a second tap can cancel a queued start
+   * before the next UI heartbeat has published its snapshot. */
+  wac_audio_copy(&s_ui.audio);
+  esp_err_t error = s_ui.audio.machine_active || s_ui.audio.machine_pending
+    ? wac_audio_sound_machine_stop() : wac_audio_sound_machine_play();
+  if (error != ESP_OK)
+    ESP_LOGW(TAG, "Sound Machine action submission failed: %s", esp_err_to_name(error));
+  wac_audio_copy(&s_ui.audio);
+  update_backup_notice();
 }
 
 static void settings_open_event_cb(lv_event_t *event)
@@ -1035,7 +1089,7 @@ static void build_app_shell(const device_config_t *config)
   wac_weather_build_status(s_ui.stage);
   wac_clock_build_status(s_ui.stage);
   build_night_overlay(s_ui.stage);
-  wac_clock_build_machine(s_ui.stage, machine_open_event_cb);
+  wac_clock_build_machine(s_ui.stage, machine_toggle_event_cb);
   wac_clock_build_alerts(s_ui.stage, alerts_open_event_cb, alert_dismiss_event_cb,
     settings_open_event_cb);
   wac_weather_build_alerts(s_ui.stage, alerts_back_event_cb, alert_row_event_cb);
@@ -1164,6 +1218,7 @@ esp_err_t app_ui_update_runtime(
   update_clock_status(&runtime->clock);
   update_weather_status();
   wac_settings_poll();
+  return_home_if_inactive();
   update_alarm_surface();
 
   return ESP_OK;

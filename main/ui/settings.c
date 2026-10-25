@@ -107,7 +107,6 @@ static struct {
   lv_obj_t *preview_button, *preview_caption;
   lv_obj_t *machine_button, *machine_status, *machine_volume, *machine_list, *machine_bar, *machine_thumb, *machine_retry;
   int machine_scroll;
-  wac_settings_view_t machine_return;
   bool alarm_return_to_clock;
   esp_err_t machine_submission_error;
   bool saving_machine, machine_changed_while_saving, machine_save_failed;
@@ -1562,12 +1561,6 @@ static void scan_networks(void)
   wac_settings_render(wac_ui_settings_view());
 }
 
-void wac_settings_start_machine(bool return_to_clock)
-{
-  s_settings.machine_return = return_to_clock ? WAC_SETTINGS_NONE : wac_ui_settings_view();
-  navigate(WAC_SETTINGS_MACHINE);
-}
-
 void wac_settings_set_alarm_return_to_clock(void)
 {
   s_settings.alarm_return_to_clock = true;
@@ -1586,7 +1579,6 @@ void wac_settings_begin(lv_obj_t *parent, const device_config_t *config)
   s_settings.preview_submission_error = ESP_OK;
   s_settings.machine_submission_error = ESP_OK;
   s_settings.machine_scroll = 0;
-  s_settings.machine_return = WAC_SETTINGS_ENTRY;
   s_settings.alarm_return_to_clock = false;
   s_settings.applied = *config;
   s_settings.alarm_snapshot_valid = false;
@@ -1692,10 +1684,7 @@ static void back(bool apply_child)
 {
   switch (wac_ui_settings_view()) {
     case WAC_SETTINGS_ENTRY: wac_ui_settings_close(); break;
-    case WAC_SETTINGS_MACHINE:
-      if (s_settings.machine_return == WAC_SETTINGS_NONE) wac_ui_settings_close();
-      else navigate(s_settings.machine_return);
-      break;
+    case WAC_SETTINGS_MACHINE: navigate(WAC_SETTINGS_ENTRY); break;
     case WAC_SETTINGS_MACHINE_SOUND: case WAC_SETTINGS_MACHINE_TIMER: navigate(WAC_SETTINGS_MACHINE); break;
     case WAC_SETTINGS_DEVICE_SETUP:
       s_settings.draft = s_settings.baseline;
@@ -1788,7 +1777,6 @@ static void action_event(lv_event_t *event)
   stop_preview();
   s_settings.preview_submission_error = ESP_OK;
   if (action > WAC_SETTINGS_NONE && action <= WAC_SETTINGS_UPDATE_SOUNDS) {
-    if (action == WAC_SETTINGS_MACHINE) { wac_settings_start_machine(false); return; }
     if (action == WAC_SETTINGS_ALARM) s_settings.alarm_return_to_clock = false;
     if (action == WAC_SETTINGS_WEATHER && wac_ui_settings_view() == WAC_SETTINGS_DEVICE_SETUP) {
       /* Weather saves independently: start from applied settings so its Save

@@ -95,7 +95,6 @@
  * Top 177 places its text baseline at 279 beside the period/divider layout;
  * positioning by the nominal 144px font size would shift that baseline. */
 #define DIGITAL_TIME_TOP 177
-#define DIGITAL_TIME_WIDTH 620
 #define DIGITAL_MERIDIEM_TOP 257
 /* Approved appearance is documented in docs/alarm-design.html. The
  * constants below define the ESP32-P4 layout values used by this file. */
@@ -395,7 +394,7 @@ static int32_t scale_dimension(int32_t value, int32_t scale)
   return (value * scale + 128) / 256;
 }
 
-static void layout_digital_time_group(bool show_meridiem)
+static void layout_digital_day_time(bool show_meridiem)
 {
   if (s_clock.digital_time_label == NULL || s_clock.digital_meridiem_label == NULL) {
     return;
@@ -405,24 +404,11 @@ static void layout_digital_time_group(bool show_meridiem)
       || lv_obj_get_style_transform_scale_y_safe(s_clock.digital_time_label, 0) != LV_SCALE_NONE)
     lv_obj_set_style_transform_scale(s_clock.digital_time_label, LV_SCALE_NONE, 0);
   lv_obj_update_layout(s_clock.digital_time_label);
-  lv_obj_update_layout(s_clock.digital_meridiem_label);
 
   int32_t time_width = lv_obj_get_width(s_clock.digital_time_label);
-  int32_t time_scale_x = lv_obj_get_style_transform_scale_x_safe(s_clock.digital_time_label, LV_PART_MAIN);
-  int32_t scaled_time_width = scale_dimension(time_width, time_scale_x);
-  int32_t meridiem_width = show_meridiem ? lv_obj_get_width(s_clock.digital_meridiem_label) : 0;
-  int32_t group_width = scaled_time_width;
-  if (show_meridiem) {
-    group_width += DIGITAL_TIME_GAP + meridiem_width;
-  }
+  int32_t time_left = (FACE_CONTENT_SIZE - time_width) / 2;
 
-  int32_t block_left = (FACE_CONTENT_SIZE - DIGITAL_TIME_WIDTH) / 2;
-  int32_t group_left = block_left + (DIGITAL_TIME_WIDTH - group_width) / 2;
-  if (group_left < block_left) {
-    group_left = block_left;
-  }
-
-  lv_obj_set_pos(s_clock.digital_time_label, group_left, DIGITAL_TIME_TOP + DIGITAL_CONTENT_Y_SHIFT);
+  lv_obj_set_pos(s_clock.digital_time_label, time_left, DIGITAL_TIME_TOP + DIGITAL_CONTENT_Y_SHIFT);
 
   if (!show_meridiem) {
     lv_obj_add_flag(s_clock.digital_meridiem_label, LV_OBJ_FLAG_HIDDEN);
@@ -432,7 +418,7 @@ static void layout_digital_time_group(bool show_meridiem)
   lv_obj_clear_flag(s_clock.digital_meridiem_label, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_pos(
     s_clock.digital_meridiem_label,
-    group_left + scaled_time_width + DIGITAL_TIME_GAP,
+    time_left + time_width + DIGITAL_TIME_GAP,
     DIGITAL_MERIDIEM_TOP + DIGITAL_CONTENT_Y_SHIFT
   );
 }
@@ -849,7 +835,7 @@ void wac_clock_build_digital(lv_obj_t *parent)
   );
   lv_obj_set_width(s_clock.digital_meridiem_label, LV_SIZE_CONTENT);
   lv_obj_set_style_text_letter_space(s_clock.digital_meridiem_label, 2, 0);
-  layout_digital_time_group(false);
+  layout_digital_day_time(false);
 
   s_clock.digital_divider_top = lv_obj_create(digital_face);
   wac_ui_clear_container_chrome(s_clock.digital_divider_top);
@@ -1082,7 +1068,7 @@ static void update_digital_clock(const device_config_t *config, const struct tm 
 
   wac_ui_set_label_text(s_clock.digital_time_label, time_text);
   if (night) layout_digital_night_time(config, show_meridiem);
-  else layout_digital_time_group(show_meridiem);
+  else layout_digital_day_time(show_meridiem);
 }
 
 void wac_clock_build_unavailable(lv_obj_t *parent)
@@ -1720,12 +1706,10 @@ void wac_clock_update_alarm(const device_config_t *config,
     wac_ui_set_label_text(s_clock.alarm_meridiem, alarm->current.minute >= 720 ? "PM" : "AM");
     set_alarm_visible(s_clock.alarm_meridiem, period);
     lv_obj_update_layout(s_clock.alarm_time);
-    lv_obj_update_layout(s_clock.alarm_meridiem);
     int width = lv_obj_get_width(s_clock.alarm_time);
-    int group_width = width + (period ? 14 + lv_obj_get_width(s_clock.alarm_meridiem) : 0);
-    int left = 90 + (620 - group_width) / 2;
+    int left = (lv_obj_get_width(s_clock.alarm_view) - width) / 2;
     lv_obj_set_pos(s_clock.alarm_time, left, DIGITAL_TIME_TOP + 10 + DIGITAL_CONTENT_Y_SHIFT);
-    lv_obj_set_pos(s_clock.alarm_meridiem, left + width + 14, DIGITAL_MERIDIEM_TOP + 10 + DIGITAL_CONTENT_Y_SHIFT);
+    lv_obj_set_pos(s_clock.alarm_meridiem, left + width + DIGITAL_TIME_GAP, DIGITAL_MERIDIEM_TOP + 10 + DIGITAL_CONTENT_Y_SHIFT);
     char duration[24];
     snprintf(duration, sizeof(duration), "%u minutes", config->alarm_snooze_minutes);
     wac_ui_set_label_text(s_clock.alarm_snooze_duration, duration);

@@ -21,7 +21,7 @@ The project is built on the **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C** and was 
 ## Features
 
 - Analog and digital clock faces, with 12-hour or 24-hour time and an optional leading zero in 12-hour mode.
-- Large, centered digital time in Night Shift and a common unavailable-time screen for either clock face.
+- Centered digital time digits by day and night, larger time in Night Shift, and a common unavailable-time screen for either clock face.
 - Current temperature, today's high and low, and weather icons that change between day and night.
 - A forecast for the next five days, with icons chosen to represent the daytime weather.
 - A current radar map **for U.S. locations only**, centered on the saved location with a full-screen map covering a 75-mile diameter.
@@ -185,8 +185,8 @@ Your selected analog or digital face is the home screen.
 | Forecast or Radar | Swipe right | Step back toward the clock. |
 | Clock | Swipe right | Open Messages. |
 | Messages | Swipe left | Return to the clock. |
-| Clock | Swipe down | Open settings. |
-| Clock | Tap the speaker icon | Open Sound Machine; Back returns to the clock. |
+| Clock | Swipe down or tap the Settings icon | Open Settings. |
+| Clock | Tap the speaker icon | Start or stop Sound Machine with your saved sound, volume and timer; stay on the clock. |
 | Clock | Tap the alert triangle | Open the active-alert list. Tap an on-clock alert headline to dismiss it from both clock faces. |
 | Clock | Tap the next-alarm or **Alarm off** notice | Open Alarm Settings; Back or Cancel returns to the clock. |
 | Clock | Tap **Missed Alarm** | Dismiss the missed-alarm notice. |
@@ -194,6 +194,8 @@ Your selected analog or digital face is the home screen.
 | Clock | Tap the backup-clock warning triangle, when shown | Read the backup-clock notice and dismiss it after checking the problem. |
 | Settings entry | Tap **Back** | Return to the clock after first-use location setup is complete. |
 | Unread message | Tap the displayed message | Mark it read for this clock and return home after acknowledgment succeeds. |
+
+Settings, Display Settings, Alarm Settings and Sound Machine return to the last clock face after 15 seconds without touch, including their nested editors. Messages, Forecast and Radar return after 60 seconds; returning from Messages does not mark it read. Holding or dragging a control keeps the page open. Device Setup and all its menus, including Wi-Fi, Weather, Messaging and Night Shift, stay open; first-use location setup still requires a saved location. Active Alerts, alert details and alarm/snooze screens stay open too. Inactivity discards unsaved edits but keeps immediate choices, playing audio and any save or restart already submitted.
 
 ### Weather and Forecast
 
@@ -247,7 +249,7 @@ When a scheduled mode cannot be calculated at startup, the clock uses its last s
 
 ### Sound Machine
 
-Open **Settings → Sound Machine** or tap the speaker on either clock face. Choose from **Rain, Thunder, Ocean, Wind, Forest, Campfire, Stream, Night, Singing Bowl, White Noise, Pink Noise** and **Brown Noise**. The first nine are looping recordings; the three noises are generated continuously. Sleep Timer offers **Continuous**, **15**, **30**, **60** or **120 minutes**.
+Tap the speaker on either clock face to start or stop playback. Open **Settings → Sound Machine** to change your preferences; **Back** returns to Settings. Choose from **Rain, Thunder, Ocean, Wind, Forest, Campfire, Stream, Night, Singing Bowl, White Noise, Pink Noise** and **Brown Noise**. The first nine are looping recordings; the three noises are generated continuously. Sleep Timer offers **Continuous**, **15**, **30**, **60** or **120 minutes**.
 
 Choose a sound, volume and sleep timer, then tap **Play**. These choices save and apply immediately; **Back** and **Done** keep playback running. Changing the sound keeps the remaining time; changing the timer starts its full duration. Timed playback fades during its final 30 seconds. **Stop**, a ringing alarm or an alarm-sound preview ends playback. Press Play to start again. Weather-alert audio temporarily interrupts playback, then resumes it if the sleep timer has not expired. The timer continues during that interruption. After a restart, your choices remain saved and playback is Stopped. See the [playback rules](docs/architecture.md#sound-machine-playback) for details.
 
@@ -339,7 +341,7 @@ Alarm Time and Fixed Schedule minute arrows move in five-minute steps and change
 | **Alarm On/Off** | Saves and applies immediately, independently of pending alarm edits. **Back** or **Cancel** does not undo a successful switch change. |
 | **Sound Machine** | Sound, volume and timer choices save and apply immediately. **Back** and **Done** only navigate. |
 
-A failed save leaves the editor available for correction or retry and does not restart. If power is interrupted during saving, some stored settings may change while others retain their previous values; check the settings after restarting and save again if needed. The [architecture](docs/architecture.md#editing-and-saving-user-settings) defines the complete save rules.
+A failed save keeps the draft available for correction or retry while its editor remains open and does not restart. A ringing alarm holds an open editor and its draft; reopen Settings to resume it with a fresh inactivity interval. If power is interrupted during saving, some stored settings may change while others retain their previous values; check the settings after restarting and save again if needed. The [architecture](docs/architecture.md#editing-and-saving-user-settings) defines the complete save rules.
 
 ### Weather provider and API key
 
